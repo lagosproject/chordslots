@@ -139,7 +139,7 @@ plugin host, and could be wrapped for CLAP, a web UI or a hardware sequencer.
 - [x] **Bass Motion Engine**: Circular DP bassline generator for smooth walking bass movement.
 - [x] **Phase 2 Performance & Groove Transform**: Bidirectional strum, melody accent, deterministic humanization, and cross-block audio-thread scheduling.
 - [x] **3-Panel Workflow Interface**: Dedicated visual sections for `HARMONY`, `GROOVE`, and `OUTPUT`.
-- [ ] **Section 3: Incoming MIDI Trigger Mode**: Play and trigger chord slots live from a MIDI keyboard or 16-pad controller (e.g., white keys $C_3 \dots B_3$ or pads trigger slots $1 \dots N$, respecting gate and velocity).
+- [x] **Section 3: Incoming MIDI Trigger Mode**: Play and trigger chord slots live from a MIDI keyboard or pad controller (White Keys $C_3 \dots B_3$, Chromatic $C_3$, or Pads $C_1$), with last-note priority held-key stack, sustain pedal (CC64) support, live velocity scaling, and real-time timeline glow.
 - [ ] **Section 4: Split-MIDI Output / Dual-Channel Voicing**: Split the bassline to MIDI Channel 2 and upper chord notes to MIDI Channel 1, allowing producers to drive a sub/bass synth and a pad/keys synth simultaneously from one instance.
 - [ ] **Section 5: A/B Snapshots & History Stack**: Compare two progression variations (A vs B) instantly with dedicated quick-switch slots.
 - [ ] **Section 6: Triplet & Polyrhythmic Grid**: Support for 3/4, 6/8, and triplet cut grids ($1/12$, $1/24$).

@@ -14,6 +14,7 @@
   - `fb512bc`: Priority 2: Performance & Groove Transform (Strum, Accent, Humanize, MIDI bake).
   - `d64b420`: UI: 3-panel workflow (`1. HARMONY GENERATOR`, `2. GROOVE & FEEL`, `OUTPUT & EXPORT`).
   - `aea007a`: docs: updated README with features and roadmap.
+  - `a42ab25`: feat: implement Section 3 Incoming MIDI Trigger Mode (Trigger.h, held stack, CC64, glow).
 
 ---
 
@@ -31,23 +32,41 @@
 * **Phase 2 Performance Engine (`Performance.h`)**:
   - Pure function `applyPerformance(in, params, slotLenMs, slotIndex, pass)` applied downstream of Phase 1 metrics.
   - Bidirectional strum ($-80\text{ms} \dots +80\text{ms}$), pinned bass on down-strum, top voice melody accent ($+18$ boost, $-10$ inner ducking), deterministic SplitMix64 humanize jitter.
+* **Incoming MIDI Trigger Engine (`Trigger.h`)**:
+  - Headless trigger state machine with held-key stack (up to 16 keys, last-note priority fallback).
+  - Note-to-slot mapping (White Keys vs Chromatic relative to root note).
+  - Exact sounding-note tracker so slot edits never leave stuck notes.
+  - Release-then-start same-sample ordering.
+  - Sustain pedal (CC 64) deferral.
 
 ### B. Plugin & Audio Processing (`plugin/`)
-* **Preallocated Queue (`PluginProcessor.h`, `PluginProcessor.cpp`)**:
+* **Live Ingestion & Voice Management (`PluginProcessor.h`, `PluginProcessor.cpp`)**:
+  - Auto-mode priority: incoming trigger notes mute loop playback; releasing notes cleanly resumes loop.
+  - Nominal 500ms duration for live strumming so fast slots don't truncate spread.
+  - Fast-tap cancellation of pending strum notes.
+  - Real-time velocity scaling ($V_{\text{final}} = V_{\text{slot}} \times \frac{V_{\text{in}}}{100}$).
   - Audio-thread 32-element queue `pendingNotes` manages strum offsets crossing host block boundaries without dynamic allocation.
-  - Mid-slot relocations and transport stops cleanly flush pending notes and paired note-offs (0 stuck notes).
+  - Prepares live triggered slot glow for UI timeline with guaranteed minimum 120ms duration.
 * **MIDI Drag-and-Drop Bake**:
   - `createMidiFile()` converts `offsetMs` to ticks at tempo ($480\text{ PPQ}$) so dragged clips match live audio.
 * **3-Panel Workflow Layout (`PluginEditor.cpp`)**:
+  - **Header**: Key, Scale, Bars, Slots, Cut Grid, Mood, Fit score, **`TRIGGER` Mode** ("Auto", "Trigger Only", "Loop Only"), **`MAP` Layout** ("White Keys (C3)", "Chromatic (C3)", "Pads (C1)").
   - **`1. HARMONY GENERATOR`**: Locks (`Rhythm`, `Roots`, `Colors`, `Voicing`), `ADVENTURE`, `SYNCOPATION`, `BASS MOTION`, `Undo`, `ROLL`.
   - **`2. GROOVE & FEEL`**: `STRUM`, `ACCENT`, `HUMANIZE`, `Re-Feel`.
   - **`OUTPUT & EXPORT`**: `GATE`, `SYNTH VOL`, `Play`, `Save .mid`, `MidiDragTile`.
+  - **Timeline**: Animated energy glow when a slot is triggered live.
 
 ---
 
 ## 3. Detailed Specifications for Upcoming Sections
 
-### Section 3: Incoming MIDI Trigger Mode (Next Priority)
+- [x] **Section 1: Bass Inversions, Slash Chords & Bass Motion DP**
+- [x] **Section 2: Phase 2 Performance & Groove Engine (Strum, Accent, Humanize, Re-Feel)**
+- [x] **Section 3: Incoming MIDI Trigger Mode (Held-stack, Last-note priority, CC64, UI glow)**
+- [ ] **Section 4: Split-MIDI Output / Dual-Channel Voicing (Next Priority)**
+- [ ] **Section 5: A/B Comparison Snapshots & Session History**
+- [ ] **Section 6: Triplet & Polyrhythmic Grid**
+- [ ] **Section 7: Modern Transition Prior / Billboard Corpus Integration**
 * **Goal**: Enable musicians to perform chord slots live using a MIDI keyboard or pad controller (e.g. Push, Launchpad, MPC, KeyStep).
 * **Requirements & Invariants**:
   1. **Mapping Modes**:
