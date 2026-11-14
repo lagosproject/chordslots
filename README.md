@@ -10,13 +10,27 @@ finds chords whose *measured* properties follow those curves.
 - **Target lanes** – per-slot Brightness, Tension and Energy targets. The white
   mark in each column is what the current chord actually measures, so you can
   see the fit at a glance. The overall match is the **Fit** score.
-- **Locks** – freeze any layer (Rhythm, Roots, Colors, Voicing) or any single
+- **Bass Inversions & Slash Chords** – right-click any slot to select chord-tone
+  bass notes (root position, 1st, 2nd, 3rd inversions, slash chords like `Am7/G`).
+  Roman numerals display figured-bass notation (`I6`, `V65`, `ii42`).
+- **Bass Motion Engine** – circular Viterbi dynamic programming minimizes bass leaps
+  and generates smooth, walking basslines ($C_3 \to B_2 \to A_2$) governed by the
+  **Bass Motion** knob.
+- **Phase 2 Groove & Performance** – transform clean voicings into human performances
+  with **Strum** (bidirectional timing spread, with pinned bass), **Accent** (boosts
+  top melody notes, softens inner voices), and **Humanize** (deterministic microtiming
+  and velocity jitter). **Re-Feel** rolls fresh jitter without regenerating chords.
+- **Locks & Rolls** – freeze any layer (Rhythm, Roots, Colors, Voicing) or any single
   slot, then **Roll** the rest.
 - **Moods** – named sets of target curves (Euphoric, Uplifting, Epic,
   Melancholic, Dark, Tense, Dreamy, Hard). A mood is a starting shape for the
   lanes, not a database of canned progressions.
-- **Gets out of the way** – built-in preview synth, MIDI output to drive any
-  instrument, drag-and-drop a MIDI clip into the DAW, undo for every roll.
+- **Dedicated 3-Panel Workflow** – clearly divided into `1. HARMONY GENERATOR`
+  (Locks, Adventure, Syncopation, Bass Motion, Roll), `2. GROOVE & FEEL` (Strum,
+  Accent, Humanize, Re-Feel), and `OUTPUT & EXPORT` (Gate, Synth Vol, Play, Save,
+  Drag MIDI).
+- **Gets out of the way** – built-in preview synth, live MIDI output, and
+  drag-and-drop MIDI clips with baked strum and humanization into any DAW.
 
 Status: **v0.1, early.** It builds, loads and generates; see
 [Limitations](#limitations).
@@ -119,18 +133,22 @@ plugin/                    JUCE processor, editor and preview synth
 The split is deliberate: all musical logic is testable and reusable without a
 plugin host, and could be wrapped for CLAP, a web UI or a hardware sequencer.
 
+## Roadmap & Upcoming Sections
+
+- [x] **Bass Inversions & Slash Chords**: User-selectable chord-tone bass notes with figured-bass Roman numerals (`I6`, `V65`, etc.).
+- [x] **Bass Motion Engine**: Circular DP bassline generator for smooth walking bass movement.
+- [x] **Phase 2 Performance & Groove Transform**: Bidirectional strum, melody accent, deterministic humanization, and cross-block audio-thread scheduling.
+- [x] **3-Panel Workflow Interface**: Dedicated visual sections for `HARMONY`, `GROOVE`, and `OUTPUT`.
+- [ ] **Section 3: Incoming MIDI Trigger Mode**: Play and trigger chord slots live from a MIDI keyboard or 16-pad controller (e.g., white keys $C_3 \dots B_3$ or pads trigger slots $1 \dots N$, respecting gate and velocity).
+- [ ] **Section 4: Split-MIDI Output / Dual-Channel Voicing**: Split the bassline to MIDI Channel 2 and upper chord notes to MIDI Channel 1, allowing producers to drive a sub/bass synth and a pad/keys synth simultaneously from one instance.
+- [ ] **Section 5: A/B Snapshots & History Stack**: Compare two progression variations (A vs B) instantly with dedicated quick-switch slots.
+- [ ] **Section 6: Triplet & Polyrhythmic Grid**: Support for 3/4, 6/8, and triplet cut grids ($1/12$, $1/24$).
+
 ## Limitations
 
 - 4/4 only, sixteenth-note cut resolution, up to 8 bars and 16 slots.
-- One chord per slot, sustained (with a Gate control); no strum or arp patterns
-  inside a slot yet.
-- Incoming MIDI is ignored; you cannot yet trigger slots from a keyboard.
-- The metric calibration has not been validated with listening tests.
-- No transition statistics learned from real music yet. Open corpora such as
-  the McGill Billboard annotations or Chordonomicon could replace the hand-written
-  motion prior, subject to their licences.
-- Tested on Linux only so far. macOS and Windows should build through JUCE but
-  are unverified.
+- The metric calibration has not been validated with large-scale listening tests.
+- Tested on Linux; macOS and Windows build through JUCE CMake.
 
 ## References
 
