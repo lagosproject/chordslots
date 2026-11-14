@@ -951,6 +951,24 @@ void ChordSlotsEditor::paint (juce::Graphics& g)
     g.setColour (ui::textDim);
     g.setFont (ui::font (10.5f));
     g.drawText ("target-driven harmony", 19, 42, 150, 14, juce::Justification::centredLeft);
+
+    auto drawPanel = [&g] (juce::Rectangle<int> r, const juce::String& title, const juce::Colour& titleColour)
+    {
+        if (r.isEmpty()) return;
+        auto rf = r.toFloat().reduced (0.5f);
+        g.setColour (ui::panel);
+        g.fillRoundedRectangle (rf, 6.0f);
+        g.setColour (ui::outline);
+        g.drawRoundedRectangle (rf, 6.0f, 1.0f);
+
+        g.setColour (titleColour);
+        g.setFont (ui::font (10.0f, true));
+        g.drawText (title, r.getX() + 10, r.getY() + 3, r.getWidth() - 20, 14, juce::Justification::centredLeft);
+    };
+
+    drawPanel (harmonyPanelBounds, "1. HARMONY GENERATOR", ui::accent);
+    drawPanel (groovePanelBounds, "2. GROOVE & FEEL", ui::energy);
+    drawPanel (outputPanelBounds, "OUTPUT & EXPORT", ui::textDim);
 }
 
 void ChordSlotsEditor::resized()
@@ -983,49 +1001,98 @@ void ChordSlotsEditor::resized()
 
     // Footer
     hint.setBounds (area.removeFromBottom (18));
-    area.removeFromBottom (8);
-    auto footer = area.removeFromBottom (78);
-    area.removeFromBottom (14);
+    area.removeFromBottom (6);
+    auto footer = area.removeFromBottom (86);
+    area.removeFromBottom (12);
 
-    auto locks = footer.removeFromLeft (240);
-    lockCaption.setBounds (locks.removeFromTop (16));
-    locks.removeFromTop (4);
-    locks = locks.removeFromTop (34);
-    const int lw = (locks.getWidth() - 15) / 4;
-    for (auto* b : { &lockRhythm, &lockRoots, &lockColors, &lockVoicing })
-    {
-        b->setBounds (locks.removeFromLeft (lw));
-        locks.removeFromLeft (5);
-    }
-    footer.removeFromLeft (10);
+    const int totalWidth = footer.getWidth();
+    const int gap = 10;
+    const int harmWidth = juce::roundToInt ((totalWidth - 2 * gap) * 0.44f);
+    const int grooWidth = juce::roundToInt ((totalWidth - 2 * gap) * 0.27f);
 
-    auto right = footer.removeFromRight (juce::jmin (360, footer.getWidth() - 8 * 48));
-    auto knobs = footer;
-    const int kw = knobs.getWidth() / 8;
+    harmonyPanelBounds = footer.removeFromLeft (harmWidth);
+    footer.removeFromLeft (gap);
+    groovePanelBounds = footer.removeFromLeft (grooWidth);
+    footer.removeFromLeft (gap);
+    outputPanelBounds = footer;
+
     struct Knob { juce::Slider* s; juce::Label* l; };
-    for (const Knob& k : { Knob { &adventure, &adventureLabel }, Knob { &syncopation, &syncopationLabel },
-                           Knob { &bassMotion, &bassMotionLabel },
-                           Knob { &strum, &strumLabel }, Knob { &accent, &accentLabel }, Knob { &humanize, &humanizeLabel },
-                           Knob { &gate, &gateLabel }, Knob { &volume, &volumeLabel } })
+
+    // --- Panel 1: Harmony Generator ---
     {
-        auto cell = knobs.removeFromLeft (kw);
-        k.l->setBounds (cell.removeFromBottom (14));
-        k.s->setBounds (cell.reduced (2, 0));
+        auto hInner = harmonyPanelBounds.reduced (8, 4);
+        hInner.removeFromTop (14);
+
+        auto locks = hInner.removeFromLeft (176);
+        lockCaption.setBounds (locks.removeFromTop (14));
+        locks.removeFromTop (2);
+        auto lockButtons = locks.removeFromTop (28);
+        const int lw = (lockButtons.getWidth() - 9) / 4;
+        for (auto* b : { &lockRhythm, &lockRoots, &lockColors, &lockVoicing })
+        {
+            b->setBounds (lockButtons.removeFromLeft (lw));
+            lockButtons.removeFromLeft (3);
+        }
+        hInner.removeFromLeft (8);
+
+        auto harmActions = hInner.removeFromRight (74);
+        undoButton.setBounds (harmActions.removeFromTop (24).reduced (0, 1));
+        harmActions.removeFromTop (2);
+        rollButton.setBounds (harmActions.removeFromTop (32).reduced (0, 1));
+        hInner.removeFromRight (6);
+
+        auto harmKnobs = hInner;
+        const int hkw = harmKnobs.getWidth() / 3;
+        for (const Knob& k : { Knob { &adventure, &adventureLabel }, Knob { &syncopation, &syncopationLabel },
+                               Knob { &bassMotion, &bassMotionLabel } })
+        {
+            auto cell = harmKnobs.removeFromLeft (hkw);
+            k.l->setBounds (cell.removeFromBottom (13));
+            k.s->setBounds (cell.reduced (1, 0));
+        }
     }
 
-    right.removeFromLeft (8);
-    dragTile.setBounds (right.removeFromRight (86).reduced (0, 4));
-    right.removeFromRight (6);
-    auto small = right.removeFromRight (76).reduced (0, 4);
-    saveButton.setBounds (small.removeFromBottom (small.getHeight() / 2).withTrimmedTop (2));
-    playButton.setBounds (small.withTrimmedBottom (2));
-    right.removeFromRight (6);
-    auto actions = right.removeFromLeft (116).reduced (0, 4);
-    auto topActions = actions.removeFromTop (actions.getHeight() / 2).withTrimmedBottom (2);
-    auto botActions = actions.withTrimmedTop (2);
-    undoButton.setBounds (topActions.removeFromLeft (topActions.getWidth() / 2 - 2));
-    refeelButton.setBounds (topActions.withTrimmedLeft (2));
-    rollButton.setBounds (botActions);
+    // --- Panel 2: Groove & Feel ---
+    {
+        auto gInner = groovePanelBounds.reduced (8, 4);
+        gInner.removeFromTop (14);
+
+        auto refeelArea = gInner.removeFromRight (62);
+        refeelButton.setBounds (refeelArea.withSizeKeepingCentre (58, 28));
+        gInner.removeFromRight (6);
+
+        auto grooveKnobs = gInner;
+        const int gkw = grooveKnobs.getWidth() / 3;
+        for (const Knob& k : { Knob { &strum, &strumLabel }, Knob { &accent, &accentLabel }, Knob { &humanize, &humanizeLabel } })
+        {
+            auto cell = grooveKnobs.removeFromLeft (gkw);
+            k.l->setBounds (cell.removeFromBottom (13));
+            k.s->setBounds (cell.reduced (1, 0));
+        }
+    }
+
+    // --- Panel 3: Output & Export ---
+    {
+        auto oInner = outputPanelBounds.reduced (8, 4);
+        oInner.removeFromTop (14);
+
+        dragTile.setBounds (oInner.removeFromRight (84).reduced (0, 2));
+        oInner.removeFromRight (6);
+
+        auto small = oInner.removeFromRight (72).reduced (0, 2);
+        saveButton.setBounds (small.removeFromBottom (small.getHeight() / 2).withTrimmedTop (1));
+        playButton.setBounds (small.withTrimmedBottom (1));
+        oInner.removeFromRight (6);
+
+        auto outKnobs = oInner;
+        const int okw = outKnobs.getWidth() / 2;
+        for (const Knob& k : { Knob { &gate, &gateLabel }, Knob { &volume, &volumeLabel } })
+        {
+            auto cell = outKnobs.removeFromLeft (okw);
+            k.l->setBounds (cell.removeFromBottom (13));
+            k.s->setBounds (cell.reduced (1, 0));
+        }
+    }
 
     // Main: slots on top, target lanes below, sharing the same time axis
     timeline.setBounds (area.removeFromTop (juce::jlimit (120, 190, area.getHeight() * 2 / 5)));

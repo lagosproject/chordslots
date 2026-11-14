@@ -158,5 +158,7 @@ private:
     int keyNamesScale = -1;
     bool refreshing = false;
 
+    juce::Rectangle<int> harmonyPanelBounds, groovePanelBounds, outputPanelBounds;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordSlotsEditor)
 };
