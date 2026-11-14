@@ -56,7 +56,7 @@ struct Host
         for (int b = 0; b < numBlocks; ++b)
         {
             juce::MidiBuffer midi;
-            midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0); // incoming MIDI must not leak through
+            midi.swapWith (injectedMidi);
             processor.processBlock (buffer, midi);
 
             for (const auto meta : midi)
@@ -82,6 +82,21 @@ struct Host
             if (playHead.playing)
                 playHead.ppq += blockSize / sampleRate * playHead.bpm / 60.0;
         }
+    }
+
+    void injectNoteOn (int note, int vel = 100, int sample = 0)
+    {
+        injectedMidi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) juce::jlimit (1, 127, vel)), sample);
+    }
+
+    void injectNoteOff (int note, int sample = 0)
+    {
+        injectedMidi.addEvent (juce::MidiMessage::noteOff (1, note), sample);
+    }
+
+    void injectCC (int cc, int val, int sample = 0)
+    {
+        injectedMidi.addEvent (juce::MidiMessage::controllerEvent (1, cc, val), sample);
     }
 
     /** Number of notes still sounding according to the emitted MIDI; also
@@ -122,6 +137,7 @@ struct Host
     FakePlayHead playHead;
     ChordSlotsProcessor processor;
     std::vector<NoteEvent> events;
+    juce::MidiBuffer injectedMidi;
     juce::int64 position = 0;
     float peak = 0.0f;
     bool nonFinite = false;
@@ -443,6 +459,78 @@ void testPerformanceAndStrum()
     CHECK (activeOns.empty());
 }
 
+void testIncomingMidiTriggerIntegration()
+{
+    Host h (48000.0, 128);
+    const cs::Progression p = h.processor.getProgression();
+
+    // 1. Live trigger when stopped
+    h.injectNoteOn (60, 100);
+    h.run (1);
+    CHECK (h.processor.getTriggeredSlot() == 0);
+    CHECK (h.heldAfterReplay() == p.slots[0].voicing.n);
+
+    // Release note 60
+    h.injectNoteOff (60);
+    h.run (1);
+    CHECK (h.heldAfterReplay() == 0);
+
+    // 2. Held-key stack & Last-Note Priority (60 -> 62 -> release 62 -> 60 returns)
+    h.injectNoteOn (60, 90);
+    h.run (1);
+    CHECK (h.processor.getTriggeredSlot() == 0);
+    CHECK (h.heldAfterReplay() == p.slots[0].voicing.n);
+
+    h.injectNoteOn (62, 110);
+    h.run (1);
+    CHECK (h.processor.getTriggeredSlot() == 1);
+    CHECK (h.heldAfterReplay() == p.slots[1].voicing.n);
+
+    // Release 62 -> should cleanly fall back to slot 0!
+    h.injectNoteOff (62);
+    h.run (1);
+    CHECK (h.processor.getTriggeredSlot() == 0);
+    CHECK (h.heldAfterReplay() == p.slots[0].voicing.n);
+
+    // Release 60 -> all released
+    h.injectNoteOff (60);
+    h.run (1);
+    CHECK (h.heldAfterReplay() == 0);
+
+    // 3. Sustain pedal (CC 64)
+    h.injectNoteOn (60, 100);
+    h.run (1);
+    h.injectCC (64, 127);
+    h.run (1);
+    h.injectNoteOff (60);
+    h.run (1);
+    // Still held by sustain pedal!
+    CHECK (h.heldAfterReplay() == p.slots[0].voicing.n);
+
+    // Release sustain pedal
+    h.injectCC (64, 0);
+    h.run (1);
+    CHECK (h.heldAfterReplay() == 0);
+
+    // 4. Strum fast tap cancellation
+    if (auto* param = h.processor.apvts.getParameter ("strum"))
+        param->setValueNotifyingHost (param->convertTo0to1 (0.8f));
+
+    h.injectNoteOn (60, 100, 0);
+    h.injectNoteOff (60, 10);
+    h.run (10);
+    // Tap finished: no late ringing notes!
+    CHECK (h.heldAfterReplay() == 0);
+
+    // 5. Progression edit while chord is held (resilience test)
+    h.injectNoteOn (60, 100);
+    h.run (1);
+    h.processor.edit ([] (cs::Progression& prog, cs::Rng& rng) { cs::roll (prog, rng); });
+    h.injectNoteOff (60);
+    h.run (1);
+    CHECK (h.heldAfterReplay() == 0);
+}
+
 } // namespace
 
 int main (int argc, char** argv)
@@ -480,6 +568,7 @@ int main (int argc, char** argv)
     testStateRoundTrip();
     testMidiFile();
     testPerformanceAndStrum();
+    testIncomingMidiTriggerIntegration();
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

@@ -31,6 +31,10 @@ add_executable(chordslots_performance_tests tests/performance_tests.cpp)
 target_link_libraries(chordslots_performance_tests PRIVATE chordslots_core)
 add_test(NAME performance COMMAND chordslots_performance_tests)
 
+add_executable(chordslots_trigger_tests tests/trigger_tests.cpp)
+target_link_libraries(chordslots_trigger_tests PRIVATE chordslots_core)
+add_test(NAME trigger COMMAND chordslots_trigger_tests)
+
 if(NOT CHORDSLOTS_BUILD_PLUGIN)
     return()
 endif()

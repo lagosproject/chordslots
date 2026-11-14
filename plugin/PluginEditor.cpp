@@ -237,7 +237,15 @@ void TimelineView::paint (juce::Graphics& g)
             g.fillRect (r.getX(), r.getBottom() - 4.0f, r.getWidth() * s.tension, 4.0f);
         }
 
-        if (s.locked || i == selected)
+        const int triggered = processor.getTriggeredSlot();
+        if (i == triggered)
+        {
+            g.setColour (ui::energy.withAlpha (0.40f));
+            g.fillRoundedRectangle (r, 6.0f);
+            g.setColour (ui::energy.brighter (0.4f));
+            g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 2.5f);
+        }
+        else if (s.locked || i == selected)
         {
             g.setColour (s.locked ? ui::accent.brighter (0.25f) : juce::Colours::white.withAlpha (0.7f));
             g.drawRoundedRectangle (r.reduced (1.0f), 6.0f, s.locked ? 2.0f : 1.2f);
@@ -659,6 +667,8 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     setupCombo (slotsBox, slotsLabel, "SLOTS");
     setupCombo (snapBox, snapLabel, "CUT GRID");
     setupCombo (moodBox, moodLabel, "MOOD (TARGET CURVES)");
+    setupCombo (triggerModeBox, triggerModeLabel, "TRIGGER");
+    setupCombo (triggerMapBox, triggerMapLabel, "MAP");
 
     for (int i = 0; i < cs::numScales(); ++i)
         scaleBox.addItem (cs::scales()[(size_t) i].name, i + 1);
@@ -672,6 +682,37 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     for (int i = 0; i < (int) cs::moods().size(); ++i)
         moodBox.addItem (cs::moods()[(size_t) i].name, i + 1);
     moodBox.setTextWhenNothingSelected ("Custom");
+
+    triggerModeBox.addItem ("Auto", 1);
+    triggerModeBox.addItem ("Trigger Only", 2);
+    triggerModeBox.addItem ("Loop Only", 3);
+
+    triggerMapBox.addItem ("White Keys (C3)", 1);
+    triggerMapBox.addItem ("Chromatic (C3)", 2);
+    triggerMapBox.addItem ("Pads (C1)", 3);
+
+    triggerModeBox.onChange = [this]
+    {
+        if (refreshing) return;
+        const int mode = triggerModeBox.getSelectedId() - 1;
+        if (auto* param = processor.apvts.getParameter ("triggerMode"))
+            param->setValueNotifyingHost (param->convertTo0to1 ((float) mode));
+    };
+
+    triggerMapBox.onChange = [this]
+    {
+        if (refreshing) return;
+        const int id = triggerMapBox.getSelectedId();
+        int root = 60;
+        int layout = 0;
+        if (id == 2) { root = 60; layout = 1; }
+        else if (id == 3) { root = 36; layout = 1; }
+
+        if (auto* param = processor.apvts.getParameter ("triggerRoot"))
+            param->setValueNotifyingHost (param->convertTo0to1 ((float) root));
+        if (auto* param = processor.apvts.getParameter ("triggerLayout"))
+            param->setValueNotifyingHost (param->convertTo0to1 ((float) layout));
+    };
 
     keyBox.onChange = [this]
     {
@@ -901,6 +942,13 @@ void ChordSlotsEditor::refresh()
     syncopation.setValue (p.syncopation, juce::dontSendNotification);
     bassMotion.setValue (p.bassMotion, juce::dontSendNotification);
 
+    const cs::TriggerConfig tc = processor.getTriggerConfig();
+    triggerModeBox.setSelectedId ((int) tc.mode + 1, juce::dontSendNotification);
+    int mapId = 1;
+    if (tc.layout == cs::TriggerLayout::Chromatic)
+        mapId = (tc.rootNote == 36) ? 3 : 2;
+    triggerMapBox.setSelectedId (mapId, juce::dontSendNotification);
+
     const int fit = juce::roundToInt (100.0f * cs::fitScore (p));
     fitLabel.setText (juce::String (fit) + "%", juce::dontSendNotification);
     fitLabel.setColour (juce::Label::textColourId, fit >= 85 ? ui::energy : (fit >= 70 ? ui::brightness : ui::tension));
@@ -920,6 +968,8 @@ void ChordSlotsEditor::timerCallback()
     if (playButton.getButtonText() != text)
         playButton.setButtonText (text);
     playButton.setToggleState (processor.isPreviewPlaying(), juce::dontSendNotification);
+    if (processor.getTriggeredSlot() >= 0)
+        timeline.repaint();
 }
 
 void ChordSlotsEditor::saveMidi()
@@ -989,13 +1039,14 @@ void ChordSlotsEditor::resized()
         label.setBounds (cell.removeFromTop (16));
         box.setBounds (cell.removeFromTop (28));
     };
-    const int flexible = juce::jmax (0, header.getWidth() - 6 * 10 - (66 + 78 + 60 + 60 + 78 + 130));
-    place (keyBox, keyLabel, 66);
-    place (scaleBox, scaleLabel, 150 + flexible / 3 - 72);
-    place (barsBox, barsLabel, 60);
-    place (slotsBox, slotsLabel, 60);
-    place (snapBox, snapLabel, 78);
-    place (moodBox, moodLabel, juce::jmax (130, header.getWidth() - 10));
+    place (keyBox, keyLabel, 58);
+    place (scaleBox, scaleLabel, 114);
+    place (barsBox, barsLabel, 50);
+    place (slotsBox, slotsLabel, 50);
+    place (snapBox, snapLabel, 64);
+    place (moodBox, moodLabel, 110);
+    place (triggerModeBox, triggerModeLabel, 85);
+    place (triggerMapBox, triggerMapLabel, juce::jmax (100, header.getWidth() - 10));
 
     area.removeFromTop (12);
 

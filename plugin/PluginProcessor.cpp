@@ -131,6 +131,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout ChordSlotsProcessor::createL
                                                              juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f));
     layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "humanize", 1 }, "Humanize",
                                                              juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "triggerMode", 1 }, "Trigger Mode",
+                                                             juce::StringArray { "Auto", "Trigger Only", "Loop Only" }, 0));
+    layout.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "triggerRoot", 1 }, "Trigger Root",
+                                                           0, 127, 60));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "triggerLayout", 1 }, "Trigger Layout",
+                                                             juce::StringArray { "White Keys", "Chromatic" }, 0));
     return layout;
 }
 
@@ -145,10 +151,14 @@ ChordSlotsProcessor::ChordSlotsProcessor()
     strumParam = apvts.getRawParameterValue ("strum");
     accentParam = apvts.getRawParameterValue ("accent");
     humanizeParam = apvts.getRawParameterValue ("humanize");
+    triggerModeParam = apvts.getRawParameterValue ("triggerMode");
+    triggerRootParam = apvts.getRawParameterValue ("triggerRoot");
+    triggerLayoutParam = apvts.getRawParameterValue ("triggerLayout");
 
     apvts.addParameterListener ("strum", this);
     apvts.addParameterListener ("accent", this);
     apvts.addParameterListener ("humanize", this);
+    apvts.addParameterListener ("triggerMode", this);
 
     model = cs::makeDefaultProgression (rng);
     publish();
@@ -160,12 +170,34 @@ ChordSlotsProcessor::~ChordSlotsProcessor()
     apvts.removeParameterListener ("strum", this);
     apvts.removeParameterListener ("accent", this);
     apvts.removeParameterListener ("humanize", this);
+    apvts.removeParameterListener ("triggerMode", this);
 }
 
-void ChordSlotsProcessor::parameterChanged (const juce::String&, float)
+void ChordSlotsProcessor::parameterChanged (const juce::String& paramID, float)
 {
+    if (paramID == "triggerMode")
+        resetTrigger();
     publish();
     sendChangeMessage();
+}
+
+cs::TriggerConfig ChordSlotsProcessor::getTriggerConfig() const noexcept
+{
+    cs::TriggerConfig cfg;
+    if (triggerModeParam != nullptr)
+        cfg.mode = (cs::TriggerMode) juce::jlimit (0, 2, juce::roundToInt (triggerModeParam->load()));
+    if (triggerRootParam != nullptr)
+        cfg.rootNote = juce::jlimit (0, 127, juce::roundToInt (triggerRootParam->load()));
+    if (triggerLayoutParam != nullptr)
+        cfg.layout = (cs::TriggerLayout) juce::jlimit (0, 1, juce::roundToInt (triggerLayoutParam->load()));
+    cfg.numSlots = play.numSlots;
+    return cfg;
+}
+
+void ChordSlotsProcessor::resetTrigger() noexcept
+{
+    triggerEngine.reset();
+    uiTriggeredSlot.store (-1);
 }
 
 cs::PerformanceParams ChordSlotsProcessor::getPerformanceParams() const noexcept
@@ -244,6 +276,8 @@ void ChordSlotsProcessor::prepareToPlay (double newSampleRate, int)
     auditionCount = 0;
     pendingCount = 0;
     wasPlaying = false;
+    resetTrigger();
+    totalSamplesProcessed = 0;
 }
 
 void ChordSlotsProcessor::releaseResources()
@@ -251,6 +285,7 @@ void ChordSlotsProcessor::releaseResources()
     synth.allNotesOff();
     pendingCount = 0;
     heldCount = 0;
+    resetTrigger();
 }
 
 bool ChordSlotsProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -264,7 +299,9 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     juce::ScopedNoDenormals noDenormals;
     const int numSamples = buffer.getNumSamples();
     buffer.clear();
-    midi.clear(); // incoming MIDI is not used (yet); we only emit our own
+
+    juce::MidiBuffer incomingMidi;
+    incomingMidi.swapWith (midi);
 
     if (playDirty.load())
     {
@@ -300,6 +337,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const double stepsPerSample = bpm / 60.0 * 4.0 / sampleRate;
     const float gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
     const bool playing = (hostPlaying || previewOn.load()) && play.numSlots > 0 && numSamples > 0;
+    const cs::TriggerConfig trigCfg = getTriggerConfig();
 
     auto clearPending = [&]
     {
@@ -328,6 +366,81 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             held[heldCount++] = note;
             midi.addEvent (juce::MidiMessage::noteOn (kMidiChannel, note, (juce::uint8) juce::jlimit (1, 127, vel)), sample);
         }
+    };
+
+    auto emitReleases = [&] (const cs::TriggerEngine::TriggerAction& act, int sample)
+    {
+        for (int i = 0; i < act.releaseCount; ++i)
+        {
+            const int note = act.releaseNotes[i];
+            bool wasHeld = false;
+            for (int h = 0; h < heldCount; ++h)
+            {
+                if (held[h] == note)
+                {
+                    wasHeld = true;
+                    held[h] = held[heldCount - 1];
+                    --heldCount;
+                    break;
+                }
+            }
+            if (wasHeld)
+                midi.addEvent (juce::MidiMessage::noteOff (kMidiChannel, note), sample);
+        }
+        clearPending();
+    };
+
+    auto triggerLiveSlot = [&] (int slot, int incomingVel, int sample)
+    {
+        if (slot < 0 || slot >= play.numSlots)
+            return;
+
+        const cs::PlaySlot& s = play.slots[slot];
+        cs::PerfInput in;
+        in.n = std::min (s.n, cs::kPerfMaxNotes);
+        in.bassCount = 0;
+        for (int j = 0; j < in.n; ++j)
+        {
+            in.pitch[(size_t) j] = s.notes[j];
+            const int baseVel = s.velocities[j] > 0 ? s.velocities[j] : s.velocity;
+            const int scaledVel = juce::jlimit (1, 127, (int) std::lround (baseVel * (incomingVel / 100.0f)));
+            in.velocity[(size_t) j] = scaledVel;
+            if (s.notes[j] < cs::kUpperFloor)
+                in.bassCount++;
+        }
+
+        const cs::PerformanceParams perf = getPerformanceParams();
+        const int pass = (int) (liveTriggerPass++ & 0x7fffffff);
+        // Nominal duration of 500ms so live strum is never truncated by a short 1/16 slot
+        const cs::PerfOutput out = cs::applyPerformance (in, perf, 500.0f, slot, pass);
+
+        int liveNotes[cs::kMaxNotes];
+        for (int j = 0; j < out.n; ++j)
+            liveNotes[j] = out.notes[(size_t) j].pitch;
+        triggerEngine.setSoundingNotes (liveNotes, out.n);
+
+        clearPending();
+        for (int j = 0; j < out.n; ++j)
+        {
+            const int note = out.notes[(size_t) j].pitch;
+            const int vel = out.notes[(size_t) j].velocity;
+            const float offsetMs = out.notes[(size_t) j].offsetMs;
+            const int delaySamples = (int) std::lround (offsetMs * 0.001 * sampleRate);
+            const int onSample = sample + delaySamples;
+
+            if (onSample < numSamples)
+            {
+                triggerNote (note, vel, onSample);
+            }
+            else if (pendingCount < kMaxPendingNotes)
+            {
+                pendingNotes[pendingCount++] = { note, vel, onSample - numSamples, slot };
+            }
+        }
+        heldSlot = slot;
+        currentSlot = slot;
+        uiTriggeredSlot.store (slot);
+        triggerGlowExpirySamples = totalSamplesProcessed + sample + (juce::int64) (0.12 * sampleRate);
     };
 
     auto startSlot = [&] (int slot, int slotSampleOffset, double slotStartStep = -1.0, double currentPlayStep = -1.0)
@@ -379,31 +492,77 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         return (double) s.start + (double) (s.end - s.start) * (double) gate;
     };
 
-    if (playing)
+    // --- Ingest incoming MIDI events ---
+    for (const auto meta : incomingMidi)
+    {
+        const auto m = meta.getMessage();
+        const int sPos = juce::jlimit (0, numSamples - 1, meta.samplePosition);
+
+        if (m.isNoteOn())
+        {
+            auto act = triggerEngine.onNoteOn (m.getNoteNumber(), m.getVelocity(), trigCfg);
+            if (act.releaseCount > 0 || act.startSlot >= 0)
+            {
+                if (heldCount > 0 && act.releaseCount == 0)
+                    releaseHeld (sPos);
+
+                emitReleases (act, sPos);
+                if (act.startSlot >= 0)
+                    triggerLiveSlot (act.startSlot, act.startVelocity, sPos);
+            }
+        }
+        else if (m.isNoteOff())
+        {
+            auto act = triggerEngine.onNoteOff (m.getNoteNumber(), trigCfg);
+            if (act.releaseCount > 0 || act.startSlot >= 0)
+            {
+                emitReleases (act, sPos);
+                if (act.startSlot >= 0)
+                    triggerLiveSlot (act.startSlot, act.startVelocity, sPos);
+            }
+        }
+        else if (m.isController() && m.getControllerNumber() == 64)
+        {
+            auto act = triggerEngine.onControlChange (64, m.getControllerValue());
+            if (act.releaseCount > 0)
+                emitReleases (act, sPos);
+        }
+        else if (m.isAllNotesOff() || (m.isController() && (m.getControllerNumber() == 120 || m.getControllerNumber() == 123)))
+        {
+            auto act = triggerEngine.reset();
+            emitReleases (act, sPos);
+            releaseHeld (sPos);
+            uiTriggeredSlot.store (-1);
+        }
+    }
+
+    // Process pending note-ons scheduled across block boundaries (for both loop and live triggers)
+    int remainingPending = 0;
+    for (int pIdx = 0; pIdx < pendingCount; ++pIdx)
+    {
+        auto& pn = pendingNotes[pIdx];
+        if (pn.slot == currentSlot)
+        {
+            if (pn.samplesUntilOn < numSamples)
+            {
+                const int sPos = juce::jlimit (0, numSamples - 1, pn.samplesUntilOn >= 0 ? pn.samplesUntilOn : 0);
+                triggerNote (pn.note, pn.velocity, sPos);
+            }
+            else
+            {
+                pn.samplesUntilOn -= numSamples;
+                pendingNotes[remainingPending++] = pn;
+            }
+        }
+    }
+    pendingCount = remainingPending;
+
+    const bool triggerSuppressesLoop = triggerEngine.isTriggerActive() || trigCfg.mode == cs::TriggerMode::TriggerOnly;
+
+    if (playing && ! triggerSuppressesLoop)
     {
         releaseAudition (0);
         auditionRequest.store (-1);
-
-        // Process pending note-ons scheduled across block boundaries
-        int remainingPending = 0;
-        for (int pIdx = 0; pIdx < pendingCount; ++pIdx)
-        {
-            auto& pn = pendingNotes[pIdx];
-            if (pn.slot == currentSlot)
-            {
-                if (pn.samplesUntilOn < numSamples)
-                {
-                    const int sPos = juce::jlimit (0, numSamples - 1, pn.samplesUntilOn >= 0 ? pn.samplesUntilOn : 0);
-                    triggerNote (pn.note, pn.velocity, sPos);
-                }
-                else
-                {
-                    pn.samplesUntilOn -= numSamples;
-                    pendingNotes[remainingPending++] = pn;
-                }
-            }
-        }
-        pendingCount = remainingPending;
 
         double startStep = expectedStep;
         bool jumped = ! wasPlaying;
@@ -508,7 +667,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     }
     else
     {
-        if (wasPlaying)
+        if (wasPlaying && ! triggerEngine.isTriggerActive())
         {
             releaseHeld (0);
             clearPending();
@@ -517,7 +676,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         uiStep.store (-1.0);
 
         const int request = auditionRequest.exchange (-1);
-        if (request >= 0 && request < play.numSlots && numSamples > 0)
+        if (request >= 0 && request < play.numSlots && numSamples > 0 && ! triggerEngine.isTriggerActive())
         {
             releaseAudition (0);
             const cs::PlaySlot& s = play.slots[request];
@@ -536,7 +695,12 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                 auditionSamplesLeft -= numSamples;
         }
     }
-    wasPlaying = playing;
+
+    if (! triggerEngine.isTriggerActive() && totalSamplesProcessed >= triggerGlowExpirySamples)
+        uiTriggeredSlot.store (-1);
+
+    totalSamplesProcessed += numSamples;
+    wasPlaying = playing && ! triggerEngine.isTriggerActive();
 
     const float gain = synthOnParam->load() > 0.5f ? synthVolParam->load() : 0.0f;
     synth.render (buffer, midi, gain);

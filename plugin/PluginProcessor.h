@@ -5,6 +5,8 @@
 #include "PreviewSynth.h"
 
 #include <chordslots/Generator.h>
+#include <chordslots/Performance.h>
+#include <chordslots/Trigger.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include <atomic>
@@ -18,6 +20,9 @@ public:
     ~ChordSlotsProcessor() override;
 
     cs::PerformanceParams getPerformanceParams() const noexcept;
+    cs::TriggerConfig getTriggerConfig() const noexcept;
+    int getTriggeredSlot() const noexcept { return uiTriggeredSlot.load(); }
+    void resetTrigger() noexcept;
     void refeel() noexcept;
 
     //==============================================================================
@@ -144,7 +149,16 @@ private:
     std::atomic<float>* strumParam = nullptr;
     std::atomic<float>* accentParam = nullptr;
     std::atomic<float>* humanizeParam = nullptr;
+    std::atomic<float>* triggerModeParam = nullptr;
+    std::atomic<float>* triggerRootParam = nullptr;
+    std::atomic<float>* triggerLayoutParam = nullptr;
     std::atomic<uint32_t> perfSeed { 1 };
+
+    cs::TriggerEngine triggerEngine;
+    std::atomic<int> uiTriggeredSlot { -1 };
+    juce::int64 triggerGlowExpirySamples = 0;
+    juce::int64 totalSamplesProcessed = 0;
+    uint32_t liveTriggerPass = 1000;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordSlotsProcessor)
 };
