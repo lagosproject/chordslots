@@ -94,12 +94,37 @@ inline int numChordTypes() { return (int) chordTypes().size(); }
 
 struct Chord
 {
-    int root = 0; // absolute pitch class 0..11
-    int type = 0; // index into chordTypes()
+    int root = 0;    // absolute pitch class 0..11
+    int type = 0;    // index into chordTypes()
+    int bassInt = 0; // semitones above root; 0 = root position
 
-    bool operator== (const Chord& o) const noexcept { return root == o.root && type == o.type; }
+    int bassPc() const noexcept { return mod12 (root + bassInt); }
+    bool isSlash() const noexcept { return bassInt != 0; }
+
+    bool operator== (const Chord& o) const noexcept
+    {
+        return root == o.root && type == o.type && bassInt == o.bassInt;
+    }
     bool operator!= (const Chord& o) const noexcept { return ! (*this == o); }
 };
+
+/** Checks whether a bass interval corresponds to a chord tone of this type. */
+inline bool isBassIntValid (int type, int bassInt) noexcept
+{
+    if (bassInt == 0)
+        return true;
+    for (int iv : chordTypes()[(size_t) type].iv)
+        if (mod12 (iv) == mod12 (bassInt))
+            return true;
+    return false;
+}
+
+/** Resets bassInt to 0 (root position) if it is no longer valid for the chord type. */
+inline void sanitizeBass (Chord& c) noexcept
+{
+    if (! isBassIntValid (c.type, c.bassInt))
+        c.bassInt = 0;
+}
 
 /** 12-bit mask of absolute pitch classes in a chord. */
 inline unsigned chordMask (Chord c)
@@ -107,6 +132,8 @@ inline unsigned chordMask (Chord c)
     unsigned m = 0;
     for (int iv : chordTypes()[(size_t) c.type].iv)
         m |= 1u << mod12 (c.root + iv);
+    if (c.isSlash())
+        m |= 1u << c.bassPc();
     return m;
 }
 
@@ -118,6 +145,15 @@ inline int tonesOutsideScale (Chord c, int tonic, int scaleIdx)
     for (int iv : chordTypes()[(size_t) c.type].iv)
         if ((sm & (1u << mod12 (c.root + iv - tonic))) == 0)
             ++n;
+    if (c.isSlash() && (sm & (1u << mod12 (c.bassPc() - tonic))) == 0)
+    {
+        bool wasChordTone = false;
+        for (int iv : chordTypes()[(size_t) c.type].iv)
+            if (mod12 (c.root + iv) == c.bassPc())
+                wasChordTone = true;
+        if (! wasChordTone)
+            ++n;
+    }
     return n;
 }
 
@@ -183,7 +219,10 @@ inline std::string pitchClassName (int pc, int tonic, int scaleIdx)
 
 inline std::string chordName (Chord c, int tonic, int scaleIdx)
 {
-    return pitchClassName (c.root, tonic, scaleIdx) + chordTypes()[(size_t) c.type].suffix;
+    std::string s = pitchClassName (c.root, tonic, scaleIdx) + chordTypes()[(size_t) c.type].suffix;
+    if (c.isSlash())
+        s += "/" + pitchClassName (c.bassPc(), tonic, scaleIdx);
+    return s;
 }
 
 inline std::string romanNumeral (Chord c, int tonic)
@@ -192,7 +231,36 @@ inline std::string romanNumeral (Chord c, int tonic)
     static const char* lower[12] = { "i", "bii", "ii", "biii", "iii", "iv", "#iv", "v", "bvi", "vi", "bvii", "vii" };
     const auto& t = chordTypes()[(size_t) c.type];
     const int d = mod12 (c.root - tonic);
-    return std::string (t.minorish ? lower[d] : upper[d]) + t.romanSuffix;
+    const std::string base = std::string (t.minorish ? lower[d] : upper[d]);
+
+    if (! c.isSlash())
+        return base + t.romanSuffix;
+
+    // Figured bass for standard triads and 7ths
+    const int bi = mod12 (c.bassInt);
+    const bool isTriad = (c.type == 0 || c.type == 1 || c.type == 3 || c.type == 4);
+    const bool is7th = (c.type >= 7 && c.type <= 12) || c.type == 20;
+
+    if (isTriad)
+    {
+        if (bi == 3 || bi == 4)
+            return base + "6";
+        if (bi == 6 || bi == 7 || bi == 8)
+            return base + "64";
+    }
+    else if (is7th)
+    {
+        const std::string sfx = (c.type == 7 || c.type == 12) ? "maj" : "";
+        if (bi == 3 || bi == 4)
+            return base + sfx + "65";
+        if (bi == 6 || bi == 7 || bi == 8)
+            return base + sfx + "43";
+        if (bi == 9 || bi == 10 || bi == 11)
+            return base + sfx + "42";
+    }
+
+    const int bd = mod12 (c.bassPc() - tonic);
+    return base + t.romanSuffix + "/" + lower[bd];
 }
 
 //==============================================================================

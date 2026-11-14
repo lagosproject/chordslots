@@ -54,15 +54,23 @@ int main (int argc, char** argv)
 
     if (std::strcmp (cmd, "roll") == 0)
     {
-        const int count = argc > 3 ? std::atoi (argv[3]) : 5;
-        Rng rng ((unsigned) (argc > 4 ? std::atoi (argv[4]) : 1));
+        const int count = argc > 3 && argv[3][0] != '-' ? std::atoi (argv[3]) : 5;
+        Rng rng ((unsigned) (argc > 4 && argv[4][0] != '-' ? std::atoi (argv[4]) : 1));
+
+        float bassMotion = 0.0f;
+        for (int a = 2; a < argc; ++a)
+        {
+            if (std::strcmp (argv[a], "--bass-motion") == 0 && a + 1 < argc)
+                bassMotion = (float) std::atof (argv[++a]);
+        }
 
         for (int m = 0; m < (int) moods().size(); ++m)
         {
-            if (argc > 2 && std::strcmp (argv[2], "all") != 0 && std::strcmp (argv[2], moods()[(size_t) m].name) != 0)
+            if (argc > 2 && argv[2][0] != '-' && std::strcmp (argv[2], "all") != 0 && std::strcmp (argv[2], moods()[(size_t) m].name) != 0)
                 continue;
 
             Progression p;
+            p.bassMotion = bassMotion;
             layoutEven (p);
             applyMood (p, m);
             std::printf ("%s  (%s %s, adventure %.2f)\n", moods()[(size_t) m].name,

@@ -388,13 +388,54 @@ void TimelineView::showSlotMenu (int slot, int step)
         menu.addItem (100 + i, label);
     }
     menu.addSeparator();
+
+    // Bass note submenu
+    juce::PopupMenu bassMenu;
+    const cs::Chord curChord = prog.slots[(size_t) slot].chord;
+    const auto& t = cs::chordTypes()[(size_t) curChord.type];
+    const int currentBassInt = curChord.bassInt;
+    const juce::String rootNoteName = utf8 (cs::pitchClassName (curChord.root, prog.tonic, prog.scale));
+    bassMenu.addItem (200, "Root: " + rootNoteName + " (root position)", true, currentBassInt == 0);
+
+    std::vector<int> bassOptions;
+    int optIdx = 0;
+    for (int iv : t.iv)
+    {
+        const int ivNorm = cs::mod12 (iv);
+        if (ivNorm == 0)
+            continue;
+        if (std::find (bassOptions.begin(), bassOptions.end(), ivNorm) != bassOptions.end())
+            continue;
+        bassOptions.push_back (ivNorm);
+
+        const int notePc = cs::mod12 (curChord.root + ivNorm);
+        const juce::String noteName = utf8 (cs::pitchClassName (notePc, prog.tonic, prog.scale));
+        juce::String desc;
+        if (ivNorm == 3 || ivNorm == 4)
+            desc = "3rd (1st inv)";
+        else if (ivNorm == 6 || ivNorm == 7 || ivNorm == 8)
+            desc = "5th (2nd inv)";
+        else if (ivNorm == 9 || ivNorm == 10 || ivNorm == 11)
+            desc = "7th (3rd inv)";
+        else if (ivNorm == 2)
+            desc = "9th";
+        else if (ivNorm == 5)
+            desc = "4th/11th";
+        else
+            desc = juce::String (ivNorm) + " semitones";
+
+        bassMenu.addItem (201 + optIdx, desc + ": " + noteName, true, currentBassInt == ivNorm);
+        ++optIdx;
+    }
+    menu.addSubMenu ("Bass note", bassMenu);
+
     menu.addItem (1, prog.slots[(size_t) slot].locked ? "Unlock slot" : "Lock slot");
     menu.addItem (2, "Split here", prog.numSlots < cs::kMaxSlots);
     menu.addItem (3, "Merge with previous", slot > 0);
 
     juce::Component::SafePointer<TimelineView> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withParentComponent (getTopLevelComponent()).withMousePosition(),
-                        [safe, slot, step, alts] (int result)
+                        [safe, slot, step, alts, bassOptions] (int result)
     {
         if (safe == nullptr || result == 0)
             return;
@@ -403,6 +444,17 @@ void TimelineView::showSlotMenu (int slot, int step)
         {
             const cs::Chord c = alts[(size_t) (result - 100)];
             proc.edit ([slot, c] (cs::Progression& p, cs::Rng& rng) { cs::setChord (p, slot, c, rng); });
+            proc.auditionSlot (slot);
+        }
+        else if (result == 200)
+        {
+            proc.edit ([slot] (cs::Progression& p, cs::Rng&) { cs::setBass (p, slot, 0); });
+            proc.auditionSlot (slot);
+        }
+        else if (result >= 201 && result - 201 < (int) bassOptions.size())
+        {
+            const int bInt = bassOptions[(size_t) (result - 201)];
+            proc.edit ([slot, bInt] (cs::Progression& p, cs::Rng&) { cs::setBass (p, slot, bInt); });
             proc.auditionSlot (slot);
         }
         else if (result == 1)
@@ -717,12 +769,15 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 
     setupKnob (adventure, adventureLabel, "ADVENTURE");
     setupKnob (syncopation, syncopationLabel, "SYNCOPATION");
+    setupKnob (bassMotion, bassMotionLabel, "BASS MOTION");
     setupKnob (gate, gateLabel, "GATE");
     setupKnob (volume, volumeLabel, "SYNTH VOL");
     adventure.setRange (0.0, 1.0, 0.01);
     syncopation.setRange (0.0, 1.0, 0.01);
+    bassMotion.setRange (0.0, 1.0, 0.01);
     adventure.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
     syncopation.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
+    bassMotion.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
     gate.setColour (juce::Slider::rotarySliderFillColourId, ui::textDim);
     volume.setColour (juce::Slider::rotarySliderFillColourId, ui::textDim);
 
@@ -737,6 +792,12 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         if (refreshing) return;
         const float v = (float) syncopation.getValue();
         processor.edit ([v] (cs::Progression& pr, cs::Rng&) { pr.syncopation = v; }, false);
+    };
+    bassMotion.onValueChange = [this]
+    {
+        if (refreshing) return;
+        const float v = (float) bassMotion.getValue();
+        processor.edit ([v] (cs::Progression& pr, cs::Rng&) { pr.bassMotion = v; }, false);
     };
 
     rollButton.getProperties().set ("primary", true);
@@ -824,6 +885,7 @@ void ChordSlotsEditor::refresh()
     lockVoicing.setToggleState (p.locks.voicing, juce::dontSendNotification);
     adventure.setValue (p.adventure, juce::dontSendNotification);
     syncopation.setValue (p.syncopation, juce::dontSendNotification);
+    bassMotion.setValue (p.bassMotion, juce::dontSendNotification);
 
     const int fit = juce::roundToInt (100.0f * cs::fitScore (p));
     fitLabel.setText (juce::String (fit) + "%", juce::dontSendNotification);
@@ -925,9 +987,10 @@ void ChordSlotsEditor::resized()
 
     auto right = footer.removeFromRight (juce::jmin (430, footer.getWidth() - 4 * 66));
     auto knobs = footer;
-    const int kw = knobs.getWidth() / 4;
+    const int kw = knobs.getWidth() / 5;
     struct Knob { juce::Slider* s; juce::Label* l; };
     for (const Knob& k : { Knob { &adventure, &adventureLabel }, Knob { &syncopation, &syncopationLabel },
+                           Knob { &bassMotion, &bassMotionLabel },
                            Knob { &gate, &gateLabel }, Knob { &volume, &volumeLabel } })
     {
         auto cell = knobs.removeFromLeft (kw);

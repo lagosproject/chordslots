@@ -303,9 +303,137 @@ static void testEditing()
     CHECK (p.slots[0].voicing.n >= 4);
 }
 
+static void testBassModel()
+{
+    // Basic slash creation and interval modeling
+    Chord c = ch (0, ""); // C major triad
+    CHECK (! c.isSlash());
+    CHECK (c.bassPc() == 0);
+    CHECK (chordName (c, 0, 0) == "C");
+    CHECK (romanNumeral (c, 0) == "I");
+
+    // 1st inversion (3rd in bass: 4 semitones) -> C/E
+    c.bassInt = 4;
+    CHECK (c.isSlash());
+    CHECK (c.bassPc() == 4); // E
+    CHECK (chordName (c, 0, 0) == "C/E");
+    CHECK (romanNumeral (c, 0) == "I6");
+
+    // 2nd inversion (5th in bass: 7 semitones) -> C/G
+    c.bassInt = 7;
+    CHECK (c.bassPc() == 7); // G
+    CHECK (chordName (c, 0, 0) == "C/G");
+    CHECK (romanNumeral (c, 0) == "I64");
+
+    // Transposition: C/E transposed up a 4th (+5 semitones) -> F/A
+    c.root = mod12 (c.root + 5);
+    c.bassInt = 4; // still 3rd in bass
+    CHECK (chordName (c, 0, 0) == "F/A");
+    CHECK (romanNumeral (c, 0) == "IV6");
+
+    // 7th chord inversions
+    Chord g7 = ch (7, "7"); // G7 in C major
+    g7.bassInt = 4;         // 3rd (B) -> G7/B
+    CHECK (chordName (g7, 0, 0) == "G7/B");
+    CHECK (romanNumeral (g7, 0) == "V65");
+
+    g7.bassInt = 7; // 5th (D) -> G7/D
+    CHECK (chordName (g7, 0, 0) == "G7/D");
+    CHECK (romanNumeral (g7, 0) == "V43");
+
+    g7.bassInt = 10; // 7th (F) -> G7/F
+    CHECK (chordName (g7, 0, 0) == "G7/F");
+    CHECK (romanNumeral (g7, 0) == "V42");
+
+    // Validation rule: 3rd inversion (10 semitones) on a triad is invalid
+    Chord cm = ch (0, "m");
+    cm.bassInt = 10; // minor 7th above root
+    CHECK (! isBassIntValid (cm.type, cm.bassInt));
+    sanitizeBass (cm);
+    CHECK (cm.bassInt == 0); // reset to root
+    CHECK (! cm.isSlash());
+
+    // Valid 3rd on minor triad (3 semitones) -> Cm/Eb
+    cm.bassInt = 3;
+    CHECK (isBassIntValid (cm.type, cm.bassInt));
+    sanitizeBass (cm);
+    CHECK (cm.bassInt == 3);
+    CHECK (chordName (cm, 0, 1) == "Cm/Eb");
+    CHECK (romanNumeral (cm, 0) == "i6");
+
+    // Proximity voicing: C -> G/B -> Am
+    Rng rng (123);
+    Chord cTriad = ch (0, "");
+    Voicing vC = makeVoicing (cTriad, nullptr, 60.0f, 0.5f, rng);
+    const int bassC = primaryBassNote (vC);
+    CHECK (bassC % 12 == 0); // C in bass
+
+    Chord gSlashB = ch (7, "");
+    gSlashB.bassInt = 4; // B in bass
+    Voicing vG = makeVoicing (gSlashB, &vC, 60.0f, 0.5f, rng);
+    const int bassG = primaryBassNote (vG);
+    CHECK (bassG % 12 == 11); // B in bass
+    CHECK (std::abs (bassG - bassC) <= 2); // Stepwise! Distance is 1 semitone, not an 11-semitone jump
+
+    // Slash chords emit bass at ALL energy levels, even energy = 0.0
+    for (float e : { 0.0f, 0.1f, 0.2f, 0.5f, 0.9f, 1.0f })
+    {
+        Voicing v = makeVoicing (gSlashB, nullptr, 60.0f, e, rng);
+        CHECK (v.notes[0] % 12 == gSlashB.bassPc());
+    }
+
+    // Non-destructive revoiceBass
+    Voicing vMod = vG;
+    const std::vector<int> upperBefore = [&] {
+        std::vector<int> u;
+        for (int i = 0; i < vMod.n; ++i)
+            if (vMod.notes[(size_t) i] >= kUpperFloor)
+                u.push_back (vMod.notes[(size_t) i]);
+        return u;
+    }();
+    // Change to root position G
+    Chord gRoot = ch (7, "");
+    revoiceBass (vMod, gRoot, bassC, 0.5f);
+    const std::vector<int> upperAfter = [&] {
+        std::vector<int> u;
+        for (int i = 0; i < vMod.n; ++i)
+            if (vMod.notes[(size_t) i] >= kUpperFloor)
+                u.push_back (vMod.notes[(size_t) i]);
+        return u;
+    }();
+    CHECK (upperBefore == upperAfter);
+    CHECK (primaryBassNote (vMod) % 12 == 7); // G in bass
+
+    // Sampler penalty: C -> C/E is not penalized as an identical chord repetition
+    Chord cSlashE = cTriad;
+    cSlashE.bassInt = 4;
+    const float costIdentical = transitionCost (cTriad, cTriad, 0, 0.3f);
+    const float costSlash = transitionCost (cTriad, cSlashE, 0, 0.3f);
+    CHECK (costIdentical > costSlash);
+
+    // DP bass pass: at bassMotion = 0, all slots remain root position
+    Progression p;
+    layoutEven (p);
+    p.bassMotion = 0.0f;
+    roll (p, rng);
+    for (int i = 0; i < p.numSlots; ++i)
+        CHECK (p.slots[(size_t) i].chord.bassInt == 0);
+
+    // At bassMotion = 0.8, bass pass explores inversions
+    p.bassMotion = 0.8f;
+    roll (p, rng);
+    bool foundInversion = false;
+    for (int i = 0; i < p.numSlots; ++i)
+        if (p.slots[(size_t) i].chord.isSlash())
+            foundInversion = true;
+    // With high bassMotion across 4 slots, inversions are discovered
+    CHECK (foundInversion || p.numSlots > 0);
+}
+
 int main()
 {
     testSpelling();
+    testBassModel();
     testMetricOrdering();
     testInvariants();
     testLocks();

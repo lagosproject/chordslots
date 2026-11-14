@@ -145,8 +145,8 @@ private:
 
     juce::TextButton lockRhythm { "Rhythm" }, lockRoots { "Roots" }, lockColors { "Colors" }, lockVoicing { "Voicing" };
     juce::Label lockCaption;
-    juce::Slider adventure, syncopation, gate, volume;
-    juce::Label adventureLabel, syncopationLabel, gateLabel, volumeLabel;
+    juce::Slider adventure, syncopation, bassMotion, gate, volume;
+    juce::Label adventureLabel, syncopationLabel, bassMotionLabel, gateLabel, volumeLabel;
     juce::TextButton undoButton { "Undo" }, rollButton { "ROLL" }, playButton { "Play" }, saveButton { "Save .mid" };
     MidiDragTile dragTile;
     juce::Label hint;

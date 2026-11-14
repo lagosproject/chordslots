@@ -19,6 +19,7 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
     t.setProperty ("snap", p.snap, nullptr);
     t.setProperty ("adventure", p.adventure, nullptr);
     t.setProperty ("syncopation", p.syncopation, nullptr);
+    t.setProperty ("bassMotion", p.bassMotion, nullptr);
     t.setProperty ("mood", p.mood, nullptr);
     t.setProperty ("lockRhythm", p.locks.rhythm, nullptr);
     t.setProperty ("lockRoots", p.locks.roots, nullptr);
@@ -32,6 +33,7 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
         st.setProperty ("start", s.start, nullptr);
         st.setProperty ("root", s.chord.root, nullptr);
         st.setProperty ("type", juce::String (cs::chordTypes()[(size_t) s.chord.type].suffix), nullptr);
+        st.setProperty ("bassInt", s.chord.bassInt, nullptr);
         st.setProperty ("locked", s.locked, nullptr);
         st.setProperty ("targetB", s.targetB, nullptr);
         st.setProperty ("targetT", s.targetT, nullptr);
@@ -71,6 +73,7 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p)
     p.snap = (snap == 1 || snap == 2 || snap == 4) ? snap : 2;
     p.adventure = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("adventure", 0.3f));
     p.syncopation = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("syncopation", 0.3f));
+    p.bassMotion = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("bassMotion", 0.0f));
     p.mood = juce::jlimit (-1, (int) cs::moods().size() - 1, (int) t.getProperty ("mood", -1));
     p.locks.rhythm = (bool) t.getProperty ("lockRhythm", false);
     p.locks.roots = (bool) t.getProperty ("lockRoots", false);
@@ -86,6 +89,8 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p)
         s.start = juce::jlimit (0, p.lengthSteps() - 1, (int) st.getProperty ("start", 0));
         s.chord.root = cs::mod12 ((int) st.getProperty ("root", 0));
         s.chord.type = chordTypeFromSuffix (st.getProperty ("type", "").toString());
+        s.chord.bassInt = juce::jlimit (0, 11, (int) st.getProperty ("bassInt", 0));
+        cs::sanitizeBass (s.chord);
         s.locked = (bool) st.getProperty ("locked", false);
         s.targetB = juce::jlimit (0.0f, 1.0f, (float) st.getProperty ("targetB", 0.5f));
         s.targetT = juce::jlimit (0.0f, 1.0f, (float) st.getProperty ("targetT", 0.4f));
