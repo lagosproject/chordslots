@@ -5,8 +5,8 @@ on:
   pull_request:
 
 jobs:
-  engine-tests:
-    name: Pruebas del motor (${{ matrix.os }})
+  core-tests:
+    name: Core Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -16,11 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configurar
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCHORDSLOTS_BUILD_PLUGIN=OFF
 
-      - name: Compilar
+      - name: Build
         run: cmake --build build --config Release
 
-      - name: Ejecutar pruebas
+      - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure

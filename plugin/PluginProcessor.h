@@ -1,0 +1,129 @@
+// ChordSlots - audio processor: host-synced chord sequencer + MIDI out + preview synth.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#pragma once
+
+#include "PreviewSynth.h"
+
+#include <chordslots/Generator.h>
+#include <juce_audio_utils/juce_audio_utils.h>
+
+#include <atomic>
+
+class ChordSlotsProcessor final : public juce::AudioProcessor,
+                                  public juce::ChangeBroadcaster
+{
+public:
+    ChordSlotsProcessor();
+    ~ChordSlotsProcessor() override = default;
+
+    //==============================================================================
+    // Model access (any non-audio thread). Listeners get a change message after
+    // every edit and after a state restore.
+
+    cs::Progression getProgression() const;
+
+    /** Runs fn (Progression&, Rng&) under the model lock, then publishes the
+        result to the audio thread. */
+    template <typename Fn>
+    void edit (Fn&& fn, bool undoable = true)
+    {
+        {
+            const juce::ScopedLock sl (modelLock);
+            if (undoable)
+                pushHistory();
+            fn (model, rng);
+            cs::sanitizeRhythm (model);
+            publish();
+        }
+        sendChangeMessage();
+    }
+
+    /** Stores an undo point without changing anything (call before a drag). */
+    void beginGesture();
+    bool undo();
+    bool canUndo() const;
+
+    //==============================================================================
+    // Transport / audition (lock-free, safe from the UI)
+
+    void setPreviewPlaying (bool shouldPlay) noexcept { previewOn.store (shouldPlay); }
+    bool isPreviewPlaying() const noexcept { return previewOn.load(); }
+    void auditionSlot (int slot) noexcept { auditionRequest.store (slot); }
+    /** Loop position in sixteenth steps, or a negative value when stopped. */
+    double getPlayPosition() const noexcept { return uiStep.load(); }
+
+    //==============================================================================
+    juce::MidiFile createMidiFile() const;
+    /** Writes the progression to a temp .mid (for drag and drop). */
+    juce::File writeTempMidiFile() const;
+    juce::String describeProgression() const;
+
+    juce::AudioProcessorValueTreeState apvts;
+
+    //==============================================================================
+    void prepareToPlay (double sampleRate, int samplesPerBlock) override;
+    void releaseResources() override;
+    bool isBusesLayoutSupported (const BusesLayout&) const override;
+    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    using juce::AudioProcessor::processBlock;
+
+    juce::AudioProcessorEditor* createEditor() override;
+    bool hasEditor() const override { return true; }
+
+    const juce::String getName() const override { return "ChordSlots"; }
+    bool acceptsMidi() const override { return true; }
+    bool producesMidi() const override { return true; }
+    bool isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.3; }
+
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+
+    void getStateInformation (juce::MemoryBlock&) override;
+    void setStateInformation (const void*, int) override;
+
+private:
+    static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+    void pushHistory();
+    void publish();
+
+    //==============================================================================
+    // Model (guarded by modelLock)
+    juce::CriticalSection modelLock;
+    cs::Progression model;
+    cs::Rng rng;
+    std::vector<cs::Progression> history;
+
+    // Hand-over to the audio thread
+    juce::SpinLock playLock;
+    cs::PlayData pendingPlay;
+    std::atomic<bool> playDirty { false };
+
+    // Audio-thread state
+    cs::PlayData play;
+    PreviewSynth synth;
+    double sampleRate = 44100.0;
+    int held[cs::kMaxNotes] = {};
+    int heldCount = 0;
+    int heldSlot = -1;
+    int currentSlot = -1;
+    bool wasPlaying = false;
+    double expectedStep = 0.0;
+    int auditionNotes[cs::kMaxNotes] = {};
+    int auditionCount = 0;
+    int auditionSamplesLeft = 0;
+
+    std::atomic<bool> previewOn { false };
+    std::atomic<int> auditionRequest { -1 };
+    std::atomic<double> uiStep { -1.0 };
+    std::atomic<double> lastBpm { 120.0 };
+
+    std::atomic<float>* gateParam = nullptr;
+    std::atomic<float>* synthOnParam = nullptr;
+    std::atomic<float>* synthVolParam = nullptr;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordSlotsProcessor)
+};
