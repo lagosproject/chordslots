@@ -125,6 +125,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout ChordSlotsProcessor::createL
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "synthOn", 1 }, "Preview Synth", true));
     layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "synthVol", 1 }, "Preview Volume",
                                                              juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.7f));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "strum", 1 }, "Strum",
+                                                             juce::NormalisableRange<float> (-1.0f, 1.0f, 0.01f), 0.0f));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "accent", 1 }, "Melody Accent",
+                                                             juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "humanize", 1 }, "Humanize",
+                                                             juce::NormalisableRange<float> (0.0f, 1.0f, 0.01f), 0.0f));
     return layout;
 }
 
@@ -136,10 +142,47 @@ ChordSlotsProcessor::ChordSlotsProcessor()
     gateParam = apvts.getRawParameterValue ("gate");
     synthOnParam = apvts.getRawParameterValue ("synthOn");
     synthVolParam = apvts.getRawParameterValue ("synthVol");
+    strumParam = apvts.getRawParameterValue ("strum");
+    accentParam = apvts.getRawParameterValue ("accent");
+    humanizeParam = apvts.getRawParameterValue ("humanize");
+
+    apvts.addParameterListener ("strum", this);
+    apvts.addParameterListener ("accent", this);
+    apvts.addParameterListener ("humanize", this);
 
     model = cs::makeDefaultProgression (rng);
     publish();
     play = pendingPlay;
+}
+
+ChordSlotsProcessor::~ChordSlotsProcessor()
+{
+    apvts.removeParameterListener ("strum", this);
+    apvts.removeParameterListener ("accent", this);
+    apvts.removeParameterListener ("humanize", this);
+}
+
+void ChordSlotsProcessor::parameterChanged (const juce::String&, float)
+{
+    publish();
+    sendChangeMessage();
+}
+
+cs::PerformanceParams ChordSlotsProcessor::getPerformanceParams() const noexcept
+{
+    cs::PerformanceParams p;
+    if (strumParam != nullptr) p.strum = strumParam->load();
+    if (accentParam != nullptr) p.accent = accentParam->load();
+    if (humanizeParam != nullptr) p.humanize = humanizeParam->load();
+    p.seed = perfSeed.load();
+    return p;
+}
+
+void ChordSlotsProcessor::refeel() noexcept
+{
+    perfSeed.fetch_add (1);
+    publish();
+    sendChangeMessage();
 }
 
 //==============================================================================
@@ -184,7 +227,8 @@ bool ChordSlotsProcessor::undo()
 
 void ChordSlotsProcessor::publish()
 {
-    const cs::PlayData d = cs::toPlayData (model);
+    const cs::PerformanceParams perf = getPerformanceParams();
+    const cs::PlayData d = cs::toPlayData (model, perf, lastBpm.load());
     const juce::SpinLock::ScopedLockType sl (playLock);
     pendingPlay = d;
     playDirty.store (true);
@@ -198,12 +242,15 @@ void ChordSlotsProcessor::prepareToPlay (double newSampleRate, int)
     heldCount = 0;
     heldSlot = currentSlot = -1;
     auditionCount = 0;
+    pendingCount = 0;
     wasPlaying = false;
 }
 
 void ChordSlotsProcessor::releaseResources()
 {
     synth.allNotesOff();
+    pendingCount = 0;
+    heldCount = 0;
 }
 
 bool ChordSlotsProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -254,6 +301,11 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const float gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
     const bool playing = (hostPlaying || previewOn.load()) && play.numSlots > 0 && numSamples > 0;
 
+    auto clearPending = [&]
+    {
+        pendingCount = 0;
+    };
+
     auto releaseHeld = [&] (int sample)
     {
         for (int i = 0; i < heldCount; ++i)
@@ -269,14 +321,53 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         auditionCount = 0;
     };
 
-    auto startSlot = [&] (int slot, int sample)
+    auto triggerNote = [&] (int note, int vel, int sample)
     {
-        releaseHeld (sample);
+        if (heldCount < cs::kMaxNotes)
+        {
+            held[heldCount++] = note;
+            midi.addEvent (juce::MidiMessage::noteOn (kMidiChannel, note, (juce::uint8) juce::jlimit (1, 127, vel)), sample);
+        }
+    };
+
+    auto startSlot = [&] (int slot, int slotSampleOffset, double slotStartStep = -1.0, double currentPlayStep = -1.0)
+    {
+        releaseHeld (slotSampleOffset);
+        clearPending();
+
         const cs::PlaySlot& s = play.slots[slot];
+        double elapsedMs = 0.0;
+        if (slotStartStep >= 0.0 && currentPlayStep > slotStartStep)
+        {
+            const double elapsedSteps = currentPlayStep - slotStartStep;
+            elapsedMs = (elapsedSteps / stepsPerSample) * (1000.0 / sampleRate);
+        }
+
         for (int i = 0; i < s.n && i < cs::kMaxNotes; ++i)
         {
-            held[heldCount++] = s.notes[i];
-            midi.addEvent (juce::MidiMessage::noteOn (kMidiChannel, s.notes[i], (juce::uint8) juce::jlimit (1, 127, s.velocity)), sample);
+            const int note = s.notes[i];
+            const int vel = s.velocities[i] > 0 ? s.velocities[i] : s.velocity;
+            const float offsetMs = s.offsetMs[i];
+
+            if (elapsedMs >= (double) offsetMs)
+            {
+                triggerNote (note, vel, slotSampleOffset);
+            }
+            else
+            {
+                const double remainingMs = (double) offsetMs - elapsedMs;
+                const int delaySamples = (int) std::lround (remainingMs * 0.001 * sampleRate);
+                const int onSample = slotSampleOffset + delaySamples;
+
+                if (onSample < numSamples)
+                {
+                    triggerNote (note, vel, onSample);
+                }
+                else if (pendingCount < kMaxPendingNotes)
+                {
+                    pendingNotes[pendingCount++] = { note, vel, onSample - numSamples, slot };
+                }
+            }
         }
         heldSlot = slot;
         currentSlot = slot;
@@ -292,6 +383,27 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     {
         releaseAudition (0);
         auditionRequest.store (-1);
+
+        // Process pending note-ons scheduled across block boundaries
+        int remainingPending = 0;
+        for (int pIdx = 0; pIdx < pendingCount; ++pIdx)
+        {
+            auto& pn = pendingNotes[pIdx];
+            if (pn.slot == currentSlot)
+            {
+                if (pn.samplesUntilOn < numSamples)
+                {
+                    const int sPos = juce::jlimit (0, numSamples - 1, pn.samplesUntilOn >= 0 ? pn.samplesUntilOn : 0);
+                    triggerNote (pn.note, pn.velocity, sPos);
+                }
+                else
+                {
+                    pn.samplesUntilOn -= numSamples;
+                    pendingNotes[remainingPending++] = pn;
+                }
+            }
+        }
+        pendingCount = remainingPending;
 
         double startStep = expectedStep;
         bool jumped = ! wasPlaying;
@@ -323,6 +435,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         if (jumped)
         {
             releaseHeld (0);
+            clearPending();
             currentSlot = -1;
         }
 
@@ -334,12 +447,13 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         {
             if (startStep < offStep (slotNow))
             {
-                startSlot (slotNow, 0);
+                startSlot (slotNow, 0, (double) play.slots[slotNow].start, startStep);
                 startedAtZero = true;
             }
             else
             {
                 releaseHeld (0);
+                clearPending();
                 currentSlot = slotNow;
             }
         }
@@ -381,9 +495,12 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         for (int e = 0; e < numEvents; ++e)
         {
             if (events[e].on)
-                startSlot (events[e].slot, events[e].sample);
+                startSlot (events[e].slot, events[e].sample, -1.0, -1.0);
             else if (heldSlot == events[e].slot)
+            {
                 releaseHeld (events[e].sample);
+                clearPending();
+            }
         }
 
         expectedStep = std::fmod (endStep, len);
@@ -394,6 +511,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         if (wasPlaying)
         {
             releaseHeld (0);
+            clearPending();
             currentSlot = -1;
         }
         uiStep.store (-1.0);
@@ -437,21 +555,29 @@ juce::String ChordSlotsProcessor::describeProgression() const
 juce::MidiFile ChordSlotsProcessor::createMidiFile() const
 {
     const cs::Progression p = getProgression();
+    const cs::PerformanceParams perf = getPerformanceParams();
+    const double bpm = lastBpm.load();
+    const cs::PlayData playData = cs::toPlayData (p, perf, bpm);
     const float gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
 
     juce::MidiMessageSequence seq;
     seq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4), 0.0);
-    seq.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / lastBpm.load())), 0.0);
+    seq.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / bpm)), 0.0);
 
-    for (int i = 0; i < p.numSlots; ++i)
+    const double msToTicks = (double) kTicksPerQuarter * bpm / 60000.0;
+
+    for (int i = 0; i < playData.numSlots; ++i)
     {
-        const cs::Slot& s = p.slots[(size_t) i];
-        const double on = (double) s.start * kTicksPerStep;
-        const double off = on + juce::jmax (1.0, (double) (p.slotEnd (i) - s.start) * kTicksPerStep * (double) gate - 1.0);
-        for (int j = 0; j < s.voicing.n; ++j)
+        const cs::PlaySlot& ps = playData.slots[(size_t) i];
+        const double baseOn = (double) ps.start * kTicksPerStep;
+        const double off = baseOn + juce::jmax (1.0, (double) (p.slotEnd (i) - ps.start) * kTicksPerStep * (double) gate - 1.0);
+        for (int j = 0; j < ps.n; ++j)
         {
-            const int note = s.voicing.notes[(size_t) j];
-            seq.addEvent (juce::MidiMessage::noteOn (kMidiChannel, note, (juce::uint8) s.voicing.velocity), on);
+            const int note = ps.notes[(size_t) j];
+            const int vel = ps.velocities[(size_t) j];
+            const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * msToTicks;
+            const double noteOn = std::min (off - 1.0, baseOn + noteOffsetTicks);
+            seq.addEvent (juce::MidiMessage::noteOn (kMidiChannel, note, (juce::uint8) juce::jlimit (1, 127, vel)), noteOn);
             seq.addEvent (juce::MidiMessage::noteOff (kMidiChannel, note), off);
         }
     }

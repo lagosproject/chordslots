@@ -391,6 +391,58 @@ void testMidiFile()
     tmp.deleteFile();
 }
 
+void testPerformanceAndStrum()
+{
+    Host h (48000.0, 128); // Small buffer to ensure offsets cross block boundaries
+
+    if (auto* p = h.processor.apvts.getParameter ("strum"))
+        p->setValueNotifyingHost (p->convertTo0to1 (0.8f));
+    if (auto* p = h.processor.apvts.getParameter ("accent"))
+        p->setValueNotifyingHost (p->convertTo0to1 (0.6f));
+    if (auto* p = h.processor.apvts.getParameter ("humanize"))
+        p->setValueNotifyingHost (p->convertTo0to1 (0.4f));
+
+    h.playHead.playing = true;
+    h.run (100);
+    h.playHead.playing = false;
+    h.run (10);
+    // Verify notes are properly paired even with cross-block strumming
+    CHECK (h.heldAfterReplay() == 0);
+
+    // Mid-strum jump/relocation test
+    h.playHead.playing = true;
+    h.run (20);
+    h.playHead.ppq = 1.05; // jump mid-slot
+    h.run (50);
+    h.playHead.playing = false;
+    h.run (10);
+    CHECK (h.heldAfterReplay() == 0);
+
+    // Verify MIDI export has staggered onsets and valid note lengths
+    const juce::MidiFile file = h.processor.createMidiFile();
+    const auto* track = file.getTrack (0);
+    CHECK (track != nullptr);
+    int noteOns = 0;
+    std::map<int, double> activeOns;
+    for (int i = 0; i < track->getNumEvents(); ++i)
+    {
+        const auto& m = track->getEventPointer (i)->message;
+        if (m.isNoteOn())
+        {
+            ++noteOns;
+            activeOns[m.getNoteNumber()] = m.getTimeStamp();
+        }
+        else if (m.isNoteOff())
+        {
+            CHECK (activeOns.count (m.getNoteNumber()) > 0);
+            CHECK (m.getTimeStamp() >= activeOns[m.getNoteNumber()]);
+            activeOns.erase (m.getNoteNumber());
+        }
+    }
+    CHECK (noteOns > 0);
+    CHECK (activeOns.empty());
+}
+
 } // namespace
 
 int main (int argc, char** argv)
@@ -427,6 +479,7 @@ int main (int argc, char** argv)
     testEditWhilePlaying();
     testStateRoundTrip();
     testMidiFile();
+    testPerformanceAndStrum();
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

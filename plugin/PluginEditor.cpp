@@ -646,7 +646,10 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
       lanes (p),
       dragTile (p),
       gateAttachment (p.apvts, "gate", gate),
-      volumeAttachment (p.apvts, "synthVol", volume)
+      volumeAttachment (p.apvts, "synthVol", volume),
+      strumAttachment (p.apvts, "strum", strum),
+      accentAttachment (p.apvts, "accent", accent),
+      humanizeAttachment (p.apvts, "humanize", humanize)
 {
     setLookAndFeel (&lnf);
 
@@ -770,14 +773,23 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     setupKnob (adventure, adventureLabel, "ADVENTURE");
     setupKnob (syncopation, syncopationLabel, "SYNCOPATION");
     setupKnob (bassMotion, bassMotionLabel, "BASS MOTION");
+    setupKnob (strum, strumLabel, "STRUM");
+    setupKnob (accent, accentLabel, "ACCENT");
+    setupKnob (humanize, humanizeLabel, "HUMANIZE");
     setupKnob (gate, gateLabel, "GATE");
     setupKnob (volume, volumeLabel, "SYNTH VOL");
     adventure.setRange (0.0, 1.0, 0.01);
     syncopation.setRange (0.0, 1.0, 0.01);
     bassMotion.setRange (0.0, 1.0, 0.01);
+    strum.setRange (-1.0, 1.0, 0.01);
+    accent.setRange (0.0, 1.0, 0.01);
+    humanize.setRange (0.0, 1.0, 0.01);
     adventure.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
     syncopation.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
     bassMotion.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
+    strum.setColour (juce::Slider::rotarySliderFillColourId, ui::energy);
+    accent.setColour (juce::Slider::rotarySliderFillColourId, ui::energy);
+    humanize.setColour (juce::Slider::rotarySliderFillColourId, ui::energy);
     gate.setColour (juce::Slider::rotarySliderFillColourId, ui::textDim);
     volume.setColour (juce::Slider::rotarySliderFillColourId, ui::textDim);
 
@@ -800,12 +812,14 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         processor.edit ([v] (cs::Progression& pr, cs::Rng&) { pr.bassMotion = v; }, false);
     };
 
+    refeelButton.setTooltip ("Roll fresh microtiming and velocity jitter (keeps chords)");
+    refeelButton.onClick = [this] { processor.refeel(); };
     rollButton.getProperties().set ("primary", true);
     rollButton.onClick = [this] { processor.edit ([] (cs::Progression& pr, cs::Rng& rng) { cs::roll (pr, rng); }); };
     undoButton.onClick = [this] { processor.undo(); };
     playButton.onClick = [this] { processor.setPreviewPlaying (! processor.isPreviewPlaying()); };
     saveButton.onClick = [this] { saveMidi(); };
-    for (auto* b : { &undoButton, &rollButton, &playButton, &saveButton })
+    for (auto* b : { &undoButton, &refeelButton, &rollButton, &playButton, &saveButton })
         addAndMakeVisible (*b);
     addAndMakeVisible (dragTile);
 
@@ -822,8 +836,8 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     refresh();
 
     setResizable (true, true);
-    setResizeLimits (860, 540, 1800, 1100);
-    setSize (980, 620);
+    setResizeLimits (900, 540, 1800, 1100);
+    setSize (1040, 620);
     startTimerHz (30);
 }
 
@@ -973,24 +987,25 @@ void ChordSlotsEditor::resized()
     auto footer = area.removeFromBottom (78);
     area.removeFromBottom (14);
 
-    auto locks = footer.removeFromLeft (300);
+    auto locks = footer.removeFromLeft (240);
     lockCaption.setBounds (locks.removeFromTop (16));
     locks.removeFromTop (4);
     locks = locks.removeFromTop (34);
-    const int lw = (locks.getWidth() - 18) / 4;
+    const int lw = (locks.getWidth() - 15) / 4;
     for (auto* b : { &lockRhythm, &lockRoots, &lockColors, &lockVoicing })
     {
         b->setBounds (locks.removeFromLeft (lw));
-        locks.removeFromLeft (6);
+        locks.removeFromLeft (5);
     }
-    footer.removeFromLeft (14);
+    footer.removeFromLeft (10);
 
-    auto right = footer.removeFromRight (juce::jmin (430, footer.getWidth() - 4 * 66));
+    auto right = footer.removeFromRight (juce::jmin (360, footer.getWidth() - 8 * 48));
     auto knobs = footer;
-    const int kw = knobs.getWidth() / 5;
+    const int kw = knobs.getWidth() / 8;
     struct Knob { juce::Slider* s; juce::Label* l; };
     for (const Knob& k : { Knob { &adventure, &adventureLabel }, Knob { &syncopation, &syncopationLabel },
                            Knob { &bassMotion, &bassMotionLabel },
+                           Knob { &strum, &strumLabel }, Knob { &accent, &accentLabel }, Knob { &humanize, &humanizeLabel },
                            Knob { &gate, &gateLabel }, Knob { &volume, &volumeLabel } })
     {
         auto cell = knobs.removeFromLeft (kw);
@@ -998,16 +1013,19 @@ void ChordSlotsEditor::resized()
         k.s->setBounds (cell.reduced (2, 0));
     }
 
-    right.removeFromLeft (10);
-    dragTile.setBounds (right.removeFromRight (92).reduced (0, 4));
-    right.removeFromRight (8);
-    auto small = right.removeFromRight (84).reduced (0, 4);
-    saveButton.setBounds (small.removeFromBottom (small.getHeight() / 2).withTrimmedTop (3));
-    playButton.setBounds (small.withTrimmedBottom (3));
-    right.removeFromRight (8);
-    undoButton.setBounds (right.removeFromLeft (62).reduced (0, 18));
     right.removeFromLeft (8);
-    rollButton.setBounds (right.reduced (0, 4));
+    dragTile.setBounds (right.removeFromRight (86).reduced (0, 4));
+    right.removeFromRight (6);
+    auto small = right.removeFromRight (76).reduced (0, 4);
+    saveButton.setBounds (small.removeFromBottom (small.getHeight() / 2).withTrimmedTop (2));
+    playButton.setBounds (small.withTrimmedBottom (2));
+    right.removeFromRight (6);
+    auto actions = right.removeFromLeft (116).reduced (0, 4);
+    auto topActions = actions.removeFromTop (actions.getHeight() / 2).withTrimmedBottom (2);
+    auto botActions = actions.withTrimmedTop (2);
+    undoButton.setBounds (topActions.removeFromLeft (topActions.getWidth() / 2 - 2));
+    refeelButton.setBounds (topActions.withTrimmedLeft (2));
+    rollButton.setBounds (botActions);
 
     // Main: slots on top, target lanes below, sharing the same time axis
     timeline.setBounds (area.removeFromTop (juce::jlimit (120, 190, area.getHeight() * 2 / 5)));

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Metrics.h"
+#include "Performance.h"
 
 #include <random>
 
@@ -1024,6 +1025,8 @@ struct PlaySlot
     int start = 0, end = 0;
     int n = 0;
     int notes[kMaxNotes] = {};
+    int velocities[kMaxNotes] = {};
+    float offsetMs[kMaxNotes] = {};
     int velocity = 96;
 };
 
@@ -1042,21 +1045,42 @@ struct PlayData
     }
 };
 
-inline PlayData toPlayData (const Progression& p)
+inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf = {}, double bpm = 120.0, int pass = 0)
 {
     PlayData d;
     d.lengthSteps = p.lengthSteps();
     d.numSlots = p.numSlots;
+    const double msPerStep = 60000.0 / (std::max (20.0, bpm) * (double) kStepsPerBar);
+
     for (int i = 0; i < p.numSlots; ++i)
     {
         const Slot& s = p.slots[(size_t) i];
         PlaySlot& o = d.slots[i];
         o.start = s.start;
         o.end = p.slotEnd (i);
-        o.n = s.voicing.n;
-        for (int j = 0; j < s.voicing.n; ++j)
-            o.notes[j] = s.voicing.notes[(size_t) j];
         o.velocity = s.voicing.velocity;
+
+        PerfInput in;
+        in.n = std::min (s.voicing.n, kPerfMaxNotes);
+        in.bassCount = 0;
+        for (int j = 0; j < in.n; ++j)
+        {
+            in.pitch[(size_t) j] = s.voicing.notes[(size_t) j];
+            in.velocity[(size_t) j] = s.voicing.velocity;
+            if (s.voicing.notes[(size_t) j] < kUpperFloor)
+                in.bassCount++;
+        }
+
+        const double slotLenMs = (double) (o.end - o.start) * msPerStep;
+        const PerfOutput out = applyPerformance (in, perf, slotLenMs, i, pass);
+
+        o.n = std::min (out.n, kMaxNotes);
+        for (int j = 0; j < o.n; ++j)
+        {
+            o.notes[j] = out.notes[(size_t) j].pitch;
+            o.velocities[j] = out.notes[(size_t) j].velocity;
+            o.offsetMs[j] = out.notes[(size_t) j].offsetMs;
+        }
     }
     return d;
 }

@@ -27,6 +27,10 @@ add_executable(chordslots_core_tests tests/core_tests.cpp)
 target_link_libraries(chordslots_core_tests PRIVATE chordslots_core)
 add_test(NAME core COMMAND chordslots_core_tests)
 
+add_executable(chordslots_performance_tests tests/performance_tests.cpp)
+target_link_libraries(chordslots_performance_tests PRIVATE chordslots_core)
+add_test(NAME performance COMMAND chordslots_performance_tests)
+
 if(NOT CHORDSLOTS_BUILD_PLUGIN)
     return()
 endif()

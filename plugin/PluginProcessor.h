@@ -10,11 +10,15 @@
 #include <atomic>
 
 class ChordSlotsProcessor final : public juce::AudioProcessor,
-                                  public juce::ChangeBroadcaster
+                                  public juce::ChangeBroadcaster,
+                                  private juce::AudioProcessorValueTreeState::Listener
 {
 public:
     ChordSlotsProcessor();
-    ~ChordSlotsProcessor() override = default;
+    ~ChordSlotsProcessor() override;
+
+    cs::PerformanceParams getPerformanceParams() const noexcept;
+    void refeel() noexcept;
 
     //==============================================================================
     // Model access (any non-audio thread). Listeners get a change message after
@@ -121,9 +125,26 @@ private:
     std::atomic<double> uiStep { -1.0 };
     std::atomic<double> lastBpm { 120.0 };
 
+    void parameterChanged (const juce::String&, float) override;
+
+    struct PendingNote
+    {
+        int note = 0;
+        int velocity = 0;
+        int samplesUntilOn = 0;
+        int slot = -1;
+    };
+    static constexpr int kMaxPendingNotes = 32;
+    PendingNote pendingNotes[kMaxPendingNotes] = {};
+    int pendingCount = 0;
+
     std::atomic<float>* gateParam = nullptr;
     std::atomic<float>* synthOnParam = nullptr;
     std::atomic<float>* synthVolParam = nullptr;
+    std::atomic<float>* strumParam = nullptr;
+    std::atomic<float>* accentParam = nullptr;
+    std::atomic<float>* humanizeParam = nullptr;
+    std::atomic<uint32_t> perfSeed { 1 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordSlotsProcessor)
 };

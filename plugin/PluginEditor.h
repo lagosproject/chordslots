@@ -145,13 +145,15 @@ private:
 
     juce::TextButton lockRhythm { "Rhythm" }, lockRoots { "Roots" }, lockColors { "Colors" }, lockVoicing { "Voicing" };
     juce::Label lockCaption;
-    juce::Slider adventure, syncopation, bassMotion, gate, volume;
-    juce::Label adventureLabel, syncopationLabel, bassMotionLabel, gateLabel, volumeLabel;
+    juce::Slider adventure, syncopation, bassMotion, strum, accent, humanize, gate, volume;
+    juce::Label adventureLabel, syncopationLabel, bassMotionLabel, strumLabel, accentLabel, humanizeLabel, gateLabel, volumeLabel;
+    juce::TextButton refeelButton { "Re-Feel" };
     juce::TextButton undoButton { "Undo" }, rollButton { "ROLL" }, playButton { "Play" }, saveButton { "Save .mid" };
     MidiDragTile dragTile;
     juce::Label hint;
 
-    juce::AudioProcessorValueTreeState::SliderAttachment gateAttachment, volumeAttachment;
+    juce::AudioProcessorValueTreeState::SliderAttachment gateAttachment, volumeAttachment,
+        strumAttachment, accentAttachment, humanizeAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
     int keyNamesScale = -1;
     bool refreshing = false;
