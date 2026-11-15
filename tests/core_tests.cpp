@@ -1020,10 +1020,74 @@ static void testSection8Harmonics()
         p.adventure = 0.3f;
         roll (p, rng);
 
-        // First half 0..2 should match second half 4..6
-        for (int i = 0; i < 3; ++i)
+        // First half 0..2 should match second half 4..6 (h..n-2 equal 0..h-2)
+        const int h = p.numSlots / 2;
+        for (int i = 0; i < h - 1; ++i)
         {
-            CHECK (p.slots[(size_t) i].chord == p.slots[(size_t) (i + 4)].chord);
+            CHECK (p.slots[(size_t) i].chord == p.slots[(size_t) (i + h)].chord);
+        }
+
+        // P1.6: Over 200 seeds, mean Fit with AA' sampled as tied variables is >= old post-hoc mean Fit
+        double sumFitOld = 0.0;
+        double sumFitNew = 0.0;
+        for (int seed = 0; seed < 200; ++seed)
+        {
+            Progression pOld;
+            pOld.tonic = seed % 12;
+            pOld.scale = (seed / 12) % 7;
+            pOld.bars = 4;
+            pOld.numSlots = 8;
+            pOld.adventure = 0.35f;
+            layoutEven (pOld);
+
+            Progression pNew = pOld;
+            pNew.phraseRepeat = true;
+
+            // Old post-hoc behavior: sample freely, then copy first half to second half
+            pOld.phraseRepeat = false;
+            Rng rOld ((unsigned) (seed * 101 + 1));
+            generateChords (pOld, rOld);
+            for (int i = h; i < pOld.numSlots - 1; ++i)
+                pOld.slots[(size_t) i].chord = pOld.slots[(size_t) (i - h)].chord;
+            voiceAll (pOld, rOld, nullptr);
+            updateActuals (pOld);
+
+            // New behavior: tied sampling inside generateChords
+            Rng rNew ((unsigned) (seed * 101 + 1));
+            generateChords (pNew, rNew);
+            voiceAll (pNew, rNew, nullptr);
+            updateActuals (pNew);
+
+            // Check slots h..n-2 equal 0..h-2
+            for (int i = 0; i < h - 1; ++i)
+            {
+                CHECK (pNew.slots[(size_t) i].chord == pNew.slots[(size_t) (i + h)].chord);
+            }
+
+            sumFitOld += fitScore (pOld);
+            sumFitNew += fitScore (pNew);
+        }
+
+        const double meanFitOld = sumFitOld / 200.0;
+        const double meanFitNew = sumFitNew / 200.0;
+        CHECK (meanFitNew >= meanFitOld);
+
+        // A locked slot in the second half is never overwritten
+        {
+            Progression pLock;
+            pLock.tonic = 0;
+            pLock.scale = 0;
+            pLock.bars = 4;
+            pLock.numSlots = 4;
+            pLock.phraseRepeat = true;
+            layoutEven (pLock);
+            pLock.slots[2].locked = true;
+            const Chord lockedChord { 1, 0, 0 }; // Db maj
+            pLock.slots[2].chord = lockedChord;
+
+            Rng rLock (42);
+            generateChords (pLock, rLock);
+            CHECK (pLock.slots[2].chord == lockedChord);
         }
     }
 

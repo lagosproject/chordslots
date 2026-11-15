@@ -452,6 +452,23 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
         if (! slotChordIsFixed (p, i))
             pools[(size_t) i] = slotCandidates (p, i, all);
 
+    const bool aa = p.phraseRepeat && n >= 4 && (n % 2 == 0);
+    const int h = n / 2;
+
+    auto isTied = [&] (int j) -> bool {
+        if (! aa || j < 0 || j >= h - 1)
+            return false;
+        const int j2 = j + h;
+        if (slotChordIsFixed (p, j) || slotChordIsFixed (p, j2))
+            return false;
+        return true;
+    };
+
+    std::vector<bool> assigned ((size_t) n, false);
+    for (int i = 0; i < n; ++i)
+        if (slotChordIsFixed (p, i))
+            assigned[(size_t) i] = true;
+
     std::vector<float> costs;
     for (int sweep = 0; sweep < 4; ++sweep)
     {
@@ -460,36 +477,64 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
             if (slotChordIsFixed (p, i))
                 continue;
 
+            // If this slot is the second half of a tied pair, it was already sampled with i - h
+            if (aa && i >= h && i < n - 1 && isTied (i - h))
+                continue;
+
+            const bool tied = isTied (i);
+            const int i2 = i + h;
+
             const auto& pool = pools[(size_t) i];
+            if (pool.empty())
+                continue;
+
             const int pi = (i + n - 1) % n, ni = (i + 1) % n, p2i = (i + n - 2) % n;
-            // On the first sweep, slots to the right have not been chosen yet
-            // (unless they are fixed), so they should not influence the pick.
-            const bool usePrev = n > 1 && (sweep > 0 || pi < i || slotChordIsFixed (p, pi));
-            const bool useNext = n > 1 && (sweep > 0 || slotChordIsFixed (p, ni));
-            const bool usePrev2 = n > 2 && (sweep > 0 || p2i < i || slotChordIsFixed (p, p2i));
+            const bool usePrev = n > 1 && (sweep > 0 || assigned[(size_t) pi]);
+            const bool useNext = n > 1 && (sweep > 0 || assigned[(size_t) ni]);
+            const bool usePrev2 = n > 2 && (sweep > 0 || assigned[(size_t) p2i]);
             const Chord* prev = usePrev ? &p.slots[(size_t) pi].chord : nullptr;
             const Chord* next = useNext ? &p.slots[(size_t) ni].chord : nullptr;
             const Chord* prev2 = usePrev2 ? &p.slots[(size_t) p2i].chord : nullptr;
 
-            costs.resize (pool.size());
-            for (size_t k = 0; k < pool.size(); ++k)
-                costs[k] = slotCost (p, i, pool[k], prev, next, prev2);
+            if (tied)
+            {
+                const int pi2 = (i2 + n - 1) % n, ni2 = (i2 + 1) % n, p2i2 = (i2 + n - 2) % n;
+                const bool usePrevTied = n > 1 && (sweep > 0 || assigned[(size_t) pi2]);
+                const bool useNextTied = n > 1 && (sweep > 0 || assigned[(size_t) ni2]);
+                const bool usePrev2Tied = n > 2 && (sweep > 0 || assigned[(size_t) p2i2]);
+                const Chord* prevTied = usePrevTied ? &p.slots[(size_t) pi2].chord : nullptr;
+                const Chord* nextTied = useNextTied ? &p.slots[(size_t) ni2].chord : nullptr;
+                const Chord* prev2Tied = usePrev2Tied ? &p.slots[(size_t) p2i2].chord : nullptr;
 
-            const int pick = sampleSoftmin (costs, temperature, rng);
-            if (pick >= 0)
-                p.slots[(size_t) i].chord = pool[(size_t) pick].chord;
-        }
-    }
+                costs.resize (pool.size());
+                for (size_t k = 0; k < pool.size(); ++k)
+                {
+                    costs[k] = slotCost (p, i, pool[k], prev, next, prev2)
+                             + slotCost (p, i2, pool[k], prevTied, nextTied, prev2Tied);
+                }
 
-    // Phrase repeat structure (AA'): if enabled and slot count is even (>= 4),
-    // phrase A (first half) repeats in second half with variation on final cadence slot.
-    if (p.phraseRepeat && n >= 4 && (n % 2 == 0))
-    {
-        const int h = n / 2;
-        for (int i = h; i < n - 1; ++i)
-        {
-            if (! slotChordIsFixed (p, i))
-                p.slots[(size_t) i].chord = p.slots[(size_t) (i - h)].chord;
+                const int pick = sampleSoftmin (costs, temperature, rng);
+                if (pick >= 0)
+                {
+                    p.slots[(size_t) i].chord = pool[(size_t) pick].chord;
+                    p.slots[(size_t) i2].chord = pool[(size_t) pick].chord;
+                    assigned[(size_t) i] = true;
+                    assigned[(size_t) i2] = true;
+                }
+            }
+            else
+            {
+                costs.resize (pool.size());
+                for (size_t k = 0; k < pool.size(); ++k)
+                    costs[k] = slotCost (p, i, pool[k], prev, next, prev2);
+
+                const int pick = sampleSoftmin (costs, temperature, rng);
+                if (pick >= 0)
+                {
+                    p.slots[(size_t) i].chord = pool[(size_t) pick].chord;
+                    assigned[(size_t) i] = true;
+                }
+            }
         }
     }
 }
