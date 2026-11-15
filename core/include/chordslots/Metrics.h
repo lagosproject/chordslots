@@ -247,7 +247,9 @@ inline float tensionOf (Chord c, int tonic, int scaleIdx)
     const float diss = typeDissonance (c.type);
     const float dist = norm01 ((float) tonalDistanceRaw (c, tonic, scaleIdx), Calibration::tonalLo, Calibration::tonalHi);
     const Function f = functionOf (c, tonic);
-    const float func = f == Function::tonic ? 0.0f : (f == Function::subdominant ? 0.4f : 1.0f);
+    const int deg = mod12 (c.root - tonic);
+    const float func = (deg == 10) ? (scaleHasMinorThird (scaleIdx) ? 0.7f : 0.4f)
+                                   : (f == Function::tonic ? 0.0f : (f == Function::subdominant ? 0.4f : 1.0f));
     return clamp01 (0.45f * diss + 0.35f * dist + 0.20f * func);
 }
 

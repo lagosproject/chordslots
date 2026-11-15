@@ -62,6 +62,23 @@ static void testMetricOrdering()
     CHECK (T (ch (7, "")) < T (ch (7, "7")));
     CHECK (T (ch (0, "")) < T (ch (11, "dim")));
 
+    // P1.3: bVII tension functional weight depends on the scale's third
+    // Major scale (C major, scale 0): degree 10 (Bb) has subdominant functional weight 0.4
+    const Chord cbVII_c = ch (10, ""); // Bb in C
+    const float diss_bVII = typeDissonance (cbVII_c.type);
+    const float dist_bVII_maj = norm01 ((float) tonalDistanceRaw (cbVII_c, 0, 0), Calibration::tonalLo, Calibration::tonalHi);
+    const float expectedT_bVII_maj = clamp01 (0.45f * diss_bVII + 0.35f * dist_bVII_maj + 0.20f * 0.4f);
+    CHECK (std::abs (tensionOf (cbVII_c, 0, 0) - expectedT_bVII_maj) < 1.0e-5f);
+    // Under old dominant weight (1.0), it was +0.12 higher
+    CHECK (tensionOf (cbVII_c, 0, 0) < clamp01 (0.45f * diss_bVII + 0.35f * dist_bVII_maj + 0.20f * 1.0f) - 0.10f);
+
+    // Minor scale (C minor, scale 1): degree 10 (Bb) has weight 0.7
+    const float dist_bVII_min = norm01 ((float) tonalDistanceRaw (cbVII_c, 0, 1), Calibration::tonalLo, Calibration::tonalHi);
+    const float expectedT_bVII_min = clamp01 (0.45f * diss_bVII + 0.35f * dist_bVII_min + 0.20f * 0.7f);
+    CHECK (std::abs (tensionOf (cbVII_c, 0, 1) - expectedT_bVII_min) < 1.0e-5f);
+    // Under old dominant weight (1.0), it was +0.06 higher
+    CHECK (tensionOf (cbVII_c, 0, 1) < clamp01 (0.45f * diss_bVII + 0.35f * dist_bVII_min + 0.20f * 1.0f) - 0.05f);
+
     for (int sc = 0; sc < numScales(); ++sc)
         for (const auto& c : buildCandidates (3, sc, 1.0f))
         {
