@@ -152,61 +152,133 @@
 
 ---
 
-### Section 8: Interactive Targeted Randomization, Advanced Substitutions & Producer Workflow (Future Task - Proposals)
-* **Goal**: Provide surgical, controlled single-parameter randomization, contextual chord substitutions with audition-in-context, voice-leading optimization, and high-impact producer workflow tools.
-* **Proposals & Roadmap Items (To be discussed in detail)**:
+### Section 8: Interactive Targeted Randomization, Advanced Substitutions & Producer Workflow (Specification & Implementation Plan)
 
-#### 1. Targeted Parameter Randomization (Refined)
-- **Hover Dice & Function-Preserving Mode**:
-  - Selecting/hovering a specific parameter (bass note/inversion, root pitch class, voicing extension, or cut position) reveals a dedicated dice icon to roll *only that single isolated element*.
-  - **Alt-Click (Preserve Function)**: Randomizes within the same harmonic function (e.g. tonic remains tonic function, dominant stays dominant).
-  - **Candidate Carousel**: Clicking cycles through the top 3–5 next-best candidates with single-step undo history rather than pure slot-machine randomness.
-  - Fully respects active locks (Rhythm, Roots, Colors, Voicing).
+* **Goal**: Deliver a comprehensive producer workflow upgrade: surgical parameter control via rich Timeline Cards and a dynamic Context Bar, in-context chord substitutions, phrase structure & anti-oscillation harmonic intelligence, a mathematically robust voice-leading engine that preserves Fit score, data-driven 24-step comping rhythms, MIDI-to-curve extraction, keyswitches, and a modularized, HiDPI-ready UI layout.
+* **Core Philosophy**: Protect and showcase ChordSlots' true differentiators—**target curves and measured perceptual metrics**—while delivering table-stakes workflow tools (voice leading, chord suggestions, audition in context) with zero audio-thread allocations and strict determinism.
 
-#### 2. Contextual Chord Substitutions with $\Delta$-Metrics & Audition-in-Context
-- **Comprehensive $\Delta$-Metrics + Absolute & Fit**:
-  - Displays relative deltas alongside absolute values: $\Delta \text{Energy}$, $\Delta \text{Brightness}$, $\Delta \text{Tension}$, and critical $\Delta \text{Fit Score}$ (indicates whether substitution moves closer to or further from drawn curve).
-- **Multi-Angle Sorting**:
-  - Sort toggles: *Target Curve Fit* (default), *Smallest Metric Delta*, and *Most Similar Voice Leading*.
-- **Audition-on-Hover in Context**:
-  - Hovering a substitution candidate plays the transition in musical context ($C_{\text{prev}} \to C_{\text{candidate}} \to C_{\text{next}}$) so musicians hear the motion rather than an isolated chord.
-- **Functional Substitution Labels**:
-  - Labels candidate chords by theoretical function: *Relative*, *Tritone Substitution*, *Secondary Dominant*, *Modal Interchange (Borrowed)*, *Passing Diminished*.
+---
 
-#### 3. Upper-Voice Voice-Leading Optimization Engine
-- **Voice Leading Knob (Smooth $\leftrightarrow$ Free)**:
-  - Minimizes upper-voice (soprano/alto/tenor) displacement across slot boundaries, prioritizing common-tone pivots and stepwise motion to eliminate unnatural register jumps.
+#### 1. Grounded UI Audit & Vertical Space Rebalance (Measured from Actual Snapshot at 1040×620)
 
-#### 4. Song Mode & Labeled Sections
-- **Arrangement Sequencing**:
-  - Labeled variations (`Verse`, `Chorus`, `Bridge`, `Outro`).
-  - Song Mode timeline sequencing (e.g. Verse $\to$ Verse $\to$ Chorus $\to$ Verse $\to$ Chorus $\to$ Bridge $\to$ Chorus).
-  - Full-song or per-section MIDI drag export.
+* **Current Bottlenecks & Measurement Corrections**:
+  - **Header Truncation at Default Size**: `BARS`, `METER`, and `SLOTS` show only "…" ellipsis. `MAP` shows "Wh…" and `MOOD` label is truncated. Moving `TRIGGER` and `MAP` into an Options/Input popover frees ~190px of header width.
+  - **Footer Squeeze**: Footer controls currently get only ~9% of window height (~58px), compressing knobs to 32px with zero space for readouts, and cutting off labels ("Rhyt…", "Voici…", "SYNCOPAT…", "BASS MOT…", "SYNTH V…", "Save…").
+  - **Real Height Distribution**: Lanes occupy ~36% (~235px), Timeline cards occupy ~22% (~145px), Header is ~68px, and Footer is ~58px.
+  - **Timeline Cards Under-utilized**: Cards are ~145px tall and mostly empty space (large chord name + tiny numeral). Space already exists on the cards for chord tones, bass note/inversion, a lock icon, and an options button ("⋯").
+  - **Lanes Editability**: Keep 3 distinct lanes (do not collapse into a single overlay lane, which breaks per-slot bar dragging), but compress each lane to ~55px (~165px total).
 
-#### 5. Comping Rhythm & Performance Feel Library
-- **Expanded 24-Step Grid Grooves**:
-  - Performance comping patterns beyond uniform strum (e.g. Piano Ballad, 80s Synth Pulse, Guitar Strum, Trap Stabs) integrated into the Groove panel.
+* **Proposed Vertical Budget (at default ~650px height)**:
+  | Area | Current Height | Proposed Height | Musical / UX Role |
+  |---|---|---|---|
+  | **Header** | ~68px | ~68px | Key, Scale, Bars, Meter, Slots, Snap, Mood/Style, Variations (enlarged to 28px) |
+  | **Timeline Cards** | ~145px | ~135px | Rich cards: Chord, Numeral, Tones (e.g. "B3 D#4 F#4 B4"), Bass, Lock glyph, "⋯" button |
+  | **Lane Toolbar** | 0px | ~22px | Mood ▾ · Style ▾ · Shape ▾ · Reset · Freehand paint tools |
+  | **Lanes** | ~235px | ~165px (3×55px) | Brightness, Tension, Energy target bars (direct per-slot drag + freehand) |
+  | **Footer Panels** | ~58px | ~100px | Balanced 3 panels, larger 42px knobs with permanent numeric readouts |
+  | **Context / Hint Bar** | ~25px | ~30px | Selected slot inspector (chord, bass, safe melody notes, targeted rolls) or global hints |
 
-#### 6. "Analyze This" MIDI-to-Curve & Shape Stamps
-- **Curve Extraction from MIDI**:
-  - Drag an external MIDI clip onto ChordSlots to compute and display its Brightness, Tension, and Energy curves as target curves.
-- **Shape Stamps**:
-  - Pre-drawn curve templates (Rise, Drop, Arch, Verse $\to$ Build $\to$ Drop).
+---
 
-#### 7. Melody-Safe-Notes Strip
-- Visual strip below timeline highlighting scale degrees and safe melody notes for the active slot chord.
+#### 2. Section 7 Harmonic Enhancements (Corpus, Structure & Anti-Oscillation)
 
-#### 8. Harmonic Modulation & Pivot Passing
-- Relative major/minor pivots and whole-tone lifts on final loop pass.
+Analysis of sample progressions (e.g., $vi5 - I - IV - V - IV - V - Imaj7 - V7$) reveals crucial improvements to the generative prior:
+1. **A-B-A Anti-Oscillation Penalty**:
+   - Pure bigram transition matrices evaluate each step independently, allowing unnatural alternating ping-pongs across multiple bars ($IV \to V \to IV \to V$).
+   - Add an $A \to B \to A$ penalty in `transitionCost()` that adds a cost penalty when returning to the chord 2 slots back, scaled inversely with `ADVENTURE`.
+2. **Phrase-Structure Generation ($A A'$ Option)**:
+   - Provide an optional 4-slot or 2-bar phrase repetition mode where slots 0–3 define phrase $A$, and slots 4–7 repeat phrase $A$ with variation on the cadence slot ($A A'$). This directly mirrors authentic pop, rock, and EDM songwriting.
+3. **Power Chord Roman Numeral & Quality Mapping**:
+   - Diatonic fifth chords (e.g. $G\#5$ in $B$ Major) must reflect scale context: use lowercase roman numerals ($vi5$) when the scale's third is minor, and infer quality class from scale membership for corpus lookups.
+4. **Style Selector**:
+   - Expose explicit style priors (`PopRock`, `MinorLoops`, `SoulRnb`, `Free`) in the lane toolbar next to Mood.
 
-#### 9. Preview Sound Models
-- Lightweight, sample-free Rhodes / Electric Piano and Felt Piano models.
+---
 
-#### 10. Workflow & Quality of Life
-- Keyboard shortcuts (`Space` = Play/Stop, `Cmd+Z` / `Ctrl+Z` = Undo, `1`–`4` = Variations).
-- Single-slot freeze / lock toggle.
+#### 3. Revised 9-Stage Implementation Sequence
 
-*(Deferred for future evaluation: MPE output, MIDI 2.0, and lasso multi-select).*
+##### Stage 1: P0 UI Fixes, Vertical Rebalance & Mechanical File Split
+* Split monolithic `PluginEditor.cpp` (1,355 lines) into `plugin/ui/` (`LookAndFeel`, `HeaderBar`, `TimelineView`, `LanesView`, `ControlPanels`, `ContextBar`).
+* Widen BARS, METER, and SLOTS; move TRIGGER and MAP into an Input/Options popover.
+* Widen footer to ~100px; add permanent numeric readouts under all 8 rotary sliders.
+* Enlarge Variation buttons A–D to 28px; make Follow a clear toggle button.
+* Guard continuously with `./build/chordslots_plugin_tests --snapshot`.
+
+##### Stage 2: Per-Slot Pin, Rich Timeline Cards & Context Bar
+* **Rich Cards**: Render chord tones, bass note, lock icon, and "⋯" options button directly on timeline cards. Add tooltips/legend explaining Brightness card fill and Tension bottom red strip.
+* **Per-Slot Pin**: Make slot locking a first-class control (click lock glyph or press `L`). Gibbs sampling respects locked slots as clamped variables.
+* **Context Bar**: Displays selected slot details (chord tones, safe melody notes, targeted reroll buttons: *Roll Root*, *Roll Color*, *Roll Bass*). Falls back to hints when no slot is selected.
+
+##### Stage 3: `ChordPickerOverlay` with In-Context Audition
+* Custom in-editor overlay replacing native popup menu.
+* In-context cadence audition ($C_{\text{prev}} \to C_{\text{candidate}} \to C_{\text{next}}$) running through a dedicated lock-free preview queue in `PluginProcessor` (isolated from live MIDI trigger voices and host export).
+* Categorized function tags (*Relative*, *Tritone*, *Modal Interchange*, *Secondary Dominant*) and $\Delta\text{Fit}$ badges.
+
+##### Stage 4: Harmonic Structure (Anti-Oscillation & Phrase Repeat)
+* Implement A-B-A anti-oscillation penalty in `Generator.h`.
+* Implement optional $A A'$ phrase-structure generation.
+* Fix Roman numeral casing for power chords based on scale degree.
+
+##### Stage 5: Upper-Voice Voice-Leading Optimization Engine (in `Generator.h`)
+* Implement optimal bipartite matching across varying voice counts ($N \le \text{kMaxNotes} = 8$), separating bass motion on Channel 2 from upper voices on Channel 1.
+* Soft cost for soprano displacement ($\le 2$ semitones preferred).
+* Metric-bounded re-voicing to guarantee that Fit score does not regress. Governed by a `VOICE LEADING` knob (`Smooth` $\leftrightarrow$ `Free`).
+
+##### Stage 6: Data-Driven Comping Rhythm Engine (24-Step Grid)
+* Data-driven step masks with per-hit velocity and gate defined per meter (4/4, 3/4, 6/8).
+* Pre-bake comping note events into `PlayData` at publish time; expand `pendingNotes` ring buffer to 64–128 elements to prevent dropouts on dense stabs with strum/humanize.
+* Full parity across preview synth, live MIDI output, drag-and-drop `.mid`, and split-channel bass.
+
+##### Stage 7: Lane Toolbar, Freehand Painting & Harmonic Shape Stamps
+* Lane toolbar: **Mood ▾ · Style ▾ · Shape ▾ · Reset**.
+* Freehand horizontal drag across lane bars to paint continuous target curves.
+* Shape stamps (*Rise*, *Drop*, *Arch*, *Cadence*) that automatically adapt to bar count and meter.
+
+##### Stage 8: MIDI-to-Curves ("Analyze This"), Keyswitches & Markers
+* Drop `.mid` file onto ChordSlots; slice notes by slot/bar and compute Brightness, Tension, and Energy using existing functions in `Metrics.h`.
+* Map low-octave keyswitches ($C_0$–$D\#_0$) for real-time variation switching.
+* 16-entry Roll History popover (storing seed + params) to favorite and recall rolls.
+* Standard MIDI Marker / Text meta events with chord names in exported MIDI.
+
+##### Stage 9: Preview Sound Models & Best-Effort Shortcuts
+* Add lightweight, sample-free Rhodes / Warm EP (2-op FM), Felt Piano, and Analog Pad algorithms in `PreviewSynth.h`.
+* Best-effort keyboard shortcuts when editor has focus (`Cmd/Ctrl+Z`, `1`–`4`, `L`, `Space`).
+* Expose Roll and Variation Select as host-automatable momentary parameters.
+
+---
+
+#### 4. Answers to Open Technical Checks
+
+1. **Is the editor resizable and HiDPI-aware?**
+   - Yes: `setResizable (true, true); setResizeLimits (900, 540, 1800, 1100); setSize (1040, 620);`. JUCE handles HiDPI font and graphics scaling, but current fixed pixel bounds cause label truncation even at the default 1040px width. Moving to proportional flex layout in Stage 1 resolves this permanently.
+2. **What do card fill color and red mini-bar encode?**
+   - **Card Fill Color**: Brightness ($B \in [0, 1]$), mapped via `colourForBrightness()` from dark blue (dark/minor) through purple to warm gold (bright/major).
+   - **Red Mini-Bar at Bottom**: Tension ($T \in [0, 1]$), drawn as `fillRect (r.getX(), r.getBottom() - 4.0f, r.getWidth() * s.tension, 4.0f)`.
+   - Both will receive clear tooltips and visual legend labels in Stage 2.
+3. **Does dragging across lane bars paint multiple slots?**
+   - Yes: `LanesView::applyDrag()` tracks `editedMask |= 1u << slot;` during `mouseDrag()`, allowing horizontal painting across consecutive slots within that lane.
+4. **Was the corpus prior active for the roll in the screenshot?**
+   - Yes: `Generator.h` lines 327–375 invoke the Billboard/RS200 bigram prior via `styleForProgression()`. The alternating $IV \leftrightarrow V \leftrightarrow IV \leftrightarrow V$ pattern demonstrates that bigram models without an A-B-A penalty can get trapped in high-probability two-chord cycles, validating Stage 4's anti-oscillation penalty.
+
+---
+
+#### 5. Test Suite Additions & Verification Standards
+
+1. **Fit-Score Non-Regression Test**: Run 1,000 randomized rolls through the Voice-Leading DP pass across all scales and meters; verify $\text{Fit}_{\text{after}} \ge \text{Fit}_{\text{before}} - 0.02$.
+2. **Comping Note-Event Capacity Test**: Stress-test worst-case comping (1/16T stabs + maximum strum + maximum humanize on 8-note chords) verifying zero dropped notes and zero queue overflow.
+3. **Determinism & Pinning Test**: Verify that a progression with Slot $k$ pinned produces identical chords and voicings across repeated rolls with the same seed.
+4. **Export Parity Test**: Verify bit-level equivalence between live audio-thread MIDI event queues and baked drag-and-drop `.mid` files for comping, split-MIDI, and strum offsets.
+5. **Anti-Oscillation & Structure Test**: Verify that progressions generated with anti-oscillation enabled exhibit zero 3-chord back-and-forth oscillations ($A-B-A-B$).
+
+---
+
+#### 2. Test Suite Additions & Verification Standards
+
+To guarantee mathematical and architectural stability, Section 8 introduces four dedicated test suites:
+1. **Fit-Score Non-Regression Test**: Run 1,000 randomized progressions through the Voice-Leading DP pass across all scales and meters; verify $\text{Fit}_{\text{after}} \ge \text{Fit}_{\text{before}} - 0.02$.
+2. **Comping Note-Event Capacity Test**: Stress-test worst-case comping (e.g. 1/16T stabs + maximum strum + maximum humanize on 8-note chords) verifying zero dropped notes and zero queue overflow.
+3. **Determinism & Pinning Test**: Verify that a progression with Slot $k$ pinned produces identical chords and voicings across repeated rolls with the same seed.
+4. **Export Parity Test**: Verify bit-level equivalence between live audio-thread MIDI event queues and baked drag-and-drop `.mid` files for comping, split-MIDI, and strum offsets.
 
 ---
 
