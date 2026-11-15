@@ -9,7 +9,7 @@ namespace
 constexpr int kMidiChannelChords = 1;
 constexpr int kMidiChannelBass   = 2;
 constexpr int kTicksPerQuarter = 480;
-constexpr int kTicksPerStep = kTicksPerQuarter / 4;
+constexpr int kTicksPerStep = kTicksPerQuarter / cs::kStepsPerQuarter;
 
 juce::ValueTree progressionToTree (const cs::Progression& p)
 {
@@ -17,6 +17,8 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
     t.setProperty ("tonic", p.tonic, nullptr);
     t.setProperty ("scale", p.scale, nullptr);
     t.setProperty ("bars", p.bars, nullptr);
+    t.setProperty ("timeSigNum", p.timeSigNum, nullptr);
+    t.setProperty ("timeSigDen", p.timeSigDen, nullptr);
     t.setProperty ("snap", p.snap, nullptr);
     t.setProperty ("adventure", p.adventure, nullptr);
     t.setProperty ("syncopation", p.syncopation, nullptr);
@@ -61,7 +63,7 @@ int chordTypeFromSuffix (const juce::String& suffix)
 /** Rebuilds a progression from saved state, clamping everything: a session
     file is outside input and must never be able to put the model in a bad
     state. */
-bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p)
+bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p, int stateVersion = 3)
 {
     if (! t.hasType ("Progression") || t.getNumChildren() == 0)
         return false;
@@ -70,8 +72,17 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p)
     p.tonic = cs::mod12 ((int) t.getProperty ("tonic", 9));
     p.scale = juce::jlimit (0, cs::numScales() - 1, (int) t.getProperty ("scale", 1));
     p.bars = juce::jlimit (1, cs::kMaxBars, (int) t.getProperty ("bars", 4));
-    const int snap = (int) t.getProperty ("snap", 2);
-    p.snap = (snap == 1 || snap == 2 || snap == 4) ? snap : 2;
+    p.timeSigNum = juce::jlimit (1, 16, (int) t.getProperty ("timeSigNum", 4));
+    p.timeSigDen = (int) t.getProperty ("timeSigDen", 4) == 8 ? 8 : 4;
+    int snap = (int) t.getProperty ("snap", 12);
+    if (stateVersion < 3)
+    {
+        snap = (snap == 4) ? 24 : ((snap == 2) ? 12 : 6);
+    }
+    const int validSnaps[] = { 24, 16, 12, 8, 6, 4, 3 };
+    if (std::none_of (std::begin (validSnaps), std::end (validSnaps), [snap] (int s) { return s == snap; }))
+        snap = 12;
+    p.snap = snap;
     p.adventure = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("adventure", 0.3f));
     p.syncopation = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("syncopation", 0.3f));
     p.bassMotion = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("bassMotion", 0.0f));
@@ -87,7 +98,10 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p)
     {
         const auto st = t.getChild (i);
         cs::Slot& s = p.slots[(size_t) i];
-        s.start = juce::jlimit (0, p.lengthSteps() - 1, (int) st.getProperty ("start", 0));
+        int rawStart = (int) st.getProperty ("start", 0);
+        if (stateVersion < 3)
+            rawStart *= 6;
+        s.start = juce::jlimit (0, p.lengthSteps() - 1, rawStart);
         s.chord.root = cs::mod12 ((int) st.getProperty ("root", 0));
         s.chord.type = chordTypeFromSuffix (st.getProperty ("type", "").toString());
         s.chord.bassInt = juce::jlimit (0, 11, (int) st.getProperty ("bassInt", 0));
@@ -319,6 +333,14 @@ bool ChordSlotsProcessor::undo()
     return true;
 }
 
+void ChordSlotsProcessor::setMeter (int num, int den)
+{
+    edit ([num, den] (cs::Progression& p, cs::Rng&)
+    {
+        cs::setMeter (p, num, den);
+    });
+}
+
 void ChordSlotsProcessor::copyVariation (int src, int dst)
 {
     if (src < 0 || src >= cs::kNumVariations || dst < 0 || dst >= cs::kNumVariations || src == dst)
@@ -415,6 +437,14 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                 ppq = *q;
                 havePpq = true;
             }
+            if (const auto sig = pos->getTimeSignature())
+            {
+                if (sig->numerator > 0 && sig->denominator > 0)
+                {
+                    hostTimeSigNum.store (sig->numerator);
+                    hostTimeSigDen.store (sig->denominator);
+                }
+            }
         }
     if (! (bpm >= 20.0 && bpm <= 999.0))
         bpm = 120.0;
@@ -426,7 +456,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     const cs::PlayData& play = playBank.variations[activePlayingVariation];
     const double len = (double) juce::jmax (1, play.lengthSteps);
-    const double stepsPerSample = bpm / 60.0 * 4.0 / sampleRate;
+    const double stepsPerSample = (bpm / 60.0) * (double) cs::kStepsPerQuarter / sampleRate;
     const float gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
     const cs::TriggerConfig trigCfg = getTriggerConfig();
     const bool split = isSplitMidi();
@@ -726,7 +756,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
         if (hostPlaying && havePpq)
         {
-            double hostStep = std::fmod (ppq * 4.0, len);
+            double hostStep = std::fmod (ppq * (double) cs::kStepsPerQuarter, len);
             if (hostStep < 0.0)
                 hostStep += len;
 
@@ -954,7 +984,7 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
             // Format 1: Track 0 = Chords (Ch 1), Track 1 = Bass (Ch 2)
             juce::MidiMessageSequence chordsSeq;
             chordsSeq.addEvent (juce::MidiMessage::textMetaEvent (3, "Chords"), 0.0);
-            chordsSeq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4), 0.0);
+            chordsSeq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (p.timeSigNum, p.timeSigDen), 0.0);
             chordsSeq.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / bpm)), 0.0);
 
             juce::MidiMessageSequence bassSeq;
@@ -998,7 +1028,7 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
             // Non-split Format 0 single track
             juce::MidiMessageSequence seq;
             seq.addEvent (juce::MidiMessage::textMetaEvent (3, "ChordSlots"), 0.0);
-            seq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4), 0.0);
+            seq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (p.timeSigNum, p.timeSigDen), 0.0);
             seq.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / bpm)), 0.0);
 
             for (int i = 0; i < playData.numSlots; ++i)
@@ -1026,7 +1056,7 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
     {
         juce::MidiMessageSequence seq;
         seq.addEvent (juce::MidiMessage::textMetaEvent (3, "Chords"), 0.0);
-        seq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4), 0.0);
+        seq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (p.timeSigNum, p.timeSigDen), 0.0);
         seq.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / bpm)), 0.0);
 
         for (int i = 0; i < playData.numSlots; ++i)
@@ -1053,7 +1083,7 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
     {
         juce::MidiMessageSequence seq;
         seq.addEvent (juce::MidiMessage::textMetaEvent (3, "Bass"), 0.0);
-        seq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4), 0.0);
+        seq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (p.timeSigNum, p.timeSigDen), 0.0);
         seq.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / bpm)), 0.0);
 
         for (int i = 0; i < playData.numSlots; ++i)
@@ -1101,7 +1131,7 @@ juce::File ChordSlotsProcessor::writeTempMidiFile (MidiExportMode mode) const
 void ChordSlotsProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::ValueTree root ("ChordSlotsState");
-    root.setProperty ("version", 2, nullptr);
+    root.setProperty ("version", 3, nullptr);
     root.setProperty ("editVariation", editVariation.load(), nullptr);
     root.setProperty ("followPlayback", followPlayback.load(), nullptr);
     root.appendChild (apvts.copyState(), nullptr);
@@ -1146,7 +1176,7 @@ void ChordSlotsProcessor::setStateInformation (const void* data, int size)
                 {
                     const auto pt = container.getChildWithName ("Progression");
                     if (pt.isValid())
-                        progressionFromTree (pt, variations[(size_t) i]);
+                        progressionFromTree (pt, variations[(size_t) i], ver);
                 }
             }
             editVariation.store (juce::jlimit (0, cs::kNumVariations - 1, (int) root.getProperty ("editVariation", 0)));
@@ -1156,7 +1186,7 @@ void ChordSlotsProcessor::setStateInformation (const void* data, int size)
         {
             // Legacy v1 preset migration: single <Progression> child
             cs::Progression legacy;
-            if (progressionFromTree (root.getChildWithName ("Progression"), legacy))
+            if (progressionFromTree (root.getChildWithName ("Progression"), legacy, ver))
             {
                 for (int i = 0; i < cs::kNumVariations; ++i)
                     variations[(size_t) i] = legacy;

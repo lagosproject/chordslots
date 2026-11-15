@@ -12,8 +12,53 @@ namespace cs
 
 constexpr int kMaxSlots = 16;
 constexpr int kMaxNotes = 8;
-constexpr int kStepsPerBar = 16; // 4/4, sixteenth-note resolution
+constexpr int kStepsPerQuarter = 24;
+static_assert (kStepsPerQuarter == 24, "kStepsPerQuarter must be 24");
+constexpr int kStepsPerBar = 4 * kStepsPerQuarter; // 4/4 default: 96 steps
 constexpr int kMaxBars = 8;
+
+struct Meter
+{
+    int num = 4;
+    int den = 4;
+    int stepsPerBar = 96;
+    std::vector<int> beatSteps;     // beat lengths: 4/4 = {24,24,24,24}, 3/4 = {24,24,24}, 6/8 = {36,36}
+    std::vector<int> strongOffsets; // offsets within bar: 4/4 = {0,48}, 3/4 = {0}, 6/8 = {0,36}
+};
+
+inline int stepsPerBar (int num = 4, int den = 4) noexcept
+{
+    if (den <= 0) den = 4;
+    return num * (kStepsPerQuarter * 4) / den;
+}
+
+inline Meter getMeter (int num = 4, int den = 4) noexcept
+{
+    Meter m;
+    m.num = num;
+    m.den = (den == 8) ? 8 : 4;
+    m.stepsPerBar = stepsPerBar (m.num, m.den);
+
+    if (m.num == 3 && m.den == 4)
+    {
+        m.beatSteps = { 24, 24, 24 };
+        m.strongOffsets = { 0 };
+    }
+    else if (m.num == 6 && m.den == 8)
+    {
+        m.beatSteps = { 36, 36 };
+        m.strongOffsets = { 0, 36 };
+    }
+    else
+    {
+        m.num = 4;
+        m.den = 4;
+        m.stepsPerBar = 96;
+        m.beatSteps = { 24, 24, 24, 24 };
+        m.strongOffsets = { 0, 48 };
+    }
+    return m;
+}
 
 using Rng = std::mt19937;
 
@@ -64,8 +109,10 @@ struct Progression
     int tonic = 9; // A
     int scale = 1; // Minor
     int bars = 4;
+    int timeSigNum = 4;
+    int timeSigDen = 4;
     int numSlots = 4;
-    int snap = 2; // cut grid in steps: 4 = 1/4, 2 = 1/8, 1 = 1/16
+    int snap = 12; // cut grid in steps: 24 = 1/4, 16 = 1/4T, 12 = 1/8, 8 = 1/8T, 6 = 1/16, 4 = 1/16T, 3 = 1/32
     float adventure = 0.3f;   // 0 = diatonic triads, 1 = borrowed chords and extensions
     float syncopation = 0.3f; // how irregular randomised cuts are
     float bassMotion = 0.0f;  // 0 = keep root in bass, 1 = smooth walking bass / pedal inversions
@@ -73,9 +120,11 @@ struct Progression
     Locks locks;
     std::array<Slot, kMaxSlots> slots {};
 
-    int lengthSteps() const noexcept { return bars * kStepsPerBar; }
+    Meter meter() const noexcept { return getMeter (timeSigNum, timeSigDen); }
+    int stepsPerBar() const noexcept { return meter().stepsPerBar; }
+    int lengthSteps() const noexcept { return bars * stepsPerBar(); }
     int slotEnd (int i) const noexcept { return i + 1 < numSlots ? slots[(size_t) (i + 1)].start : lengthSteps(); }
-    int maxSlots() const noexcept { return std::min (kMaxSlots, lengthSteps() / snap); }
+    int maxSlots() const noexcept { return std::min (kMaxSlots, lengthSteps() / std::max (1, snap)); }
 };
 
 //==============================================================================
@@ -116,11 +165,35 @@ inline void sanitizeRhythm (Progression& p)
     }
 }
 
+inline void setMeter (Progression& p, int newNum, int newDen)
+{
+    newDen = (newDen == 8) ? 8 : 4;
+    newNum = std::clamp (newNum, 1, 16);
+    if (newNum == p.timeSigNum && newDen == p.timeSigDen)
+        return;
+
+    const int oldBarLen = p.stepsPerBar();
+    p.timeSigNum = newNum;
+    p.timeSigDen = newDen;
+    const int newBarLen = p.stepsPerBar();
+
+    for (int i = 1; i < p.numSlots; ++i)
+    {
+        const int bar = p.slots[(size_t) i].start / oldBarLen;
+        const int offset = p.slots[(size_t) i].start % oldBarLen;
+        const int remappedOffset = std::clamp ((int) std::lround ((double) offset * newBarLen / oldBarLen / p.snap) * p.snap, 0, newBarLen - 1);
+        p.slots[(size_t) i].start = bar * newBarLen + remappedOffset;
+    }
+    sanitizeRhythm (p);
+}
+
 inline void randomizeRhythm (Progression& p, Rng& rng)
 {
     layoutEven (p);
     const int len = p.lengthSteps();
     const int unit = p.snap;
+    const auto m = p.meter();
+    const int barLen = m.stepsPerBar;
 
     for (int i = 1; i < p.numSlots; ++i)
     {
@@ -132,7 +205,23 @@ inline void randomizeRhythm (Progression& p, Rng& rng)
         const int shift = (r < 0.45f ? -1 : r < 0.70f ? 1 : r < 0.85f ? -2 : 2) * unit;
         const int lo = p.slots[(size_t) (i - 1)].start + unit;
         const int hi = (i + 1 < p.numSlots ? p.slots[(size_t) (i + 1)].start : len) - unit;
-        const int s = p.slots[(size_t) i].start + shift;
+        int s = p.slots[(size_t) i].start + shift;
+
+        // Weight towards strong beat positions in the meter
+        if (rand01 (rng) < 0.5f)
+        {
+            const int bar = s / barLen;
+            const int offset = s % barLen;
+            for (int strong : m.strongOffsets)
+            {
+                if (std::abs (offset - strong) <= unit)
+                {
+                    s = bar * barLen + strong;
+                    break;
+                }
+            }
+        }
+
         if (s >= lo && s <= hi)
             p.slots[(size_t) i].start = s;
     }
@@ -1047,6 +1136,7 @@ struct PlaySlot
 struct PlayData
 {
     int lengthSteps = 4 * kStepsPerBar;
+    int stepsPerBar = kStepsPerBar;
     int numSlots = 0;
     PlaySlot slots[kMaxSlots];
 
@@ -1063,8 +1153,10 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
 {
     PlayData d;
     d.lengthSteps = p.lengthSteps();
+    d.stepsPerBar = p.stepsPerBar();
     d.numSlots = p.numSlots;
-    const double msPerStep = 60000.0 / (std::max (20.0, bpm) * (double) kStepsPerBar);
+    const double msPerBeat = 60000.0 / std::max (20.0, bpm);
+    const double msPerStep = msPerBeat / (double) kStepsPerQuarter;
 
     for (int i = 0; i < p.numSlots; ++i)
     {

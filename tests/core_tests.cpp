@@ -149,9 +149,10 @@ static void testLocks()
         // Rhythm lock: cuts survive.
         p = base;
         p.locks.rhythm = true;
-        p.slots[2].start = 37;
+        const int testCut = base.slots[1].start + 24;
+        p.slots[2].start = testCut;
         roll (p, rng);
-        CHECK (p.slots[2].start == 37);
+        CHECK (p.slots[2].start == testCut);
         for (int i = 0; i < p.numSlots; ++i)
             if (i != 2)
                 CHECK (p.slots[(size_t) i].start == base.slots[(size_t) i].start);
@@ -232,8 +233,8 @@ static void testEditing()
     Rng rng (5);
     Progression p = makeDefaultProgression (rng);
 
-    moveCut (p, 1, 3);
-    CHECK (p.slots[1].start == 4 || p.slots[1].start == 2); // snapped to 1/8
+    moveCut (p, 1, 15);
+    CHECK (p.slots[1].start == 12 || p.slots[1].start == 24); // snapped to 1/8 (12 steps)
     moveCut (p, 1, 1000);
     CHECK (p.slots[1].start == p.slots[2].start - 1); // cannot cross the next cut
     moveCut (p, 1, -50);
@@ -245,7 +246,7 @@ static void testEditing()
     setNumSlots (p, 100);
     CHECK (p.numSlots == kMaxSlots && rhythmValid (p));
     setBars (p, 1);
-    CHECK (p.lengthSteps() == 16 && rhythmValid (p) && p.numSlots <= p.maxSlots());
+    CHECK (p.lengthSteps() == 96 && rhythmValid (p) && p.numSlots <= p.maxSlots());
     setBars (p, 8);
     CHECK (rhythmValid (p));
 
@@ -254,7 +255,7 @@ static void testEditing()
         Progression q = makeDefaultProgression (rng);
         const int n0 = q.numSlots;
         const Chord c1 = q.slots[1].chord;
-        CHECK (splitSlot (q, 1, q.slots[1].start + 4));
+        CHECK (splitSlot (q, 1, q.slots[1].start + 24));
         CHECK (q.numSlots == n0 + 1 && rhythmValid (q));
         CHECK (q.slots[1].chord == c1 && q.slots[2].chord == c1);
         CHECK (! splitSlot (q, 1, q.slots[1].start)); // not inside the slot
@@ -430,6 +431,59 @@ static void testBassModel()
     CHECK (foundInversion || p.numSlots > 0);
 }
 
+static void testMeterAndRhythm()
+{
+    // 1. Meter struct and beat groupings
+    const Meter m44 = getMeter (4, 4);
+    CHECK (m44.num == 4 && m44.den == 4 && m44.stepsPerBar == 96);
+    CHECK (m44.beatSteps.size() == 4 && m44.beatSteps[0] == 24);
+    CHECK (m44.strongOffsets.size() == 2 && m44.strongOffsets[0] == 0 && m44.strongOffsets[1] == 48);
+
+    const Meter m34 = getMeter (3, 4);
+    CHECK (m34.num == 3 && m34.den == 4 && m34.stepsPerBar == 72);
+    CHECK (m34.beatSteps.size() == 3 && m34.beatSteps[0] == 24);
+    CHECK (m34.strongOffsets.size() == 1 && m34.strongOffsets[0] == 0);
+
+    const Meter m68 = getMeter (6, 8);
+    CHECK (m68.num == 6 && m68.den == 8 && m68.stepsPerBar == 72);
+    CHECK (m68.beatSteps.size() == 2 && m68.beatSteps[0] == 36 && m68.beatSteps[1] == 36);
+    CHECK (m68.strongOffsets.size() == 2 && m68.strongOffsets[0] == 0 && m68.strongOffsets[1] == 36);
+
+    // 2. Progression meter and setMeter
+    Rng rng (13);
+    Progression p = makeDefaultProgression (rng);
+    CHECK (p.stepsPerBar() == 96);
+    CHECK (p.lengthSteps() == 4 * 96);
+
+    setMeter (p, 3, 4);
+    CHECK (p.timeSigNum == 3 && p.timeSigDen == 4);
+    CHECK (p.stepsPerBar() == 72);
+    CHECK (p.lengthSteps() == 4 * 72);
+    CHECK (rhythmValid (p));
+
+    setMeter (p, 6, 8);
+    CHECK (p.timeSigNum == 6 && p.timeSigDen == 8);
+    CHECK (p.stepsPerBar() == 72);
+    CHECK (p.lengthSteps() == 4 * 72);
+    CHECK (rhythmValid (p));
+
+    // Round-trip back to 4/4
+    setMeter (p, 4, 4);
+    CHECK (p.stepsPerBar() == 96);
+    CHECK (p.lengthSteps() == 4 * 96);
+    CHECK (rhythmValid (p));
+
+    // 3. Roll in 6/8 and 3/4 preserves valid rhythm
+    setMeter (p, 6, 8);
+    p.syncopation = 0.5f;
+    for (int i = 0; i < 20; ++i)
+    {
+        roll (p, rng);
+        CHECK (rhythmValid (p));
+        CHECK (p.lengthSteps() == 4 * 72);
+    }
+}
+
 int main()
 {
     testSpelling();
@@ -439,6 +493,7 @@ int main()
     testLocks();
     testTargetsSteerOutput();
     testEditing();
+    testMeterAndRhythm();
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

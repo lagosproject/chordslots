@@ -65,8 +65,9 @@
 - [x] **Section 3: Incoming MIDI Trigger Mode (Held-stack, Last-note priority, CC64, UI glow)**
 - [x] **Section 4: Split-MIDI Output / Dual-Channel Voicing (Channel 1 Chords, Channel 2 Monophonic Bass)**
 - [x] **Section 5: 4-Variation Bank (A/B/C/D), Follow Playback, and Independent Undo History**
-- [ ] **Section 6: Triplet & Polyrhythmic Grid (Next Priority)**
+- [ ] **Section 6: Meter & Triplet Grid (In Progress)**
 - [ ] **Section 7: Modern Transition Prior / Billboard Corpus Integration**
+- [ ] **Section 8: Interactive Targeted Randomization & Relative Chord Metric Substitutions (Future Task)**
 * **Goal**: Enable musicians to perform chord slots live using a MIDI keyboard or pad controller (e.g. Push, Launchpad, MPC, KeyStep).
 * **Requirements & Invariants**:
   1. **Mapping Modes**:
@@ -111,12 +112,36 @@
 
 ---
 
-### Section 6: Triplet & Polyrhythmic Grid
-* **Goal**: Support 3/4, 6/8, and triplet cut grids.
+### Section 6: Meter & Triplet Grid (Completed)
+* **Goal**: Support 4/4, 3/4, 6/8 meters, 24-step/quarter timebase, and triplet cut grids (1/4T, 1/8T, 1/16T).
+* **Architecture & Invariants**:
+  1. **Timebase Upgrade ($kStepsPerQuarter = 24$)**: Exact integer math across all straight and triplet divisions ($1/4=24, 1/4\text{T}=16, 1/8=12, 1/8\text{T}=8, 1/16=6, 1/16\text{T}=4, 1/32=3$). MIDI ticks per step = $480/24=20$.
+  2. **Compound & Simple Meter Groupings (`Meter`)**: 4/4 = `{24,24,24,24}` (96 steps/bar), 3/4 = `{24,24,24}` (72 steps/bar), 6/8 = `{36,36}` (72 steps/bar compound duple). Strong beat positions bias rhythm generation and roll cuts.
+  3. **Per-Bar Cut Remapping**: `setMeter` preserves each cut's beat offset within its bar, clamping and deduplicating rather than scaling proportionally across the loop length, keeping beat alignment natural. Pushes old state to undo history.
+  4. **Header Controls**: `METER` combo (`4/4`, `3/4`, `6/8`, `Host`) and `CUT GRID` combo (`1/4`, `1/4T`, `1/8`, `1/8T`, `1/16`, `1/16T`, `1/32`).
+  5. **Audio Thread Safety & Host Tracking**: Lock-free atomic host time-signature reporting in `processBlock`. When "Host" is selected, message thread applies meter change on signature change via undoable `setMeter`. Bar start alignment using `ppqPositionOfLastBarStart`.
+  6. **MIDI Export**: Writes `timeSignatureMetaEvent (p.timeSigNum, p.timeSigDen)` in all Format-0 and Format-1 export branches.
+  7. **State Migration**: Seamless v1/v2 $\to$ v3 state migration with $6\times$ step scaling, snap mapping, and fallback defaults.
+
+---
+
+### Section 7: Modern Transition Prior / Billboard Corpus Integration
+* **Goal**: Incorporate data-driven transition probability matrices trained on contemporary songwriting chord movements.
+
+---
+
+### Section 8: Interactive Targeted Randomization & Relative Chord Metric Substitutions (Future Task)
+* **Goal**: Provide surgical, single-parameter randomization and intuitive perceptual feedback when substituting chords.
 * **Requirements**:
-  1. Time signature awareness in header ($4/4$, $3/4$, $6/8$).
-  2. Grid snap options: $1/4$, $1/8$, $1/16$, $1/8\text{T}$, $1/16\text{T}$.
-  3. Grid drawing and cut clamping adapted to fractional step lengths.
+  1. **Targeted Single-Parameter Randomization on Selection**:
+     - Selecting a specific layer or parameter for a slot (e.g. left-selecting a slot's bass note / inversion, root pitch class, voicing extension, or cut position) enables rolling/randomizing *only that isolated parameter* without regenerating or altering any other part of the slot or progression.
+     - For example: if a user likes a chord's harmony but wants to explore basslines, selecting the bass note allows re-rolling only the bass motion/inversion for that slot.
+  2. **Contextual Chord Substitution with $\Delta$-Metrics Comparison**:
+     - When clicking a slot to explore substitute chords (alternatives popup or browser), each candidate chord displays the direct relative delta comparing its measured properties against the currently loaded chord:
+       - $\Delta \text{Energy}$: e.g. `+14% Energy` or `-10% Energy`
+       - $\Delta \text{Brightness}$: e.g. `+8% Brightness` or `-15% Brightness`
+       - $\Delta \text{Tension}$: e.g. `+20% Tension` (more dissonance/friction) or `-12% Tension` (more consonant)
+     - Empowers musicians to immediately predict how a substitution changes the emotional arc of the progression before auditioning.
 
 ---
 

@@ -43,6 +43,12 @@ public:
     void setFollowPlayback (bool follow) noexcept;
 
     void copyVariation (int src, int dst);
+    void setMeter (int num, int den);
+
+    int getHostTimeSigNum() const noexcept { return hostTimeSigNum.load(); }
+    int getHostTimeSigDen() const noexcept { return hostTimeSigDen.load(); }
+    bool isFollowingHostMeter() const noexcept { return followHostMeter.load(); }
+    void setFollowHostMeter (bool follow) noexcept { followHostMeter.store (follow); }
 
     /** Runs fn (Progression&, Rng&) under the model lock, then publishes the
         result to the audio thread. */
@@ -193,6 +199,10 @@ private:
     std::atomic<float>* splitMidiParam = nullptr;
     std::atomic<float>* variationParam = nullptr;
     std::atomic<float>* quantizeSwitchParam = nullptr;
+
+    std::atomic<int> hostTimeSigNum { 4 };
+    std::atomic<int> hostTimeSigDen { 4 };
+    std::atomic<bool> followHostMeter { false };
     std::atomic<uint32_t> perfSeed { 1 };
 
     cs::TriggerEngine triggerEngine;

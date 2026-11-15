@@ -24,13 +24,15 @@ struct FakePlayHead final : juce::AudioPlayHead
         info.setBpm (bpm);
         info.setIsPlaying (playing);
         info.setPpqPosition (ppq);
-        info.setTimeSignature (TimeSignature { 4, 4 });
+        info.setTimeSignature (TimeSignature { timeSigNum, timeSigDen });
         return info;
     }
 
     double bpm = 120.0;
     double ppq = 0.0;
     bool playing = false;
+    int timeSigNum = 4;
+    int timeSigDen = 4;
 };
 
 struct NoteEvent
@@ -144,7 +146,7 @@ struct Host
     bool nonFinite = false;
 };
 
-double samplesPerStep (const Host& h) { return h.sampleRate * 60.0 / h.playHead.bpm / 4.0; }
+double samplesPerStep (const Host& h) { return h.sampleRate * 60.0 / h.playHead.bpm / (double) cs::kStepsPerQuarter; }
 
 void testHostSyncedPlayback()
 {
@@ -154,9 +156,9 @@ void testHostSyncedPlayback()
         p.bars = 2;
         p.numSlots = 4;
         cs::layoutEven (p);
-        p.slots[1].start = 6;  // irregular cuts
-        p.slots[2].start = 16;
-        p.slots[3].start = 27;
+        p.slots[1].start = 36;  // irregular cuts
+        p.slots[2].start = 96;
+        p.slots[3].start = 162;
         p.locks.rhythm = true;
         for (int i = 0; i < p.numSlots; ++i)
             p.slots[(size_t) i].targetE = 1.0f; // densest, loudest voicings
@@ -227,15 +229,15 @@ void testGateAndRelocation()
 
     // Start in the middle of slot 1 but after its gate has closed: silence
     // until the loop wraps to slot 0.
-    h.playHead.ppq = 3.5; // step 14 of 16; slot 1 spans 8..16, gate closes at 12
+    h.playHead.ppq = 3.5; // step 84 of 96; slot 1 spans 48..96, gate closes at 72
     h.playHead.playing = true;
-    h.run ((int) std::ceil (1.0 * sps / h.blockSize));
+    h.run ((int) std::ceil (6.0 * sps / h.blockSize));
     CHECK (h.events.empty());
-    h.run ((int) std::ceil (2.0 * sps / h.blockSize));
+    h.run ((int) std::ceil (10.0 * sps / h.blockSize));
     CHECK (! h.events.empty() && h.events.front().on);
 
     // With gate 0.5 each chord lasts half its slot.
-    h.run ((int) std::ceil (16.0 * sps / h.blockSize));
+    h.run ((int) std::ceil (96.0 * sps / h.blockSize));
     juce::int64 on = -1;
     int measured = 0;
     for (const auto& ev : h.events)
@@ -244,7 +246,7 @@ void testGateAndRelocation()
             on = ev.sample;
         else if (! ev.on && on >= 0)
         {
-            CHECK (std::abs ((double) (ev.sample - on) - 4.0 * sps) <= 2.0);
+            CHECK (std::abs ((double) (ev.sample - on) - 24.0 * sps) <= 2.0);
             on = -1;
             ++measured;
         }
@@ -298,7 +300,7 @@ void testEditWhilePlaying()
             case 0: h.processor.edit ([] (cs::Progression& p, cs::Rng& rng) { cs::roll (p, rng); }); break;
             case 1: h.processor.edit ([&] (cs::Progression& p, cs::Rng& rng) { cs::setNumSlots (p, 1 + random.nextInt (16)); cs::roll (p, rng); }); break;
             case 2: h.processor.edit ([&] (cs::Progression& p, cs::Rng&) { cs::setBars (p, 1 << random.nextInt (4)); }); break;
-            case 3: h.processor.edit ([&] (cs::Progression& p, cs::Rng&) { cs::moveCut (p, 1, random.nextInt (64)); }); break;
+            case 3: h.processor.edit ([&] (cs::Progression& p, cs::Rng&) { cs::moveCut (p, 1, random.nextInt (p.lengthSteps())); }); break;
             default: h.processor.undo(); break;
         }
     }
@@ -396,7 +398,7 @@ void testMidiFile()
         const auto& m = track->getEventPointer (i)->message;
         ons += m.isNoteOn() ? 1 : 0;
         offs += m.isNoteOff() ? 1 : 0;
-        CHECK (m.getTimeStamp() <= (double) p.lengthSteps() * 120.0);
+        CHECK (m.getTimeStamp() <= (double) p.lengthSteps() * 20.0);
     }
     CHECK (ons == expected && offs == expected);
 
@@ -895,6 +897,141 @@ void testVariationBankAndHistory()
     CHECK (h2.processor.getProgression (0).slots[0].chord.root == 5);
 }
 
+void testMeterAndTripletGrid()
+{
+    // 1. Playback in 3/4 meter
+    {
+        Host h (48000.0, 256);
+        h.playHead.timeSigNum = 3;
+        h.playHead.timeSigDen = 4;
+        h.processor.setMeter (3, 4);
+
+        const cs::Progression p = h.processor.getProgression();
+        CHECK (p.timeSigNum == 3 && p.timeSigDen == 4);
+        CHECK (p.stepsPerBar() == 72);
+        CHECK (p.lengthSteps() == 4 * 72);
+
+        h.playHead.playing = true;
+        const double sps = samplesPerStep (h);
+        const int blocks = (int) std::ceil (2 * p.lengthSteps() * sps / h.blockSize);
+        h.run (blocks);
+        CHECK (! h.events.empty());
+        h.playHead.playing = false;
+        h.run (8);
+        CHECK (h.heldAfterReplay() == 0);
+    }
+
+    // 2. Playback in 6/8 meter
+    {
+        Host h (48000.0, 256);
+        h.playHead.timeSigNum = 6;
+        h.playHead.timeSigDen = 8;
+        h.processor.setMeter (6, 8);
+
+        const cs::Progression p = h.processor.getProgression();
+        CHECK (p.timeSigNum == 6 && p.timeSigDen == 8);
+        CHECK (p.stepsPerBar() == 72);
+
+        h.playHead.playing = true;
+        h.run (50);
+        h.playHead.playing = false;
+        h.run (8);
+        CHECK (h.heldAfterReplay() == 0);
+        CHECK (! h.nonFinite);
+    }
+
+    // 3. Triplet cut timing (1/8T = 8 steps, 1/16T = 4 steps)
+    {
+        Host h (44100.0, 128); // Awkward sample rate & small buffer
+        h.playHead.bpm = 97.3;
+        h.processor.edit ([] (cs::Progression& p, cs::Rng&)
+        {
+            p.bars = 1;
+            p.numSlots = 3;
+            p.snap = 4; // 1/16T
+            p.slots[0].start = 0;
+            p.slots[1].start = 8; // 1/8T
+            p.slots[2].start = 24; // 1 beat
+            p.locks.rhythm = true;
+        });
+
+        h.playHead.playing = true;
+        const cs::Progression p = h.processor.getProgression();
+        const double sps = samplesPerStep (h);
+        const int blocks = (int) std::ceil (2 * p.lengthSteps() * sps / h.blockSize);
+        h.run (blocks);
+        CHECK (! h.events.empty());
+        h.playHead.playing = false;
+        h.run (8);
+        CHECK (h.heldAfterReplay() == 0);
+    }
+
+    // 4. MIDI file export in 3/4 and 6/8
+    {
+        Host h;
+        h.processor.setMeter (3, 4);
+        const juce::MidiFile file34 = h.processor.createMidiFile();
+        CHECK (file34.getNumTracks() >= 1);
+        const auto* track34 = file34.getTrack (0);
+        bool foundSig34 = false;
+        for (int i = 0; i < track34->getNumEvents(); ++i)
+        {
+            const auto& m = track34->getEventPointer (i)->message;
+            if (m.isTimeSignatureMetaEvent())
+            {
+                int num = 0, den = 0;
+                m.getTimeSignatureInfo (num, den);
+                if (num == 3 && den == 4)
+                    foundSig34 = true;
+            }
+        }
+        CHECK (foundSig34);
+
+        h.processor.setMeter (6, 8);
+        const juce::MidiFile file68 = h.processor.createMidiFile();
+        const auto* track68 = file68.getTrack (0);
+        bool foundSig68 = false;
+        for (int i = 0; i < track68->getNumEvents(); ++i)
+        {
+            const auto& m = track68->getEventPointer (i)->message;
+            if (m.isTimeSignatureMetaEvent())
+            {
+                int num = 0, den = 0;
+                m.getTimeSignatureInfo (num, den);
+                if (num == 6 && den == 8)
+                    foundSig68 = true;
+            }
+        }
+        CHECK (foundSig68);
+    }
+
+    // 5. Legacy v2 state migration (scaling slot starts 6x)
+    {
+        Host h;
+        juce::ValueTree v2Root ("ChordSlotsState");
+        v2Root.setProperty ("version", 2, nullptr);
+        juce::ValueTree v2Container ("ProgressionA");
+        juce::ValueTree v2Prog ("Progression");
+        v2Prog.setProperty ("bars", 2, nullptr);
+        v2Prog.setProperty ("snap", 2, nullptr); // legacy 1/8 note snap
+        juce::ValueTree slot0 ("Slot"); slot0.setProperty ("start", 0, nullptr); slot0.setProperty ("root", 0, nullptr); slot0.setProperty ("notes", "60 64 67", nullptr); v2Prog.appendChild (slot0, nullptr);
+        juce::ValueTree slot1 ("Slot"); slot1.setProperty ("start", 6, nullptr); slot1.setProperty ("root", 5, nullptr); slot1.setProperty ("notes", "65 69 72", nullptr); v2Prog.appendChild (slot1, nullptr);
+        juce::ValueTree slot2 ("Slot"); slot2.setProperty ("start", 16, nullptr); slot2.setProperty ("root", 7, nullptr); slot2.setProperty ("notes", "67 71 74", nullptr); v2Prog.appendChild (slot2, nullptr);
+        v2Container.appendChild (v2Prog, nullptr);
+        v2Root.appendChild (v2Container, nullptr);
+
+        juce::MemoryBlock block;
+        juce::AudioProcessor::copyXmlToBinary (*v2Root.createXml(), block);
+        h.processor.setStateInformation (block.getData(), (int) block.getSize());
+
+        const cs::Progression p = h.processor.getProgression (0);
+        CHECK (p.slots[0].start == 0);
+        CHECK (p.slots[1].start == 36);  // 6 * 6 = 36
+        CHECK (p.slots[2].start == 96);  // 16 * 6 = 96
+        CHECK (p.snap == 12);            // legacy 2 mapped to 12
+    }
+}
+
 } // namespace
 
 int main (int argc, char** argv)
@@ -935,6 +1072,7 @@ int main (int argc, char** argv)
     testIncomingMidiTriggerIntegration();
     testSplitMidiOutput();
     testVariationBankAndHistory();
+    testMeterAndTripletGrid();
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

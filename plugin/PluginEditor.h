@@ -140,8 +140,8 @@ private:
     ChordSlotsProcessor& processor;
     ChordSlotsLookAndFeel lnf;
 
-    juce::ComboBox keyBox, scaleBox, barsBox, slotsBox, snapBox, moodBox, triggerModeBox, triggerMapBox;
-    juce::Label keyLabel, scaleLabel, barsLabel, slotsLabel, snapLabel, moodLabel, triggerModeLabel, triggerMapLabel;
+    juce::ComboBox keyBox, scaleBox, barsBox, meterBox, slotsBox, snapBox, moodBox, triggerModeBox, triggerMapBox;
+    juce::Label keyLabel, scaleLabel, barsLabel, meterLabel, slotsLabel, snapLabel, moodLabel, triggerModeLabel, triggerMapLabel;
     juce::Label fitLabel, fitCaption;
 
     juce::Label variationLabel;

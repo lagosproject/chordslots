@@ -203,16 +203,38 @@ void TimelineView::paint (juce::Graphics& g)
 {
     // Ruler: bars and beats
     const int len = prog.lengthSteps();
-    for (int step = 0; step <= len; step += 4)
+    const auto m = prog.meter();
+    const int barSteps = m.stepsPerBar;
+
+    if (m.num == 6 && m.den == 8)
     {
-        const bool bar = step % cs::kStepsPerBar == 0;
-        const float x = juce::jlimit (0.5f, (float) getWidth() - 0.5f, xForStep (step));
-        g.setColour (bar ? ui::textDim : ui::outline);
-        g.drawVerticalLine ((int) x, bar ? 2.0f : 9.0f, 15.0f);
-        if (bar && step < len)
+        for (int step = 0; step <= len; step += 12)
         {
-            g.setFont (ui::font (10.5f));
-            g.drawText (juce::String (step / cs::kStepsPerBar + 1), (int) x + 4, 0, 30, 13, juce::Justification::centredLeft);
+            const bool bar = step % barSteps == 0;
+            const bool compound = step % 36 == 0;
+            const float x = juce::jlimit (0.5f, (float) getWidth() - 0.5f, xForStep (step));
+            g.setColour (bar ? ui::textDim : (compound ? ui::outline.brighter (0.2f) : ui::outline.withAlpha (0.4f)));
+            g.drawVerticalLine ((int) x, bar ? 2.0f : (compound ? 7.0f : 11.0f), 15.0f);
+            if (bar && step < len)
+            {
+                g.setFont (ui::font (10.5f));
+                g.drawText (juce::String (step / barSteps + 1), (int) x + 4, 0, 30, 13, juce::Justification::centredLeft);
+            }
+        }
+    }
+    else
+    {
+        for (int step = 0; step <= len; step += cs::kStepsPerQuarter)
+        {
+            const bool bar = step % barSteps == 0;
+            const float x = juce::jlimit (0.5f, (float) getWidth() - 0.5f, xForStep (step));
+            g.setColour (bar ? ui::textDim : ui::outline);
+            g.drawVerticalLine ((int) x, bar ? 2.0f : 8.0f, 15.0f);
+            if (bar && step < len)
+            {
+                g.setFont (ui::font (10.5f));
+                g.drawText (juce::String (step / barSteps + 1), (int) x + 4, 0, 30, 13, juce::Justification::centredLeft);
+            }
         }
     }
 
@@ -684,6 +706,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     setupCombo (keyBox, keyLabel, "KEY");
     setupCombo (scaleBox, scaleLabel, "SCALE");
     setupCombo (barsBox, barsLabel, "BARS");
+    setupCombo (meterBox, meterLabel, "METER");
     setupCombo (slotsBox, slotsLabel, "SLOTS");
     setupCombo (snapBox, snapLabel, "CUT GRID");
     setupCombo (moodBox, moodLabel, "MOOD (TARGET CURVES)");
@@ -694,11 +717,19 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         scaleBox.addItem (cs::scales()[(size_t) i].name, i + 1);
     for (int b : { 1, 2, 4, 8 })
         barsBox.addItem (juce::String (b), b);
+    meterBox.addItem ("4/4", 1);
+    meterBox.addItem ("3/4", 2);
+    meterBox.addItem ("6/8", 3);
+    meterBox.addItem ("Host", 4);
     for (int i = 1; i <= cs::kMaxSlots; ++i)
         slotsBox.addItem (juce::String (i), i);
-    snapBox.addItem ("1/4", 4);
-    snapBox.addItem ("1/8", 2);
-    snapBox.addItem ("1/16", 1);
+    snapBox.addItem ("1/4", 24);
+    snapBox.addItem ("1/4T", 16);
+    snapBox.addItem ("1/8", 12);
+    snapBox.addItem ("1/8T", 8);
+    snapBox.addItem ("1/16", 6);
+    snapBox.addItem ("1/16T", 4);
+    snapBox.addItem ("1/32", 3);
     for (int i = 0; i < (int) cs::moods().size(); ++i)
         moodBox.addItem (cs::moods()[(size_t) i].name, i + 1);
     moodBox.setTextWhenNothingSelected ("Custom");
@@ -758,6 +789,27 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         if (refreshing) return;
         const int bars = barsBox.getSelectedId();
         processor.edit ([bars] (cs::Progression& pr, cs::Rng&) { cs::setBars (pr, bars); });
+    };
+    meterBox.onChange = [this]
+    {
+        if (refreshing) return;
+        const int id = meterBox.getSelectedId();
+        if (id == 4)
+        {
+            processor.setFollowHostMeter (true);
+            const int hNum = processor.getHostTimeSigNum();
+            const int hDen = processor.getHostTimeSigDen();
+            if (hNum > 0 && hDen > 0)
+                processor.setMeter (hNum, hDen);
+        }
+        else
+        {
+            processor.setFollowHostMeter (false);
+            int num = 4, den = 4;
+            if (id == 2) { num = 3; den = 4; }
+            else if (id == 3) { num = 6; den = 8; }
+            processor.setMeter (num, den);
+        }
     };
     slotsBox.onChange = [this]
     {
@@ -1002,6 +1054,17 @@ void ChordSlotsEditor::refresh()
     keyBox.setSelectedId (p.tonic + 1, juce::dontSendNotification);
     scaleBox.setSelectedId (p.scale + 1, juce::dontSendNotification);
     barsBox.setSelectedId (p.bars, juce::dontSendNotification);
+    if (processor.isFollowingHostMeter())
+    {
+        meterBox.setSelectedId (4, juce::dontSendNotification);
+    }
+    else
+    {
+        int meterId = 1;
+        if (p.timeSigNum == 3 && p.timeSigDen == 4) meterId = 2;
+        else if (p.timeSigNum == 6 && p.timeSigDen == 8) meterId = 3;
+        meterBox.setSelectedId (meterId, juce::dontSendNotification);
+    }
     slotsBox.setSelectedId (p.numSlots, juce::dontSendNotification);
     snapBox.setSelectedId (p.snap, juce::dontSendNotification);
     moodBox.setSelectedId (p.mood + 1, juce::dontSendNotification);
@@ -1043,6 +1106,18 @@ void ChordSlotsEditor::timerCallback()
         if (processor.getEditVariation() != playingVar)
         {
             processor.setEditVariation (playingVar);
+            refresh();
+        }
+    }
+
+    if (processor.isFollowingHostMeter())
+    {
+        const int hNum = processor.getHostTimeSigNum();
+        const int hDen = processor.getHostTimeSigDen();
+        const auto p = processor.getProgression();
+        if (hNum > 0 && hDen > 0 && (hNum != p.timeSigNum || hDen != p.timeSigDen))
+        {
+            processor.setMeter (hNum, hDen);
             refresh();
         }
     }
@@ -1154,14 +1229,15 @@ void ChordSlotsEditor::resized()
         label.setBounds (cell.removeFromTop (16));
         box.setBounds (cell.removeFromTop (28));
     };
-    place (keyBox, keyLabel, 50);
-    place (scaleBox, scaleLabel, 98);
-    place (barsBox, barsLabel, 44);
-    place (slotsBox, slotsLabel, 44);
-    place (snapBox, snapLabel, 58);
-    place (moodBox, moodLabel, 95);
-    place (triggerModeBox, triggerModeLabel, 75);
-    place (triggerMapBox, triggerMapLabel, juce::jmax (70, header.getWidth() - 10));
+    place (keyBox, keyLabel, 48);
+    place (scaleBox, scaleLabel, 88);
+    place (barsBox, barsLabel, 42);
+    place (meterBox, meterLabel, 48);
+    place (slotsBox, slotsLabel, 42);
+    place (snapBox, snapLabel, 60);
+    place (moodBox, moodLabel, 88);
+    place (triggerModeBox, triggerModeLabel, 72);
+    place (triggerMapBox, triggerMapLabel, juce::jmax (60, header.getWidth() - 10));
 
     area.removeFromTop (12);
 

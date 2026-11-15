@@ -38,6 +38,7 @@ finds chords whose *measured* properties follow those curves.
 - **Incoming MIDI Trigger Modes** – perform slots live from a MIDI keyboard or pads
   with Auto priority, Trigger Only, or Loop Only, White Keys / Chromatic mapping,
   held-note priority stack, sustain pedal (CC64) support, and timeline glow.
+- **Meter & Triplet Grid (4/4, 3/4, 6/8)** – 24-steps-per-quarter timebase with exact integer step math across straight and triplet subdivisions (1/4T, 1/8T, 1/16T, 1/32). Per-variation meter settings, meter-aware rhythm generator (compound beat grouping for 6/8), per-bar cut remapping on meter change, timeline grid ticks & compound beat markers, and optional lock-free host meter tracking. Time-signature meta events written to MIDI export.
 - **Gets out of the way** – built-in preview synth, live MIDI output, and
   drag-and-drop MIDI clips with baked strum and humanization into any DAW.
 
