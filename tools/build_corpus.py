@@ -287,7 +287,6 @@ def generate_header(matrices: List[List[List[int]]]) -> str:
     out.append("// Hand-authored style prior (provisional): transition weights written by hand from")
     out.append("// common pop/rock, minor-loop and soul/R&B practice. Not derived from a corpus yet;")
     out.append("// replacement with licence-clean corpus data is planned (IMPLEMENTATION_PLAN.md, P4).")
-    out.append("// Bigrams: Frame-repeat collapsed chord changes with add-k smoothing and PMI discount.")
     out.append("// Matrices: 3 Style Clusters x 60 Tokens x 60 Tokens quantized to uint8_t.")
     out.append("#pragma once")
     out.append("")
