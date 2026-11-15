@@ -322,6 +322,63 @@ static void testEditing()
     setChord (p, 0, ch (4, "7"), rng);
     CHECK (p.slots[0].chord == ch (4, "7"));
     CHECK (p.slots[0].voicing.n >= 4);
+
+    // P1.5: Targeted rolls use the cost model
+    {
+        double sumCostNew = 0.0;
+        double sumCostOld = 0.0;
+
+        for (int seed = 0; seed < 200; ++seed)
+        {
+            Progression q;
+            q.tonic = 9; // A
+            q.scale = 1; // Minor
+            q.bars = 4;
+            q.numSlots = 4;
+            q.adventure = 0.3f;
+            layoutEven (q);
+            Rng rInit ((unsigned) (seed + 1000));
+            roll (q, rInit);
+
+            const int slot = 1;
+            const Chord original = q.slots[slot].chord;
+
+            const int n = q.numSlots;
+            const int pi = (slot + n - 1) % n, ni = (slot + 1) % n, p2i = (slot + n - 2) % n;
+            const Chord* prev = &q.slots[(size_t) pi].chord;
+            const Chord* next = &q.slots[(size_t) ni].chord;
+            const Chord* prev2 = &q.slots[(size_t) p2i].chord;
+
+            // Reference old uniform behavior
+            {
+                Rng rOld ((unsigned) (seed * 7 + 1));
+                std::vector<int> types;
+                for (int t = 0; t < numChordTypes(); ++t)
+                    if (t != original.type)
+                        types.push_back (t);
+                std::uniform_int_distribution<size_t> dist (0, types.size() - 1);
+                Chord oldChord = original;
+                oldChord.type = types[dist (rOld)];
+                const int outside = tonesOutsideScale (oldChord, q.tonic, q.scale);
+                Candidate cand { oldChord, 0.5f, 0.5f, outside, chordTypes()[(size_t) oldChord.type].complexity };
+                sumCostOld += slotCost (q, slot, cand, prev, next, prev2);
+            }
+
+            // New scored rollSlotColor behavior
+            {
+                Rng rNew ((unsigned) (seed * 7 + 1));
+                Progression qTest = q;
+                rollSlotColor (qTest, slot, rNew);
+                const Chord newChord = qTest.slots[slot].chord;
+                const int outside = tonesOutsideScale (newChord, q.tonic, q.scale);
+                CHECK (outside <= 1); // never returns tonesOutsideScale > 1
+                Candidate cand { newChord, 0.5f, 0.5f, outside, chordTypes()[(size_t) newChord.type].complexity };
+                sumCostNew += slotCost (q, slot, cand, prev, next, prev2);
+            }
+        }
+
+        CHECK (sumCostNew / 200.0 < sumCostOld / 200.0);
+    }
 }
 
 static void testBassModel()

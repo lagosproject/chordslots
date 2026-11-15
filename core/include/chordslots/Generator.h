@@ -1205,48 +1205,92 @@ inline void setBass (Progression& p, int slot, int bassInt)
     updateActuals (p, slot);
 }
 
-/** Rerolls ONLY the root of a single slot, keeping chord quality/type if valid. */
+/** Rerolls ONLY the root of a single slot, scored by slotCost. */
 inline void rollSlotRoot (Progression& p, int slot, Rng& rng)
 {
     if (slot < 0 || slot >= p.numSlots)
         return;
-    Slot& s = p.slots[(size_t) slot];
-    const auto& sc = scales()[(size_t) p.scale];
-    std::vector<int> candidates;
-    for (int pc : sc.pcs)
+    const Slot& s = p.slots[(size_t) slot];
+    const auto all = buildCandidates (p.tonic, p.scale, std::max (p.adventure, 0.45f));
+    std::vector<Candidate> candidates;
+    for (const auto& c : all)
     {
-        const int absPc = mod12 (p.tonic + pc);
-        if (absPc != s.chord.root)
-            candidates.push_back (absPc);
+        if (c.chord.type == s.chord.type && c.chord.root != s.chord.root)
+            candidates.push_back (c);
+    }
+    if (candidates.empty())
+    {
+        for (const auto& c : all)
+        {
+            if (c.chord.root != s.chord.root)
+                candidates.push_back (c);
+        }
     }
     if (candidates.empty())
         return;
-    std::uniform_int_distribution<size_t> dist (0, candidates.size() - 1);
-    Chord next = s.chord;
-    next.root = candidates[dist (rng)];
-    sanitizeBass (next);
-    setChord (p, slot, next, rng);
+
+    const int n = p.numSlots;
+    const int pi = (slot + n - 1) % n, ni = (slot + 1) % n, p2i = (slot + n - 2) % n;
+    const Chord* prev = n > 1 ? &p.slots[(size_t) pi].chord : nullptr;
+    const Chord* next = n > 1 ? &p.slots[(size_t) ni].chord : nullptr;
+    const Chord* prev2 = n > 2 ? &p.slots[(size_t) p2i].chord : nullptr;
+
+    std::vector<float> costs (candidates.size());
+    for (size_t i = 0; i < candidates.size(); ++i)
+        costs[i] = slotCost (p, slot, candidates[i], prev, next, prev2);
+
+    const int pick = sampleSoftmin (costs, 0.004f, rng);
+    if (pick >= 0)
+    {
+        Chord nextChord = candidates[(size_t) pick].chord;
+        nextChord.bassInt = s.chord.bassInt;
+        sanitizeBass (nextChord);
+        setChord (p, slot, nextChord, rng);
+    }
 }
 
-/** Rerolls ONLY the chord type/color of a single slot, keeping root. */
+/** Rerolls ONLY the chord type/color of a single slot, keeping root and scored by slotCost. */
 inline void rollSlotColor (Progression& p, int slot, Rng& rng)
 {
     if (slot < 0 || slot >= p.numSlots)
         return;
-    Slot& s = p.slots[(size_t) slot];
-    std::vector<int> types;
-    for (int t = 0; t < numChordTypes(); ++t)
+    const Slot& s = p.slots[(size_t) slot];
+    const auto all = buildCandidates (p.tonic, p.scale, std::max (p.adventure, 0.45f));
+    std::vector<Candidate> candidates;
+    for (const auto& c : all)
     {
-        if (t != s.chord.type)
-            types.push_back (t);
+        if (c.chord.root == s.chord.root && c.chord.type != s.chord.type)
+            candidates.push_back (c);
     }
-    if (types.empty())
+    if (candidates.empty())
+    {
+        for (const auto& c : all)
+        {
+            if (c.chord.type != s.chord.type)
+                candidates.push_back (c);
+        }
+    }
+    if (candidates.empty())
         return;
-    std::uniform_int_distribution<size_t> dist (0, types.size() - 1);
-    Chord next = s.chord;
-    next.type = types[dist (rng)];
-    sanitizeBass (next);
-    setChord (p, slot, next, rng);
+
+    const int n = p.numSlots;
+    const int pi = (slot + n - 1) % n, ni = (slot + 1) % n, p2i = (slot + n - 2) % n;
+    const Chord* prev = n > 1 ? &p.slots[(size_t) pi].chord : nullptr;
+    const Chord* next = n > 1 ? &p.slots[(size_t) ni].chord : nullptr;
+    const Chord* prev2 = n > 2 ? &p.slots[(size_t) p2i].chord : nullptr;
+
+    std::vector<float> costs (candidates.size());
+    for (size_t i = 0; i < candidates.size(); ++i)
+        costs[i] = slotCost (p, slot, candidates[i], prev, next, prev2);
+
+    const int pick = sampleSoftmin (costs, 0.004f, rng);
+    if (pick >= 0)
+    {
+        Chord nextChord = candidates[(size_t) pick].chord;
+        nextChord.bassInt = s.chord.bassInt;
+        sanitizeBass (nextChord);
+        setChord (p, slot, nextChord, rng);
+    }
 }
 
 /** Cycles or rerolls the bass note / inversion for a single slot. */
