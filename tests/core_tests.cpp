@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <set>
 #include <string>
 
 using namespace cs;
@@ -564,6 +565,193 @@ static void testModernTransitionPrior()
     CHECK (costF_G < 0.25f);  // bVI -> bVII
     CHECK (costG_Am < 0.25f); // bVII -> i
     CHECK (costE7_Am < 0.25f); // V7 -> i
+
+    // P1.1: Prior scoring & Interpolated Backoff tests
+    // Check that unseen awkward transitions cost more than seen diatonic transitions:
+    const Chord cCsharp = ch (1, ""); // C# major
+    const float costAm_Csharp = corpusTransitionCost (cAm, cCsharp, 9, 1, CorpusStyle::MinorLoops);
+    const float costAm_G = corpusTransitionCost (cAm, cG, 9, 1, CorpusStyle::MinorLoops);
+    const float costAm_Em = corpusTransitionCost (cAm, cEm, 9, 1, CorpusStyle::MinorLoops);
+    CHECK (costAm_Csharp > costAm_F);
+    CHECK (costAm_Csharp > costAm_G);
+    CHECK (costAm_Csharp > costAm_Dm);
+    CHECK (costAm_Csharp > costAm_Em);
+
+    const float costC_Csharp = corpusTransitionCost (cI, cCsharp, 0, 0, CorpusStyle::PopRock);
+    CHECK (costC_Csharp > costI_IV);
+    CHECK (costC_Csharp > costI_V);
+    CHECK (costC_Csharp > corpusTransitionCost (cI, cvi, 0, 0, CorpusStyle::PopRock));
+
+    // In every cluster, for every source row with counts, every seen transition
+    // costs less than every unseen transition from the same row (excluding collapsed self-loops).
+    {
+        auto tok = [](int deg, int qual) { return deg * 5 + qual; };
+        std::set<std::pair<int, int>> clusterTransitions[3];
+
+        // Cluster 0 (PopRock)
+        clusterTransitions[0].insert({tok(0, 0), tok(5, 0)});
+        clusterTransitions[0].insert({tok(0, 0), tok(7, 0)});
+        clusterTransitions[0].insert({tok(0, 0), tok(7, 2)});
+        clusterTransitions[0].insert({tok(0, 0), tok(9, 1)});
+        clusterTransitions[0].insert({tok(0, 0), tok(2, 1)});
+        clusterTransitions[0].insert({tok(0, 0), tok(10, 0)});
+        clusterTransitions[0].insert({tok(0, 0), tok(4, 1)});
+        clusterTransitions[0].insert({tok(0, 0), tok(8, 0)});
+        clusterTransitions[0].insert({tok(0, 0), tok(3, 0)});
+        clusterTransitions[0].insert({tok(0, 0), tok(5, 1)});
+
+        clusterTransitions[0].insert({tok(5, 0), tok(0, 0)});
+        clusterTransitions[0].insert({tok(5, 0), tok(7, 0)});
+        clusterTransitions[0].insert({tok(5, 0), tok(7, 2)});
+        clusterTransitions[0].insert({tok(5, 0), tok(9, 1)});
+        clusterTransitions[0].insert({tok(5, 0), tok(2, 1)});
+        clusterTransitions[0].insert({tok(5, 0), tok(10, 0)});
+        clusterTransitions[0].insert({tok(5, 0), tok(5, 1)});
+
+        for (int qv : {0, 2}) {
+            clusterTransitions[0].insert({tok(7, qv), tok(0, 0)});
+            clusterTransitions[0].insert({tok(7, qv), tok(5, 0)});
+            clusterTransitions[0].insert({tok(7, qv), tok(9, 1)});
+            clusterTransitions[0].insert({tok(7, qv), tok(2, 1)});
+            clusterTransitions[0].insert({tok(7, qv), tok(4, 1)});
+        }
+
+        clusterTransitions[0].insert({tok(9, 1), tok(5, 0)});
+        clusterTransitions[0].insert({tok(9, 1), tok(7, 0)});
+        clusterTransitions[0].insert({tok(9, 1), tok(7, 2)});
+        clusterTransitions[0].insert({tok(9, 1), tok(2, 1)});
+        clusterTransitions[0].insert({tok(9, 1), tok(0, 0)});
+        clusterTransitions[0].insert({tok(9, 1), tok(4, 1)});
+
+        clusterTransitions[0].insert({tok(2, 1), tok(7, 0)});
+        clusterTransitions[0].insert({tok(2, 1), tok(7, 2)});
+        clusterTransitions[0].insert({tok(2, 1), tok(5, 0)});
+        clusterTransitions[0].insert({tok(2, 1), tok(0, 0)});
+        clusterTransitions[0].insert({tok(2, 1), tok(9, 1)});
+
+        clusterTransitions[0].insert({tok(4, 1), tok(9, 1)});
+        clusterTransitions[0].insert({tok(4, 1), tok(5, 0)});
+        clusterTransitions[0].insert({tok(4, 1), tok(0, 0)});
+        clusterTransitions[0].insert({tok(4, 1), tok(2, 1)});
+
+        clusterTransitions[0].insert({tok(10, 0), tok(5, 0)});
+        clusterTransitions[0].insert({tok(10, 0), tok(0, 0)});
+        clusterTransitions[0].insert({tok(10, 0), tok(7, 0)});
+
+        clusterTransitions[0].insert({tok(8, 0), tok(10, 0)});
+        clusterTransitions[0].insert({tok(8, 0), tok(0, 0)});
+        clusterTransitions[0].insert({tok(8, 0), tok(7, 0)});
+
+        clusterTransitions[0].insert({tok(3, 0), tok(5, 0)});
+        clusterTransitions[0].insert({tok(3, 0), tok(10, 0)});
+        clusterTransitions[0].insert({tok(3, 0), tok(0, 0)});
+
+        clusterTransitions[0].insert({tok(5, 1), tok(0, 0)});
+
+        // Cluster 1 (MinorLoops)
+        clusterTransitions[1].insert({tok(0, 1), tok(8, 0)});
+        clusterTransitions[1].insert({tok(0, 1), tok(5, 1)});
+        clusterTransitions[1].insert({tok(0, 1), tok(10, 0)});
+        clusterTransitions[1].insert({tok(0, 1), tok(7, 1)});
+        clusterTransitions[1].insert({tok(0, 1), tok(7, 0)});
+        clusterTransitions[1].insert({tok(0, 1), tok(7, 2)});
+        clusterTransitions[1].insert({tok(0, 1), tok(3, 0)});
+        clusterTransitions[1].insert({tok(0, 1), tok(5, 0)});
+
+        clusterTransitions[1].insert({tok(8, 0), tok(10, 0)});
+        clusterTransitions[1].insert({tok(8, 0), tok(0, 1)});
+        clusterTransitions[1].insert({tok(8, 0), tok(5, 1)});
+        clusterTransitions[1].insert({tok(8, 0), tok(7, 0)});
+        clusterTransitions[1].insert({tok(8, 0), tok(7, 2)});
+
+        clusterTransitions[1].insert({tok(10, 0), tok(0, 1)});
+        clusterTransitions[1].insert({tok(10, 0), tok(8, 0)});
+        clusterTransitions[1].insert({tok(10, 0), tok(3, 0)});
+        clusterTransitions[1].insert({tok(10, 0), tok(5, 1)});
+        clusterTransitions[1].insert({tok(10, 0), tok(7, 0)});
+
+        clusterTransitions[1].insert({tok(5, 1), tok(7, 0)});
+        clusterTransitions[1].insert({tok(5, 1), tok(7, 2)});
+        clusterTransitions[1].insert({tok(5, 1), tok(7, 1)});
+        clusterTransitions[1].insert({tok(5, 1), tok(0, 1)});
+        clusterTransitions[1].insert({tok(5, 1), tok(10, 0)});
+        clusterTransitions[1].insert({tok(5, 1), tok(8, 0)});
+
+        clusterTransitions[1].insert({tok(7, 1), tok(0, 1)});
+        clusterTransitions[1].insert({tok(7, 1), tok(8, 0)});
+        clusterTransitions[1].insert({tok(7, 0), tok(0, 1)});
+        clusterTransitions[1].insert({tok(7, 2), tok(0, 1)});
+        clusterTransitions[1].insert({tok(7, 0), tok(8, 0)});
+        clusterTransitions[1].insert({tok(7, 2), tok(8, 0)});
+
+        clusterTransitions[1].insert({tok(3, 0), tok(10, 0)});
+        clusterTransitions[1].insert({tok(3, 0), tok(8, 0)});
+        clusterTransitions[1].insert({tok(3, 0), tok(5, 1)});
+        clusterTransitions[1].insert({tok(3, 0), tok(0, 1)});
+
+        clusterTransitions[1].insert({tok(2, 3), tok(7, 0)});
+        clusterTransitions[1].insert({tok(2, 3), tok(7, 2)});
+        clusterTransitions[1].insert({tok(2, 1), tok(7, 0)});
+        clusterTransitions[1].insert({tok(2, 3), tok(0, 1)});
+
+        clusterTransitions[1].insert({tok(5, 0), tok(0, 1)});
+        clusterTransitions[1].insert({tok(5, 0), tok(7, 0)});
+
+        // Cluster 2 (SoulRnb)
+        clusterTransitions[2].insert({tok(2, 1), tok(7, 0)});
+        clusterTransitions[2].insert({tok(2, 1), tok(7, 2)});
+        clusterTransitions[2].insert({tok(2, 1), tok(0, 0)});
+        clusterTransitions[2].insert({tok(2, 1), tok(5, 0)});
+
+        clusterTransitions[2].insert({tok(7, 0), tok(0, 0)});
+        clusterTransitions[2].insert({tok(7, 2), tok(0, 0)});
+        clusterTransitions[2].insert({tok(7, 0), tok(9, 1)});
+        clusterTransitions[2].insert({tok(7, 2), tok(9, 1)});
+
+        clusterTransitions[2].insert({tok(0, 0), tok(9, 1)});
+        clusterTransitions[2].insert({tok(0, 0), tok(2, 1)});
+        clusterTransitions[2].insert({tok(0, 0), tok(5, 0)});
+        clusterTransitions[2].insert({tok(0, 0), tok(4, 1)});
+        clusterTransitions[2].insert({tok(0, 0), tok(2, 2)});
+        clusterTransitions[2].insert({tok(0, 0), tok(9, 2)});
+
+        clusterTransitions[2].insert({tok(9, 1), tok(2, 1)});
+        clusterTransitions[2].insert({tok(9, 1), tok(5, 0)});
+        clusterTransitions[2].insert({tok(9, 1), tok(7, 0)});
+
+        clusterTransitions[2].insert({tok(4, 1), tok(9, 1)});
+        clusterTransitions[2].insert({tok(4, 1), tok(2, 1)});
+        clusterTransitions[2].insert({tok(4, 1), tok(5, 0)});
+
+        clusterTransitions[2].insert({tok(2, 2), tok(7, 0)});
+        clusterTransitions[2].insert({tok(2, 2), tok(7, 2)});
+        clusterTransitions[2].insert({tok(9, 2), tok(2, 1)});
+        clusterTransitions[2].insert({tok(4, 2), tok(9, 1)});
+        clusterTransitions[2].insert({tok(0, 2), tok(5, 0)});
+        clusterTransitions[2].insert({tok(5, 1), tok(0, 0)});
+
+        for (int c = 0; c < 3; ++c)
+        {
+            for (int src = 0; src < 60; ++src)
+            {
+                bool hasSeen = false;
+                for (int dst = 0; dst < 60; ++dst)
+                    if (clusterTransitions[c].count({src, dst})) { hasSeen = true; break; }
+                if (!hasSeen) continue;
+
+                for (int dstSeen = 0; dstSeen < 60; ++dstSeen)
+                {
+                    if (!clusterTransitions[c].count({src, dstSeen})) continue;
+                    for (int dstUnseen = 0; dstUnseen < 60; ++dstUnseen)
+                    {
+                        if (clusterTransitions[c].count({src, dstUnseen})) continue;
+                        if (dstUnseen == src) continue; // collapsed self loop
+                        CHECK (kCorpusMatrices[c][src][dstSeen] < kCorpusMatrices[c][src][dstUnseen]);
+                    }
+                }
+            }
+        }
+    }
 
     // 4. Overload and backward compatibility check
     const float costOverload4 = transitionCost (cI, cIV, 0, 0.3f);

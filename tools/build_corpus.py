@@ -4,7 +4,7 @@ tools/build_corpus.py: Hand-authored style prior (provisional): transition weigh
 written by hand from common pop/rock, minor-loop and soul/R&B practice. Not derived
 from a corpus yet; replacement with licence-clean corpus data is planned (IMPLEMENTATION_PLAN.md, P4).
 
-Generates core/include/chordslots/Corpus.h with quantized (uint8_t) bigram surprise/PMI matrices.
+Generates core/include/chordslots/Corpus.h with quantized (uint8_t) bigram surprise matrices (interpolated backoff).
 Usage:
     python3 tools/build_corpus.py [--verify] [--out path/to/Corpus.h]
 """
@@ -226,7 +226,8 @@ def compute_matrices():
     raw_clusters = build_cluster_transitions()
     matrices = []
 
-    k_smooth = 0.5  # Add-k Laplace smoothing parameter
+    k_smooth = 0.5  # Smoothing parameter for unigram backoff
+    beta = 200.0    # Backoff weight parameter: lambda_A = row_total(A) / (row_total(A) + beta)
 
     for c_idx, counts in enumerate(raw_clusters):
         # Compute unigrams and total counts
@@ -238,22 +239,26 @@ def compute_matrices():
             row_totals[src] += cnt
             col_totals[dst] += cnt
 
-        # Smoothed conditional probabilities P(B | A) and marginals P(B)
-        # P(B | A) = (cnt(A, B) + k) / (row_total(A) + k * NUM_TOKENS)
-        # P(B) = (col_total(B) + k) / (total_transitions + k * NUM_TOKENS)
+        # Interpolated backoff:
+        # P_uni(B) = (col_total(B) + k) / (total + k * 60)
+        # For row A with row_total(A) > 0: lambda_A = row_total(A) / (row_total(A) + beta)
+        # For row A with no counts: lambda_A = 0
+        # P(B | A) = lambda_A * (cnt(A, B) / row_total(A)) + (1 - lambda_A) * P_uni(B)
+        # score = -ln P(B | A)
         scores = [[0.0] * NUM_TOKENS for _ in range(NUM_TOKENS)]
         min_score = 1e9
         max_score = -1e9
 
         for src in range(NUM_TOKENS):
-            denom_src = row_totals[src] + k_smooth * NUM_TOKENS
+            r_tot = row_totals[src]
+            lam = (r_tot / (r_tot + beta)) if r_tot > 0.0 else 0.0
             for dst in range(NUM_TOKENS):
+                p_uni = (col_totals[dst] + k_smooth) / (total_transitions + k_smooth * NUM_TOKENS)
                 cnt = counts.get((src, dst), 0.0)
-                p_cond = (cnt + k_smooth) / denom_src
-                p_dst = (col_totals[dst] + k_smooth) / (total_transitions + k_smooth * NUM_TOKENS)
-                
-                # Balanced score: -ln P(B | A) + 0.3 * ln P(B) (PMI discount)
-                score = -math.log(p_cond) + 0.3 * math.log(p_dst)
+                p_ml = (cnt / r_tot) if r_tot > 0.0 else 0.0
+                p_cond = lam * p_ml + (1.0 - lam) * p_uni
+
+                score = -math.log(p_cond)
                 scores[src][dst] = score
                 if score < min_score:
                     min_score = score
@@ -287,6 +292,7 @@ def generate_header(matrices: List[List[List[int]]]) -> str:
     out.append("// Hand-authored style prior (provisional): transition weights written by hand from")
     out.append("// common pop/rock, minor-loop and soul/R&B practice. Not derived from a corpus yet;")
     out.append("// replacement with licence-clean corpus data is planned (IMPLEMENTATION_PLAN.md, P4).")
+    out.append("// Transition scoring: Interpolated backoff P(B|A) = λ_A·P_ml(B|A) + (1-λ_A)·P_uni(B), score = -ln P(B|A).")
     out.append("// Matrices: 3 Style Clusters x 60 Tokens x 60 Tokens quantized to uint8_t.")
     out.append("#pragma once")
     out.append("")
@@ -348,7 +354,7 @@ def generate_header(matrices: List[List[List[int]]]) -> str:
     out.append("    return deg * kNumQualityClasses + q;")
     out.append("}")
     out.append("")
-    out.append("// Quantized transition surprise/PMI matrices (0..255). Size: 3 x 60 x 60 = 10,800 bytes (< 11 KB)")
+    out.append("// Quantized transition surprise matrices (0..255). Size: 3 x 60 x 60 = 10,800 bytes (< 11 KB)")
     out.append("alignas (16) constexpr uint8_t kCorpusMatrices[kNumCorpusClusters][kNumCorpusTokens][kNumCorpusTokens] = {")
 
     for c_idx in range(NUM_CLUSTERS):
