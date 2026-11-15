@@ -816,6 +816,79 @@ static void testModernTransitionPrior()
         }
     }
 
+    // P1.4: Never drop the bass note & energy tracking
+    {
+        Rng rng (42);
+        for (int t = 0; t < numChordTypes(); ++t)
+        {
+            Chord c { 0, t, 0 }; // non-slash chord
+            Voicing v = makeVoicing (c, nullptr, 64.0f, 0.1f, rng);
+            CHECK (primaryBassNote (v) >= 0);
+            CHECK (primaryBassNote (v) < kUpperFloor);
+            bool hasBass = false;
+            for (int i = 0; i < v.n; ++i)
+                if (v.notes[(size_t) i] < kUpperFloor)
+                    hasBass = true;
+            CHECK (hasBass);
+        }
+
+        // Specifically test Dreamy C#sus4 at low energy (spec example: previously lost bass)
+        Chord csus4 = ch (1, "sus4");
+        Voicing vDreamy = makeVoicing (csus4, nullptr, centreForBrightness (0.85f), 0.1f, rng);
+        CHECK (primaryBassNote (vDreamy) >= 0);
+        CHECK (primaryBassNote (vDreamy) < kUpperFloor);
+
+        // Energy tracking test across all moods (s4, seeds 0..99):
+        // mean |energy - targetE| must be no worse than 0.052612 (measured before the change)
+        double sumErr = 0.0;
+        int count = 0;
+        for (size_t m = 0; m < moods().size(); ++m)
+        {
+            for (int seed = 0; seed < 100; ++seed)
+            {
+                Rng r ((unsigned) seed);
+                Progression pr;
+                pr.numSlots = 4;
+                layoutEven (pr);
+                applyMood (pr, (int) m);
+                pr.numSlots = 4;
+                roll (pr, r);
+                for (int s = 0; s < pr.numSlots; ++s)
+                {
+                    sumErr += std::abs (pr.slots[(size_t) s].energy - pr.slots[(size_t) s].targetE);
+                    count++;
+                }
+            }
+        }
+        const double meanErr = sumErr / count;
+        CHECK (meanErr <= 0.052612);
+
+        // Quick eval (N=60): noBassSlotPct == 0 for every mood x configuration
+        for (size_t m = 0; m < moods().size(); ++m)
+        {
+            for (int slots : { 4, 8 })
+            {
+                int noBassCount = 0;
+                for (int seed = 0; seed < 60; ++seed)
+                {
+                    Rng r ((unsigned) seed);
+                    Progression pr;
+                    pr.numSlots = slots;
+                    layoutEven (pr);
+                    applyMood (pr, (int) m);
+                    pr.numSlots = slots;
+                    roll (pr, r);
+                    for (int s = 0; s < pr.numSlots; ++s)
+                    {
+                        if (primaryBassNote (pr.slots[(size_t) s].voicing) < 0)
+                            noBassCount++;
+                    }
+                }
+                CHECK (noBassCount == 0);
+            }
+        }
+    }
+
     // 5. 1,000 rolls distribution and entropy test
     Rng rng (42);
     Progression p;

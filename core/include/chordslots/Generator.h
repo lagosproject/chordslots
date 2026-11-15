@@ -531,14 +531,14 @@ inline int primaryBassNote (const Voicing& v, int upperFloor = kUpperFloor) noex
     return best;
 }
 
-/** Finds a bass octave in ~28..52 closest to refBassNote (or ~40 if none),
-    guaranteeing it stays below upperFloorCeiling. */
+/** Finds a bass octave in ~28..47 closest to refBassNote (or ~40 if none),
+    guaranteeing it stays below upperFloorCeiling and below kUpperFloor. */
 inline int pickBassRegister (int bassPc, int refBassNote = -1, int upperFloorCeiling = kUpperFloor) noexcept
 {
     constexpr int kMinBass = 28; // E1
-    constexpr int kMaxBass = 52; // E3
+    constexpr int kMaxBass = 47; // B2 (< kUpperFloor = 48)
     const int target = refBassNote >= 0 ? refBassNote : 40; // Default ~E2
-    const int ceiling = upperFloorCeiling - 2;
+    const int ceiling = std::min (upperFloorCeiling - 2, kUpperFloor - 1);
 
     int bestNote = -1;
     int bestDist = 1000;
@@ -574,7 +574,7 @@ inline int pickBassRegister (int bassPc, int refBassNote = -1, int upperFloorCei
         }
     }
 
-    return bestNote >= 0 ? bestNote : 36 + bassPc;
+    return bestNote >= 0 ? bestNote : (36 + bassPc <= kUpperFloor - 1 ? 36 + bassPc : 24 + bassPc);
 }
 
 /** Re-voices ONLY the bass note(s) of an existing voicing, leaving upper structure untouched. */
@@ -590,8 +590,7 @@ inline void revoiceBass (Voicing& v, Chord c, int refBassNote = -1, float energy
 
     const int bass = pickBassRegister (c.bassPc(), refBassNote, upper.front());
     std::vector<int> all = upper;
-    if (c.isSlash() || energy > 0.3f)
-        all.push_back (bass);
+    all.push_back (bass);
     if (energy > 0.85f && bass - 12 >= 24)
         all.push_back (bass - 12);
 
@@ -688,8 +687,7 @@ inline Voicing makeVoicing (Chord c, const Voicing* ref, float centre, float ene
     std::vector<int> all = best;
     const int refBass = ref != nullptr ? primaryBassNote (*ref) : -1;
     const int bass = pickBassRegister (c.bassPc(), refBass, best.front());
-    if (c.isSlash() || energy > 0.3f)
-        all.push_back (bass);
+    all.push_back (bass);
     if (energy > 0.85f && bass - 12 >= 24)
         all.push_back (bass - 12);
     if (energy > 0.6f)
@@ -732,7 +730,7 @@ inline void updateActuals (Progression& p, int i)
 
     // Energy is a performance property (loudness and density), not a harmonic one.
     const float vel = clamp01 (((float) s.voicing.velocity - 45.0f) / 75.0f);
-    const float density = clamp01 (((float) s.voicing.n - 2.0f) / 5.0f);
+    const float density = clamp01 (((float) s.voicing.n - 2.0f) / 4.5f);
     s.energy = clamp01 (0.6f * vel + 0.4f * density);
 }
 
@@ -977,8 +975,7 @@ inline std::vector<Voicing> candidateVoicingsForSlot (const Progression& p, int 
 
             std::vector<int> all = notes;
             const int bass = pickBassRegister (s.chord.bassPc(), -1, notes.front());
-            if (s.chord.isSlash() || s.targetE > 0.3f)
-                all.push_back (bass);
+            all.push_back (bass);
             if (s.targetE > 0.85f && bass - 12 >= 24)
                 all.push_back (bass - 12);
             if (s.targetE > 0.6f)
