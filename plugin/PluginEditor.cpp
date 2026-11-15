@@ -1,701 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginEditor.h"
 
-namespace ui
-{
-
-juce::Font font (float height, bool bold)
-{
-    return juce::Font (juce::FontOptions (height, bold ? juce::Font::bold : juce::Font::plain));
-}
-
-juce::Colour colourForBrightness (float b)
-{
-    const juce::Colour dark (0xff232a55), mid (0xff6a5d8c), bright (0xfff0b54a);
-    b = juce::jlimit (0.0f, 1.0f, b);
-    return b < 0.5f ? dark.interpolatedWith (mid, b * 2.0f) : mid.interpolatedWith (bright, (b - 0.5f) * 2.0f);
-}
-
-} // namespace ui
-
 namespace
 {
-
-juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
-
-const juce::Colour laneColours[3] = { ui::brightness, ui::tension, ui::energy };
-const char* const laneNames[3] = { "BRIGHTNESS", "TENSION", "ENERGY" };
-
-float& targetRef (cs::Slot& s, int lane) { return lane == 0 ? s.targetB : (lane == 1 ? s.targetT : s.targetE); }
-float targetOf (const cs::Slot& s, int lane) { return lane == 0 ? s.targetB : (lane == 1 ? s.targetT : s.targetE); }
-float actualOf (const cs::Slot& s, int lane) { return lane == 0 ? s.brightness : (lane == 1 ? s.tension : s.energy); }
-
-void drawPadlock (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c, bool closed)
-{
-    g.setColour (c);
-    const auto body = r.withTrimmedTop (r.getHeight() * 0.45f);
-    g.fillRoundedRectangle (body, 2.0f);
-    juce::Path shackle;
-    const float w = r.getWidth() * 0.56f;
-    const float x = r.getCentreX() - w * 0.5f + (closed ? 0.0f : w * 0.55f);
-    shackle.addCentredArc (x + w * 0.5f, body.getY(), w * 0.5f, r.getHeight() * 0.36f, 0.0f,
-                           -juce::MathConstants<float>::halfPi, juce::MathConstants<float>::halfPi, true);
-    g.strokePath (shackle, juce::PathStrokeType (1.8f));
+inline juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 }
 
-} // namespace
-
-//==============================================================================
-ChordSlotsLookAndFeel::ChordSlotsLookAndFeel()
-{
-    setColour (juce::ResizableWindow::backgroundColourId, ui::background);
-    setColour (juce::ComboBox::backgroundColourId, ui::panel);
-    setColour (juce::ComboBox::outlineColourId, ui::outline);
-    setColour (juce::ComboBox::textColourId, ui::text);
-    setColour (juce::ComboBox::arrowColourId, ui::textDim);
-    setColour (juce::PopupMenu::backgroundColourId, ui::panel);
-    setColour (juce::PopupMenu::textColourId, ui::text);
-    setColour (juce::PopupMenu::headerTextColourId, ui::textDim);
-    setColour (juce::PopupMenu::highlightedBackgroundColourId, ui::accent.withAlpha (0.35f));
-    setColour (juce::PopupMenu::highlightedTextColourId, ui::text);
-    setColour (juce::Label::textColourId, ui::text);
-    setColour (juce::TextButton::textColourOffId, ui::text);
-    setColour (juce::TextButton::textColourOnId, juce::Colours::white);
-    setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-}
-
-void ChordSlotsLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)
-{
-    const auto r = b.getLocalBounds().toFloat().reduced (0.75f);
-    const bool primary = b.getProperties().getWithDefault ("primary", false);
-    juce::Colour fill = primary ? ui::accent : (b.getToggleState() ? ui::accent.withAlpha (0.75f) : ui::panelHi);
-    if (down)
-        fill = fill.darker (0.25f);
-    else if (over)
-        fill = fill.brighter (0.12f);
-    if (! b.isEnabled())
-        fill = fill.withAlpha (0.35f);
-
-    g.setColour (fill);
-    g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (b.getToggleState() || primary ? ui::accent.brighter (0.3f) : ui::outline);
-    g.drawRoundedRectangle (r, 6.0f, 1.0f);
-}
-
-juce::Font ChordSlotsLookAndFeel::getTextButtonFont (juce::TextButton& b, int h)
-{
-    const bool primary = b.getProperties().getWithDefault ("primary", false);
-    return ui::font (primary ? juce::jmin (20.0f, (float) h * 0.45f) : 13.5f, primary);
-}
-
-void ChordSlotsLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos,
-                                              float startAngle, float endAngle, juce::Slider& s)
-{
-    const auto area = juce::Rectangle<int> (x, y, w, h).toFloat().reduced (4.0f);
-    const float radius = juce::jmin (area.getWidth(), area.getHeight()) * 0.5f;
-    const auto centre = area.getCentre();
-    const float angle = startAngle + pos * (endAngle - startAngle);
-    const float thickness = juce::jmax (3.0f, radius * 0.22f);
-
-    juce::Path track, value;
-    track.addCentredArc (centre.x, centre.y, radius - thickness * 0.5f, radius - thickness * 0.5f, 0.0f, startAngle, endAngle, true);
-    value.addCentredArc (centre.x, centre.y, radius - thickness * 0.5f, radius - thickness * 0.5f, 0.0f, startAngle, angle, true);
-
-    g.setColour (ui::panelHi);
-    g.strokePath (track, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    g.setColour (s.findColour (juce::Slider::rotarySliderFillColourId));
-    g.strokePath (value, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-
-    const float inner = radius - thickness - 3.0f;
-    if (inner > 3.0f)
-    {
-        g.setColour (ui::panel.brighter (0.08f));
-        g.fillEllipse (juce::Rectangle<float> (inner * 2.0f, inner * 2.0f).withCentre (centre));
-        g.setColour (ui::text);
-        juce::Path tick;
-        tick.addRoundedRectangle (-1.2f, -inner + 2.0f, 2.4f, inner * 0.5f, 1.2f);
-        g.fillPath (tick, juce::AffineTransform::rotation (angle).translated (centre.x, centre.y));
-    }
-}
-
-void ChordSlotsLookAndFeel::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox& box)
-{
-    const auto r = juce::Rectangle<int> (w, h).toFloat().reduced (0.75f);
-    g.setColour (ui::panel);
-    g.fillRoundedRectangle (r, 5.0f);
-    g.setColour (box.hasKeyboardFocus (true) ? ui::accent : ui::outline);
-    g.drawRoundedRectangle (r, 5.0f, 1.0f);
-
-    juce::Path arrow;
-    const float cx = (float) w - 13.0f, cy = (float) h * 0.5f;
-    arrow.startNewSubPath (cx - 4.0f, cy - 2.0f);
-    arrow.lineTo (cx, cy + 2.5f);
-    arrow.lineTo (cx + 4.0f, cy - 2.0f);
-    g.setColour (ui::textDim);
-    g.strokePath (arrow, juce::PathStrokeType (1.6f));
-}
-
-juce::Font ChordSlotsLookAndFeel::getComboBoxFont (juce::ComboBox&) { return ui::font (14.0f); }
-juce::Font ChordSlotsLookAndFeel::getPopupMenuFont() { return ui::font (14.0f); }
-juce::Font ChordSlotsLookAndFeel::getLabelFont (juce::Label& l) { return l.getFont(); }
-
-//==============================================================================
-TimelineView::TimelineView (ChordSlotsProcessor& p) : processor (p) {}
-
-void TimelineView::setProgression (const cs::Progression& p)
-{
-    prog = p;
-    if (selected >= prog.numSlots)
-        selected = -1;
-    repaint();
-}
-
-void TimelineView::setPlayhead (double step)
-{
-    if (std::abs (step - playhead) > 1.0e-6)
-    {
-        playhead = step;
-        repaint();
-    }
-}
-
-float TimelineView::xForStep (double step) const
-{
-    return (float) (step / (double) prog.lengthSteps()) * (float) getWidth();
-}
-
-int TimelineView::stepForX (float x) const
-{
-    return (int) std::lround ((double) x / juce::jmax (1, getWidth()) * prog.lengthSteps());
-}
-
-int TimelineView::cutAt (float x) const
-{
-    for (int i = 1; i < prog.numSlots; ++i)
-        if (std::abs (x - xForStep (prog.slots[(size_t) i].start)) <= 5.0f)
-            return i;
-    return -1;
-}
-
-int TimelineView::slotAt (float x) const
-{
-    const double step = (double) x / juce::jmax (1, getWidth()) * prog.lengthSteps();
-    for (int i = prog.numSlots - 1; i >= 0; --i)
-        if (step >= prog.slots[(size_t) i].start)
-            return i;
-    return 0;
-}
-
-juce::Rectangle<float> TimelineView::slotBounds (int i) const
-{
-    const float x0 = xForStep (prog.slots[(size_t) i].start);
-    const float x1 = xForStep (prog.slotEnd (i));
-    return { x0 + 1.5f, 18.0f, juce::jmax (2.0f, x1 - x0 - 3.0f), (float) getHeight() - 18.0f };
-}
-
-juce::Rectangle<float> TimelineView::lockBounds (int i) const
-{
-    const auto r = slotBounds (i);
-    return { r.getRight() - 21.0f, r.getY() + 7.0f, 13.0f, 14.0f };
-}
-
-void TimelineView::paint (juce::Graphics& g)
-{
-    // Ruler: bars and beats
-    const int len = prog.lengthSteps();
-    const auto m = prog.meter();
-    const int barSteps = m.stepsPerBar;
-
-    if (m.num == 6 && m.den == 8)
-    {
-        for (int step = 0; step <= len; step += 12)
-        {
-            const bool bar = step % barSteps == 0;
-            const bool compound = step % 36 == 0;
-            const float x = juce::jlimit (0.5f, (float) getWidth() - 0.5f, xForStep (step));
-            g.setColour (bar ? ui::textDim : (compound ? ui::outline.brighter (0.2f) : ui::outline.withAlpha (0.4f)));
-            g.drawVerticalLine ((int) x, bar ? 2.0f : (compound ? 7.0f : 11.0f), 15.0f);
-            if (bar && step < len)
-            {
-                g.setFont (ui::font (10.5f));
-                g.drawText (juce::String (step / barSteps + 1), (int) x + 4, 0, 30, 13, juce::Justification::centredLeft);
-            }
-        }
-    }
-    else
-    {
-        for (int step = 0; step <= len; step += cs::kStepsPerQuarter)
-        {
-            const bool bar = step % barSteps == 0;
-            const float x = juce::jlimit (0.5f, (float) getWidth() - 0.5f, xForStep (step));
-            g.setColour (bar ? ui::textDim : ui::outline);
-            g.drawVerticalLine ((int) x, bar ? 2.0f : 8.0f, 15.0f);
-            if (bar && step < len)
-            {
-                g.setFont (ui::font (10.5f));
-                g.drawText (juce::String (step / barSteps + 1), (int) x + 4, 0, 30, 13, juce::Justification::centredLeft);
-            }
-        }
-    }
-
-    for (int i = 0; i < prog.numSlots; ++i)
-    {
-        const cs::Slot& s = prog.slots[(size_t) i];
-        const auto r = slotBounds (i);
-        const juce::Colour fill = ui::colourForBrightness (s.brightness);
-        const bool lightText = fill.getPerceivedBrightness() < 0.6f;
-        const juce::Colour ink = lightText ? juce::Colours::white : juce::Colour (0xff1a1630);
-
-        g.setColour (i == hoverSlot && hoverCut < 0 ? fill.brighter (0.12f) : fill);
-        g.fillRoundedRectangle (r, 7.0f);
-
-        // Tension as a strip along the bottom edge.
-        {
-            juce::Graphics::ScopedSaveState state (g);
-            juce::Path clip;
-            clip.addRoundedRectangle (r, 7.0f);
-            g.reduceClipRegion (clip);
-            g.setColour (ui::tension.withAlpha (0.9f));
-            g.fillRect (r.getX(), r.getBottom() - 4.0f, r.getWidth() * s.tension, 4.0f);
-        }
-
-        const int triggered = processor.getTriggeredSlot();
-        if (i == triggered)
-        {
-            g.setColour (ui::energy.withAlpha (0.40f));
-            g.fillRoundedRectangle (r, 6.0f);
-            g.setColour (ui::energy.brighter (0.4f));
-            g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 2.5f);
-        }
-        else if (s.locked || i == selected)
-        {
-            g.setColour (s.locked ? ui::accent.brighter (0.25f) : juce::Colours::white.withAlpha (0.7f));
-            g.drawRoundedRectangle (r.reduced (1.0f), 6.0f, s.locked ? 2.0f : 1.2f);
-        }
-
-        if (r.getWidth() > 26.0f)
-        {
-            const juce::String name = utf8 (cs::chordName (s.chord, prog.tonic, prog.scale));
-            const float size = juce::jlimit (12.0f, 26.0f, r.getWidth() / juce::jmax (2.0f, (float) name.length() * 0.62f));
-            auto textArea = r.reduced (6.0f, 0.0f);
-            g.setColour (ink);
-            g.setFont (ui::font (size, true));
-            g.drawText (name, textArea.withHeight (r.getHeight() * 0.62f).translated (0.0f, r.getHeight() * 0.10f),
-                        juce::Justification::centred, false);
-
-            g.setColour (ink.withAlpha (0.72f));
-            g.setFont (ui::font (12.0f));
-            g.drawText (utf8 (cs::romanNumeral (s.chord, prog.tonic)),
-                        textArea.withTop (r.getBottom() - 30.0f).withHeight (18.0f), juce::Justification::centred, false);
-
-            if (r.getWidth() > 44.0f)
-            {
-                const bool show = s.locked || i == hoverSlot;
-                if (show)
-                    drawPadlock (g, lockBounds (i), s.locked ? ink : ink.withAlpha (hoverLock && i == hoverSlot ? 0.9f : 0.4f), s.locked);
-            }
-        }
-    }
-
-    if (hoverCut > 0 || dragCut > 0)
-    {
-        const int c = dragCut > 0 ? dragCut : hoverCut;
-        if (c < prog.numSlots)
-        {
-            const float x = xForStep (prog.slots[(size_t) c].start);
-            g.setColour (juce::Colours::white);
-            g.fillRoundedRectangle (x - 1.5f, 22.0f, 3.0f, (float) getHeight() - 26.0f, 1.5f);
-        }
-    }
-
-    if (playhead >= 0.0)
-    {
-        const float x = xForStep (playhead);
-        g.setColour (juce::Colours::white.withAlpha (0.9f));
-        g.fillRect (x - 1.0f, 14.0f, 2.0f, (float) getHeight() - 14.0f);
-    }
-}
-
-void TimelineView::mouseMove (const juce::MouseEvent& e)
-{
-    const int cut = cutAt ((float) e.x);
-    const int slot = slotAt ((float) e.x);
-    const bool lock = cut < 0 && lockBounds (slot).expanded (5.0f).contains (e.position);
-    if (cut != hoverCut || slot != hoverSlot || lock != hoverLock)
-    {
-        hoverCut = cut;
-        hoverSlot = slot;
-        hoverLock = lock;
-        setMouseCursor (cut > 0 ? juce::MouseCursor::LeftRightResizeCursor
-                                : (lock ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor));
-        repaint();
-    }
-}
-
-void TimelineView::mouseExit (const juce::MouseEvent&)
-{
-    hoverCut = hoverSlot = -1;
-    hoverLock = false;
-    repaint();
-}
-
-void TimelineView::mouseDown (const juce::MouseEvent& e)
-{
-    const int cut = cutAt ((float) e.x);
-    const int slot = slotAt ((float) e.x);
-
-    if (e.mods.isPopupMenu())
-    {
-        showSlotMenu (slot, stepForX ((float) e.x));
-        return;
-    }
-
-    if (cut > 0)
-    {
-        dragCut = cut;
-        processor.beginGesture();
-        return;
-    }
-
-    if (lockBounds (slot).expanded (5.0f).contains (e.position))
-    {
-        processor.edit ([slot] (cs::Progression& p, cs::Rng&)
-        {
-            if (slot < p.numSlots)
-                p.slots[(size_t) slot].locked = ! p.slots[(size_t) slot].locked;
-        });
-        return;
-    }
-
-    selected = slot;
-    processor.auditionSlot (slot);
-    repaint();
-}
-
-void TimelineView::mouseDrag (const juce::MouseEvent& e)
-{
-    if (dragCut <= 0)
-        return;
-    const int cut = dragCut;
-    const int step = stepForX ((float) e.x);
-    processor.edit ([cut, step] (cs::Progression& p, cs::Rng&) { cs::moveCut (p, cut, step); }, false);
-}
-
-void TimelineView::mouseUp (const juce::MouseEvent&)
-{
-    dragCut = -1;
-    repaint();
-}
-
-void TimelineView::mouseDoubleClick (const juce::MouseEvent& e)
-{
-    const int cut = cutAt ((float) e.x);
-    if (cut > 0)
-    {
-        processor.edit ([cut] (cs::Progression& p, cs::Rng&) { cs::removeSlot (p, cut); });
-        return;
-    }
-    const int slot = slotAt ((float) e.x);
-    const int step = stepForX ((float) e.x);
-    processor.edit ([slot, step] (cs::Progression& p, cs::Rng&) { cs::splitSlot (p, slot, step); });
-}
-
-void TimelineView::showSlotMenu (int slot, int step)
-{
-    if (slot < 0 || slot >= prog.numSlots)
-        return;
-
-    const auto alts = cs::alternatives (prog, slot, 10);
-    juce::PopupMenu menu;
-    menu.addSectionHeader ("Replace with (best fit first)");
-    for (int i = 0; i < (int) alts.size(); ++i)
-    {
-        const auto m = cs::chordMetrics (alts[(size_t) i], prog.tonic, prog.scale);
-        const juce::String label = utf8 (cs::chordName (alts[(size_t) i], prog.tonic, prog.scale)) + "    "
-                                   + utf8 (cs::romanNumeral (alts[(size_t) i], prog.tonic))
-                                   + "    bright " + juce::String (juce::roundToInt (m.brightness * 100.0f))
-                                   + "  tense " + juce::String (juce::roundToInt (m.tension * 100.0f));
-        menu.addItem (100 + i, label);
-    }
-    menu.addSeparator();
-
-    // Bass note submenu
-    juce::PopupMenu bassMenu;
-    const cs::Chord curChord = prog.slots[(size_t) slot].chord;
-    const auto& t = cs::chordTypes()[(size_t) curChord.type];
-    const int currentBassInt = curChord.bassInt;
-    const juce::String rootNoteName = utf8 (cs::pitchClassName (curChord.root, prog.tonic, prog.scale));
-    bassMenu.addItem (200, "Root: " + rootNoteName + " (root position)", true, currentBassInt == 0);
-
-    std::vector<int> bassOptions;
-    int optIdx = 0;
-    for (int iv : t.iv)
-    {
-        const int ivNorm = cs::mod12 (iv);
-        if (ivNorm == 0)
-            continue;
-        if (std::find (bassOptions.begin(), bassOptions.end(), ivNorm) != bassOptions.end())
-            continue;
-        bassOptions.push_back (ivNorm);
-
-        const int notePc = cs::mod12 (curChord.root + ivNorm);
-        const juce::String noteName = utf8 (cs::pitchClassName (notePc, prog.tonic, prog.scale));
-        juce::String desc;
-        if (ivNorm == 3 || ivNorm == 4)
-            desc = "3rd (1st inv)";
-        else if (ivNorm == 6 || ivNorm == 7 || ivNorm == 8)
-            desc = "5th (2nd inv)";
-        else if (ivNorm == 9 || ivNorm == 10 || ivNorm == 11)
-            desc = "7th (3rd inv)";
-        else if (ivNorm == 2)
-            desc = "9th";
-        else if (ivNorm == 5)
-            desc = "4th/11th";
-        else
-            desc = juce::String (ivNorm) + " semitones";
-
-        bassMenu.addItem (201 + optIdx, desc + ": " + noteName, true, currentBassInt == ivNorm);
-        ++optIdx;
-    }
-    menu.addSubMenu ("Bass note", bassMenu);
-
-    menu.addItem (1, prog.slots[(size_t) slot].locked ? "Unlock slot" : "Lock slot");
-    menu.addItem (2, "Split here", prog.numSlots < cs::kMaxSlots);
-    menu.addItem (3, "Merge with previous", slot > 0);
-
-    juce::Component::SafePointer<TimelineView> safe (this);
-    menu.showMenuAsync (juce::PopupMenu::Options().withParentComponent (getTopLevelComponent()).withMousePosition(),
-                        [safe, slot, step, alts, bassOptions] (int result)
-    {
-        if (safe == nullptr || result == 0)
-            return;
-        auto& proc = safe->processor;
-        if (result >= 100 && result - 100 < (int) alts.size())
-        {
-            const cs::Chord c = alts[(size_t) (result - 100)];
-            proc.edit ([slot, c] (cs::Progression& p, cs::Rng& rng) { cs::setChord (p, slot, c, rng); });
-            proc.auditionSlot (slot);
-        }
-        else if (result == 200)
-        {
-            proc.edit ([slot] (cs::Progression& p, cs::Rng&) { cs::setBass (p, slot, 0); });
-            proc.auditionSlot (slot);
-        }
-        else if (result >= 201 && result - 201 < (int) bassOptions.size())
-        {
-            const int bInt = bassOptions[(size_t) (result - 201)];
-            proc.edit ([slot, bInt] (cs::Progression& p, cs::Rng&) { cs::setBass (p, slot, bInt); });
-            proc.auditionSlot (slot);
-        }
-        else if (result == 1)
-            proc.edit ([slot] (cs::Progression& p, cs::Rng&) { if (slot < p.numSlots) p.slots[(size_t) slot].locked = ! p.slots[(size_t) slot].locked; });
-        else if (result == 2)
-            proc.edit ([slot, step] (cs::Progression& p, cs::Rng&) { cs::splitSlot (p, slot, step); });
-        else if (result == 3)
-            proc.edit ([slot] (cs::Progression& p, cs::Rng&) { cs::removeSlot (p, slot); });
-    });
-}
-
-//==============================================================================
-LanesView::LanesView (ChordSlotsProcessor& p) : processor (p) {}
-
-void LanesView::setProgression (const cs::Progression& p)
-{
-    prog = p;
-    repaint();
-}
-
-juce::Rectangle<float> LanesView::laneBounds (int lane) const
-{
-    const float gap = 8.0f;
-    const float h = ((float) getHeight() - 2.0f * gap) / 3.0f;
-    return { 0.0f, (float) lane * (h + gap), (float) getWidth(), h };
-}
-
-void LanesView::paint (juce::Graphics& g)
-{
-    const double len = (double) prog.lengthSteps();
-    for (int lane = 0; lane < 3; ++lane)
-    {
-        const auto lb = laneBounds (lane);
-        const juce::Colour c = laneColours[lane];
-
-        for (int i = 0; i < prog.numSlots; ++i)
-        {
-            const cs::Slot& s = prog.slots[(size_t) i];
-            const float x0 = (float) (s.start / len) * lb.getWidth();
-            const float x1 = (float) (prog.slotEnd (i) / len) * lb.getWidth();
-            const juce::Rectangle<float> col (x0 + 1.5f, lb.getY(), juce::jmax (2.0f, x1 - x0 - 3.0f), lb.getHeight());
-
-            g.setColour (ui::panel);
-            g.fillRoundedRectangle (col, 5.0f);
-
-            const float target = targetOf (s, lane);
-            const float actual = actualOf (s, lane);
-            const float alpha = s.locked ? 0.45f : 1.0f;
-            const auto usable = col.reduced (0.0f, 3.0f);
-            const float ty = usable.getBottom() - target * usable.getHeight();
-
-            {
-                juce::Graphics::ScopedSaveState state (g);
-                juce::Path clip;
-                clip.addRoundedRectangle (col, 5.0f);
-                g.reduceClipRegion (clip);
-                g.setColour (c.withAlpha (0.28f * alpha));
-                g.fillRect (col.withTop (ty));
-                g.setColour (c.withAlpha (alpha));
-                g.fillRect (col.getX(), ty - 1.0f, col.getWidth(), 2.0f);
-            }
-
-            // Measured value of the chord that is actually there.
-            const float ay = usable.getBottom() - actual * usable.getHeight();
-            const float cx = col.getCentreX();
-            const float half = juce::jmin (9.0f, col.getWidth() * 0.5f - 1.0f);
-            if (half > 1.0f)
-            {
-                g.setColour (juce::Colours::white.withAlpha (0.92f * alpha));
-                g.fillRoundedRectangle (cx - half, ay - 1.5f, half * 2.0f, 3.0f, 1.5f);
-            }
-        }
-
-        g.setColour (c.withAlpha (0.9f));
-        g.setFont (ui::font (10.5f, true));
-        g.drawText (laneNames[lane], lb.reduced (9.0f, 5.0f).toNearestInt(), juce::Justification::topLeft, false);
-    }
-}
-
-void LanesView::applyDrag (const juce::MouseEvent& e)
-{
-    if (dragLane < 0)
-        return;
-    const auto lb = laneBounds (dragLane).reduced (0.0f, 3.0f);
-    const float value = juce::jlimit (0.0f, 1.0f, (lb.getBottom() - e.position.y) / lb.getHeight());
-    const double step = (double) e.position.x / juce::jmax (1, getWidth()) * prog.lengthSteps();
-
-    int slot = 0;
-    for (int i = prog.numSlots - 1; i >= 0; --i)
-        if (step >= prog.slots[(size_t) i].start)
-        {
-            slot = i;
-            break;
-        }
-
-    editedMask |= 1u << slot;
-    const int lane = dragLane;
-    processor.edit ([slot, lane, value] (cs::Progression& p, cs::Rng&)
-    {
-        if (slot < p.numSlots)
-        {
-            targetRef (p.slots[(size_t) slot], lane) = value;
-            p.mood = -1;
-        }
-    }, false);
-}
-
-void LanesView::mouseDown (const juce::MouseEvent& e)
-{
-    dragLane = -1;
-    for (int lane = 0; lane < 3; ++lane)
-        if (laneBounds (lane).expanded (0.0f, 4.0f).contains (e.position))
-            dragLane = lane;
-    if (dragLane < 0)
-        return;
-    editedMask = 0;
-    processor.beginGesture();
-    applyDrag (e);
-}
-
-void LanesView::mouseDrag (const juce::MouseEvent& e) { applyDrag (e); }
-
-void LanesView::mouseUp (const juce::MouseEvent&)
-{
-    if (dragLane < 0 || editedMask == 0)
-        return;
-    const unsigned mask = editedMask;
-    const bool energy = dragLane == 2;
-    dragLane = -1;
-    // Releasing the mouse makes the edited slots follow their new targets;
-    // everything else stays exactly as it was.
-    processor.edit ([mask, energy] (cs::Progression& p, cs::Rng& rng)
-    {
-        if (energy)
-            cs::applyEnergy (p, rng);
-        else
-            cs::rerollSlots (p, mask, rng);
-    }, false);
-}
-
-//==============================================================================
-MidiDragTile::MidiDragTile (ChordSlotsProcessor& p,
-                           ChordSlotsProcessor::MidiExportMode mode,
-                           const juce::String& label)
-    : processor (p), exportMode (mode), tileLabel (label)
-{
-    setMouseCursor (juce::MouseCursor::DraggingHandCursor);
-}
-
-void MidiDragTile::paint (juce::Graphics& g)
-{
-    const auto r = getLocalBounds().toFloat().reduced (0.75f);
-    g.setColour (isMouseOver() ? ui::panelHi.brighter (0.1f) : ui::panelHi);
-    g.fillRoundedRectangle (r, 5.0f);
-    g.setColour (ui::outline);
-    const float dashes[] = { 4.0f, 3.0f };
-    juce::Path outlinePath, dashed;
-    outlinePath.addRoundedRectangle (r, 5.0f);
-    juce::PathStrokeType (1.2f).createDashedStroke (dashed, outlinePath, dashes, 2);
-    g.setColour (ui::textDim);
-    g.fillPath (dashed);
-
-    if (r.getHeight() >= 36.0f)
-    {
-        // Tiny piano-roll glyph
-        const auto icon = r.withSizeKeepingCentre (26.0f, 16.0f).translated (0.0f, -8.0f);
-        g.setColour (ui::accent.brighter (0.2f));
-        g.fillRoundedRectangle (icon.getX(), icon.getY(), 12.0f, 3.5f, 1.5f);
-        g.fillRoundedRectangle (icon.getX() + 7.0f, icon.getY() + 6.0f, 14.0f, 3.5f, 1.5f);
-        g.fillRoundedRectangle (icon.getX() + 14.0f, icon.getY() + 12.0f, 12.0f, 3.5f, 1.5f);
-
-        g.setColour (ui::text);
-        g.setFont (ui::font (12.0f, true));
-        g.drawText (tileLabel, r.withTrimmedTop (r.getHeight() * 0.52f).toNearestInt(), juce::Justification::centred, false);
-    }
-    else
-    {
-        // Compact height for dual stacked tiles (Chords / Bass)
-        g.setColour (exportMode == ChordSlotsProcessor::MidiExportMode::BassOnly ? ui::accent.brighter (0.35f) : ui::accent);
-        const float tagY = r.getCentreY() - 3.5f;
-        g.fillRoundedRectangle (r.getX() + 6.0f, tagY, 7.0f, 7.0f, 1.5f);
-
-        g.setColour (ui::text);
-        g.setFont (ui::font (11.0f, true));
-        g.drawText (tileLabel, r.withTrimmedLeft (16.0f).toNearestInt(), juce::Justification::centredLeft, false);
-    }
-}
-
-void MidiDragTile::mouseDrag (const juce::MouseEvent& e)
-{
-    if (dragging || e.getDistanceFromDragStart() < 6)
-        return;
-    const juce::File file = processor.writeTempMidiFile (exportMode);
-    if (file.existsAsFile())
-    {
-        dragging = true;
-        juce::DragAndDropContainer::performExternalDragDropOfFiles ({ file.getFullPathName() }, false, this);
-    }
-}
-
-//==============================================================================
 ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
-    : AudioProcessorEditor (p),
+    : juce::AudioProcessorEditor (&p),
       processor (p),
       timeline (p),
+      pickerOverlay (p),
       lanes (p),
       dragTile (p, ChordSlotsProcessor::MidiExportMode::Master, "Drag MIDI"),
-      dragChordsTile (p, ChordSlotsProcessor::MidiExportMode::ChordsOnly, "Drag Chords"),
-      dragBassTile (p, ChordSlotsProcessor::MidiExportMode::BassOnly, "Drag Bass"),
+      dragChordsTile (p, ChordSlotsProcessor::MidiExportMode::ChordsOnly, "Chords"),
+      dragBassTile (p, ChordSlotsProcessor::MidiExportMode::BassOnly, "Bass"),
       gateAttachment (p.apvts, "gate", gate),
-      volumeAttachment (p.apvts, "synthVol", volume),
+      volumeAttachment (p.apvts, "volume", volume),
       strumAttachment (p.apvts, "strum", strum),
       accentAttachment (p.apvts, "accent", accent),
       humanizeAttachment (p.apvts, "humanize", humanize),
@@ -703,67 +24,47 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 {
     setLookAndFeel (&lnf);
 
+    // Header Combos
     setupCombo (keyBox, keyLabel, "KEY");
     setupCombo (scaleBox, scaleLabel, "SCALE");
     setupCombo (barsBox, barsLabel, "BARS");
     setupCombo (meterBox, meterLabel, "METER");
     setupCombo (slotsBox, slotsLabel, "SLOTS");
-    setupCombo (snapBox, snapLabel, "CUT GRID");
-    setupCombo (moodBox, moodLabel, "MOOD (TARGET CURVES)");
-    setupCombo (triggerModeBox, triggerModeLabel, "TRIGGER");
-    setupCombo (triggerMapBox, triggerMapLabel, "MAP");
+    setupCombo (snapBox, snapLabel, "GRID");
+
+    for (int pc = 0; pc < 12; ++pc)
+        keyBox.addItem (utf8 (cs::pitchClassName (pc, pc, 0)), pc + 1);
 
     for (int i = 0; i < cs::numScales(); ++i)
         scaleBox.addItem (cs::scales()[(size_t) i].name, i + 1);
+
     for (int b : { 1, 2, 4, 8 })
-        barsBox.addItem (juce::String (b), b);
+        barsBox.addItem (juce::String (b) + (b == 1 ? " bar" : " bars"), b);
+
     meterBox.addItem ("4/4", 1);
     meterBox.addItem ("3/4", 2);
     meterBox.addItem ("6/8", 3);
     meterBox.addItem ("Host", 4);
-    for (int i = 1; i <= cs::kMaxSlots; ++i)
-        slotsBox.addItem (juce::String (i), i);
+
+    for (int n : { 2, 3, 4, 5, 6, 7, 8, 12, 16 })
+        slotsBox.addItem (juce::String (n), n);
+
     snapBox.addItem ("1/4", 24);
-    snapBox.addItem ("1/4T", 16);
+    snapBox.addItem ("1/4 T", 16);
     snapBox.addItem ("1/8", 12);
-    snapBox.addItem ("1/8T", 8);
+    snapBox.addItem ("1/8 T", 8);
     snapBox.addItem ("1/16", 6);
-    snapBox.addItem ("1/16T", 4);
+    snapBox.addItem ("1/16 T", 4);
     snapBox.addItem ("1/32", 3);
-    for (int i = 0; i < (int) cs::moods().size(); ++i)
-        moodBox.addItem (cs::moods()[(size_t) i].name, i + 1);
-    moodBox.setTextWhenNothingSelected ("Custom");
 
-    triggerModeBox.addItem ("Auto", 1);
-    triggerModeBox.addItem ("Trigger Only", 2);
-    triggerModeBox.addItem ("Loop Only", 3);
+    const auto& m = cs::moods();
+    for (int i = 0; i < (int) m.size(); ++i)
+        moodBox.addItem (m[(size_t) i].name, i + 1);
 
-    triggerMapBox.addItem ("White Keys (C3)", 1);
-    triggerMapBox.addItem ("Chromatic (C3)", 2);
-    triggerMapBox.addItem ("Pads (C1)", 3);
-
-    triggerModeBox.onChange = [this]
-    {
-        if (refreshing) return;
-        const int mode = triggerModeBox.getSelectedId() - 1;
-        if (auto* param = processor.apvts.getParameter ("triggerMode"))
-            param->setValueNotifyingHost (param->convertTo0to1 ((float) mode));
-    };
-
-    triggerMapBox.onChange = [this]
-    {
-        if (refreshing) return;
-        const int id = triggerMapBox.getSelectedId();
-        int root = 60;
-        int layout = 0;
-        if (id == 2) { root = 60; layout = 1; }
-        else if (id == 3) { root = 36; layout = 1; }
-
-        if (auto* param = processor.apvts.getParameter ("triggerRoot"))
-            param->setValueNotifyingHost (param->convertTo0to1 ((float) root));
-        if (auto* param = processor.apvts.getParameter ("triggerLayout"))
-            param->setValueNotifyingHost (param->convertTo0to1 ((float) layout));
-    };
+    // Input / Trigger popover button
+    inputButton.setTooltip ("Configure incoming MIDI trigger mode and note mapping");
+    inputButton.onClick = [this] { showInputMenu(); };
+    addAndMakeVisible (inputButton);
 
     keyBox.onChange = [this]
     {
@@ -771,6 +72,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         const int tonic = keyBox.getSelectedId() - 1;
         processor.edit ([tonic] (cs::Progression& pr, cs::Rng&) { cs::setTonic (pr, tonic); });
     };
+
     scaleBox.onChange = [this]
     {
         if (refreshing) return;
@@ -784,12 +86,14 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
             pr.locks.rhythm = keep;
         });
     };
+
     barsBox.onChange = [this]
     {
         if (refreshing) return;
         const int bars = barsBox.getSelectedId();
         processor.edit ([bars] (cs::Progression& pr, cs::Rng&) { cs::setBars (pr, bars); });
     };
+
     meterBox.onChange = [this]
     {
         if (refreshing) return;
@@ -811,6 +115,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
             processor.setMeter (num, den);
         }
     };
+
     slotsBox.onChange = [this]
     {
         if (refreshing) return;
@@ -822,7 +127,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
             {
                 const int scale = pr.scale;
                 const float adv = pr.adventure, sync = pr.syncopation;
-                cs::applyMood (pr, pr.mood, false); // re-spread the curves over the new slot count
+                cs::applyMood (pr, pr.mood, false); // re-spread curves over new slot count
                 pr.scale = scale;
                 pr.adventure = adv;
                 pr.syncopation = sync;
@@ -830,12 +135,14 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
             cs::roll (pr, rng);
         });
     };
+
     snapBox.onChange = [this]
     {
         if (refreshing) return;
         const int snap = snapBox.getSelectedId();
         processor.edit ([snap] (cs::Progression& pr, cs::Rng&) { pr.snap = snap; }, false);
     };
+
     moodBox.onChange = [this]
     {
         if (refreshing || moodBox.getSelectedId() == 0) return;
@@ -847,99 +154,18 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         });
     };
 
+    // Fit score badge
     fitCaption.setText ("FIT", juce::dontSendNotification);
-    fitCaption.setFont (ui::font (10.5f, true));
+    fitCaption.setFont (ui::font (10.0f, true));
     fitCaption.setColour (juce::Label::textColourId, ui::textDim);
     fitCaption.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (fitCaption);
-    fitLabel.setFont (ui::font (26.0f, true));
+
+    fitLabel.setFont (ui::font (24.0f, true));
     fitLabel.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (fitLabel);
 
-    addAndMakeVisible (timeline);
-    addAndMakeVisible (lanes);
-
-    lockCaption.setText ("LOCK  (survives Roll)", juce::dontSendNotification);
-    lockCaption.setFont (ui::font (10.5f, true));
-    lockCaption.setColour (juce::Label::textColourId, ui::textDim);
-    addAndMakeVisible (lockCaption);
-
-    struct LockDef
-    {
-        juce::TextButton* button;
-        bool cs::Locks::* field;
-    };
-    for (const LockDef& d : { LockDef { &lockRhythm, &cs::Locks::rhythm }, LockDef { &lockRoots, &cs::Locks::roots },
-                              LockDef { &lockColors, &cs::Locks::colors }, LockDef { &lockVoicing, &cs::Locks::voicing } })
-    {
-        d.button->setClickingTogglesState (true);
-        auto* button = d.button;
-        const auto field = d.field;
-        button->onClick = [this, button, field]
-        {
-            const bool on = button->getToggleState();
-            processor.edit ([field, on] (cs::Progression& pr, cs::Rng&) { pr.locks.*field = on; }, false);
-        };
-        addAndMakeVisible (*button);
-    }
-
-    setupKnob (adventure, adventureLabel, "ADVENTURE");
-    setupKnob (syncopation, syncopationLabel, "SYNCOPATION");
-    setupKnob (bassMotion, bassMotionLabel, "BASS MOTION");
-    setupKnob (strum, strumLabel, "STRUM");
-    setupKnob (accent, accentLabel, "ACCENT");
-    setupKnob (humanize, humanizeLabel, "HUMANIZE");
-    setupKnob (gate, gateLabel, "GATE");
-    setupKnob (volume, volumeLabel, "SYNTH VOL");
-    adventure.setRange (0.0, 1.0, 0.01);
-    syncopation.setRange (0.0, 1.0, 0.01);
-    bassMotion.setRange (0.0, 1.0, 0.01);
-    strum.setRange (-1.0, 1.0, 0.01);
-    accent.setRange (0.0, 1.0, 0.01);
-    humanize.setRange (0.0, 1.0, 0.01);
-    adventure.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
-    syncopation.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
-    bassMotion.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
-    strum.setColour (juce::Slider::rotarySliderFillColourId, ui::energy);
-    accent.setColour (juce::Slider::rotarySliderFillColourId, ui::energy);
-    humanize.setColour (juce::Slider::rotarySliderFillColourId, ui::energy);
-    gate.setColour (juce::Slider::rotarySliderFillColourId, ui::textDim);
-    volume.setColour (juce::Slider::rotarySliderFillColourId, ui::textDim);
-
-    adventure.onValueChange = [this]
-    {
-        if (refreshing) return;
-        const float v = (float) adventure.getValue();
-        processor.edit ([v] (cs::Progression& pr, cs::Rng&) { pr.adventure = v; }, false);
-    };
-    syncopation.onValueChange = [this]
-    {
-        if (refreshing) return;
-        const float v = (float) syncopation.getValue();
-        processor.edit ([v] (cs::Progression& pr, cs::Rng&) { pr.syncopation = v; }, false);
-    };
-    bassMotion.onValueChange = [this]
-    {
-        if (refreshing) return;
-        const float v = (float) bassMotion.getValue();
-        processor.edit ([v] (cs::Progression& pr, cs::Rng&) { pr.bassMotion = v; }, false);
-    };
-
-    refeelButton.setTooltip ("Roll fresh microtiming and velocity jitter (keeps chords)");
-    refeelButton.onClick = [this] { processor.refeel(); };
-    rollButton.getProperties().set ("primary", true);
-    rollButton.onClick = [this] { processor.edit ([] (cs::Progression& pr, cs::Rng& rng) { cs::roll (pr, rng); }); };
-    undoButton.onClick = [this] { processor.undo(); };
-    playButton.onClick = [this] { processor.setPreviewPlaying (! processor.isPreviewPlaying()); };
-    saveButton.onClick = [this] { saveMidi(); };
-    splitMidiButton.setTooltip ("Split MIDI output: Chords on Channel 1, Bass on Channel 2");
-    splitMidiButton.setClickingTogglesState (true);
-    for (auto* b : { &undoButton, &refeelButton, &rollButton, &playButton, &saveButton, &splitMidiButton })
-        addAndMakeVisible (*b);
-    addAndMakeVisible (dragTile);
-    addChildComponent (dragChordsTile);
-    addChildComponent (dragBassTile);
-
+    // Variation bank
     variationLabel.setText ("VARIATION", juce::dontSendNotification);
     variationLabel.setFont (ui::font (10.0f, true));
     variationLabel.setColour (juce::Label::textColourId, ui::textDim);
@@ -947,10 +173,12 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     addAndMakeVisible (variationLabel);
 
     followButton.setButtonText ("Follow");
-    followButton.setColour (juce::ToggleButton::textColourId, ui::textDim);
-    followButton.setColour (juce::ToggleButton::tickColourId, ui::accent);
-    followButton.setToggleState (processor.isFollowingPlayback(), juce::dontSendNotification);
-    followButton.onClick = [this] { processor.setFollowPlayback (followButton.getToggleState()); };
+    followButton.setClickingTogglesState (true);
+    followButton.setTooltip ("When enabled, editing follows the playing variation");
+    followButton.onClick = [this]
+    {
+        processor.setFollowPlayback (followButton.getToggleState());
+    };
     addAndMakeVisible (followButton);
 
     const char* const varNames[] = { "A", "B", "C", "D" };
@@ -958,6 +186,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     {
         varButtons[i].setButtonText (varNames[i]);
         varButtons[i].setClickingTogglesState (false);
+        varButtons[i].setTooltip (juce::String ("Switch to Variation ") + varNames[i]);
         varButtons[i].onClick = [this, i]
         {
             processor.setEditVariation (i);
@@ -988,21 +217,285 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     };
     addAndMakeVisible (copyVarButton);
 
-    hint.setText (juce::String::fromUTF8 ("Click a slot to hear it  \xc2\xb7  right-click for alternatives  \xc2\xb7  drag the edges to move cuts  \xc2\xb7  "
-                                          "double-click to split or merge  \xc2\xb7  drag the bars to set targets (white marks = what the chord measures)"),
-                  juce::dontSendNotification);
-    hint.setFont (ui::font (11.5f));
+    // Views
+    addAndMakeVisible (timeline);
+
+    // Lane Toolbar controls
+    laneToolbarLabel.setText ("TARGET CURVES", juce::dontSendNotification);
+    laneToolbarLabel.setFont (ui::font (10.0f, true));
+    laneToolbarLabel.setColour (juce::Label::textColourId, ui::textDim);
+    addAndMakeVisible (laneToolbarLabel);
+
+    setupCombo (moodBox, moodLabel, "MOOD PRESET");
+    for (int i = 0; i < (int) m.size(); ++i)
+        moodBox.addItem (m[(size_t) i].name, i + 1);
+
+    setupCombo (styleBox, styleLabel, "STYLE PRIOR");
+    styleBox.addItem ("Pop/Rock (Billboard)", 1);
+    styleBox.addItem ("Minor Loops (EDM)", 2);
+    styleBox.addItem ("Soul / Jazz", 3);
+    styleBox.addItem ("Free Harmony", 4);
+    styleBox.setSelectedId (1, juce::dontSendNotification);
+
+    setupCombo (shapeBox, shapeLabel, "SHAPES");
+    shapeBox.addItem (juce::String::fromUTF8 ("Shape Stamps ▾"), 1);
+    shapeBox.addItem (juce::String::fromUTF8 ("Rise (0.2 → 0.9)"), 2);
+    shapeBox.addItem (juce::String::fromUTF8 ("Drop (0.9 → 0.2)"), 3);
+    shapeBox.addItem ("Arch (Peak center)", 4);
+    shapeBox.addItem ("Pop Build (Step up)", 5);
+    shapeBox.addItem ("Valley (Dip center)", 6);
+    shapeBox.setSelectedId (1, juce::dontSendNotification);
+    shapeBox.onChange = [this]
+    {
+        const int id = shapeBox.getSelectedId();
+        if (id > 1)
+        {
+            applyShapeStamp (id - 1);
+            shapeBox.setSelectedId (1, juce::dontSendNotification);
+        }
+    };
+
+    resetCurvesBtn.setTooltip ("Reset all target curves to neutral flat (0.50)");
+    resetCurvesBtn.onClick = [this]
+    {
+        processor.edit ([] (cs::Progression& pr, cs::Rng& rng)
+        {
+            for (int i = 0; i < pr.numSlots; ++i)
+            {
+                pr.slots[(size_t) i].targetB = 0.5f;
+                pr.slots[(size_t) i].targetT = 0.5f;
+                pr.slots[(size_t) i].targetE = 0.5f;
+            }
+            cs::roll (pr, rng);
+        });
+    };
+    addAndMakeVisible (resetCurvesBtn);
+
+    analyzeMidiBtn.setButtonText (juce::String::fromUTF8 ("Analyze MIDI ▾"));
+    analyzeMidiBtn.setTooltip ("Import a MIDI file and extract Brightness, Tension, and Energy curves");
+    analyzeMidiBtn.onClick = [this] { analyzeMidi(); };
+    addAndMakeVisible (analyzeMidiBtn);
+
+    addAndMakeVisible (lanes);
+
+    // Overlay
+    pickerOverlay.setVisible (false);
+    pickerOverlay.onClose = [this] { pickerOverlay.setVisible (false); };
+    addChildComponent (pickerOverlay);
+
+    // Footer Panel 1: Locks
+    lockCaption.setText ("LOCKS (Survive Roll)", juce::dontSendNotification);
+    lockCaption.setFont (ui::font (10.0f, true));
+    lockCaption.setColour (juce::Label::textColourId, ui::textDim);
+    addAndMakeVisible (lockCaption);
+
+    struct LockDef
+    {
+        juce::TextButton* button;
+        bool cs::Locks::* field;
+        const char* tip;
+    };
+    for (const LockDef& d : {
+        LockDef { &lockRhythm, &cs::Locks::rhythm, "Locks rhythm and slot cut positions during Roll" },
+        LockDef { &lockRoots,  &cs::Locks::roots,  "Locks chord root notes during Roll" },
+        LockDef { &lockColors, &cs::Locks::colors, "Locks chord types and qualities during Roll" },
+        LockDef { &lockVoicing,&cs::Locks::voicing,"Locks inversions and voice registers during Roll" } })
+    {
+        d.button->setClickingTogglesState (true);
+        d.button->setTooltip (d.tip);
+        auto* button = d.button;
+        const auto field = d.field;
+        button->onClick = [this, button, field]
+        {
+            const bool on = button->getToggleState();
+            processor.edit ([field, on] (cs::Progression& pr, cs::Rng&) { pr.locks.*field = on; }, false);
+        };
+        addAndMakeVisible (*button);
+    }
+
+    // Knobs with numeric text boxes
+    setupKnob (adventure, adventureLabel, "ADVENTURE");
+    setupKnob (syncopation, syncopationLabel, "SYNCOPATION");
+    setupKnob (bassMotion, bassMotionLabel, "BASS MOTION");
+    setupKnob (strum, strumLabel, "STRUM");
+    setupKnob (accent, accentLabel, "ACCENT");
+    setupKnob (humanize, humanizeLabel, "HUMANIZE");
+    setupKnob (gate, gateLabel, "GATE");
+    setupKnob (volume, volumeLabel, "SYNTH VOL");
+
+    adventure.setRange (0.0, 1.0, 0.01);
+    syncopation.setRange (0.0, 1.0, 0.01);
+    bassMotion.setRange (0.0, 1.0, 0.01);
+    strum.setRange (-1.0, 1.0, 0.01);
+    accent.setRange (0.0, 1.0, 0.01);
+    humanize.setRange (0.0, 1.0, 0.01);
+
+    adventure.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
+    syncopation.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
+    bassMotion.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
+    strum.textFromValueFunction = [] (double v)
+    {
+        const int ms = juce::roundToInt (v * 80.0);
+        return (ms > 0 ? "+" : "") + juce::String (ms) + " ms";
+    };
+    accent.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
+    humanize.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 20.0)) + " ms"; };
+    gate.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
+    volume.textFromValueFunction = [] (double v)
+    {
+        return juce::String (juce::Decibels::gainToDecibels ((float) v, -48.0f), 1) + " dB";
+    };
+
+    adventure.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
+    syncopation.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
+    bassMotion.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
+    strum.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 80.0; };
+    accent.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
+    humanize.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 20.0; };
+    gate.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
+    volume.valueFromTextFunction = [] (const juce::String& s)
+    {
+        return (double) juce::Decibels::decibelsToGain ((float) s.getDoubleValue(), -48.0f);
+    };
+
+    adventure.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
+    syncopation.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
+    bassMotion.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
+    strum.setColour (juce::Slider::rotarySliderFillColourId, ui::energy);
+    accent.setColour (juce::Slider::rotarySliderFillColourId, ui::energy);
+    humanize.setColour (juce::Slider::rotarySliderFillColourId, ui::energy);
+    gate.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
+    volume.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
+
+    adventure.onValueChange = [this]
+    {
+        if (refreshing) return;
+        const float val = (float) adventure.getValue();
+        processor.edit ([val] (cs::Progression& pr, cs::Rng&) { pr.adventure = val; }, false);
+    };
+    syncopation.onValueChange = [this]
+    {
+        if (refreshing) return;
+        const float val = (float) syncopation.getValue();
+        processor.edit ([val] (cs::Progression& pr, cs::Rng&) { pr.syncopation = val; }, false);
+    };
+    bassMotion.onValueChange = [this]
+    {
+        if (refreshing) return;
+        const float val = (float) bassMotion.getValue();
+        processor.edit ([val] (cs::Progression& pr, cs::Rng&) { pr.bassMotion = val; }, false);
+    };
+
+    // Groove comping combo
+    setupCombo (compBox, compLabel, "COMPING");
+    compBox.addItem ("Sustain", 1);
+    compBox.addItem ("1/4 Pulse", 2);
+    compBox.addItem ("1/8 Pulse", 3);
+    compBox.addItem ("Offbeat Reggae", 4);
+    compBox.addItem ("Ballad Stabs", 5);
+    compBox.addItem ("Trap Stabs", 6);
+    compBox.addItem ("Triplet Swing", 7);
+    compAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "compStyle", compBox);
+
+    // Synth sound model combo
+    setupCombo (synthModelBox, synthModelLabel, "SOUND");
+    synthModelBox.addItem ("Clean Saw", 1);
+    synthModelBox.addItem ("Rhodes EP", 2);
+    synthModelBox.addItem ("Felt Piano", 3);
+    synthModelAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "synthModel", synthModelBox);
+
+    // Buttons
+    refeelButton.setTooltip ("Re-humanize groove with a fresh timing and velocity seed");
+    refeelButton.onClick = [this] { processor.refeel(); };
+    addAndMakeVisible (refeelButton);
+
+    undoButton.onClick = [this] { processor.undo(); };
+    addAndMakeVisible (undoButton);
+
+    rollButton.getProperties().set ("primary", true);
+    rollButton.setTooltip ("Generate new chords for all unlocked slots");
+    rollButton.onClick = [this]
+    {
+        processor.edit ([] (cs::Progression& pr, cs::Rng& rng) { cs::roll (pr, rng); });
+    };
+    addAndMakeVisible (rollButton);
+
+    playButton.setTooltip ("Toggle built-in preview synth playback");
+    playButton.onClick = [this] { processor.setPreviewPlaying (! processor.isPreviewPlaying()); };
+    addAndMakeVisible (playButton);
+
+    saveButton.setTooltip ("Export progression as standard MIDI file");
+    saveButton.onClick = [this] { saveMidi(); };
+    addAndMakeVisible (saveButton);
+
+    splitMidiButton.setClickingTogglesState (true);
+    splitMidiButton.setTooltip ("Route upper chords to MIDI Ch 1 and monophonic bass to MIDI Ch 2");
+    addAndMakeVisible (splitMidiButton);
+
+    addAndMakeVisible (dragTile);
+    addAndMakeVisible (dragChordsTile);
+    addAndMakeVisible (dragBassTile);
+
+    // Context / Hint Bar & Targeted Rolls
+    rollRootBtn.setTooltip ("Reroll only the root of this slot");
+    rollRootBtn.onClick = [this]
+    {
+        const int s = timeline.getSelectedSlot();
+        if (s >= 0)
+            processor.edit ([s] (cs::Progression& pr, cs::Rng& rng) { cs::rollSlotRoot (pr, s, rng); });
+    };
+    addChildComponent (rollRootBtn);
+
+    rollColorBtn.setTooltip ("Reroll only the chord type/quality of this slot");
+    rollColorBtn.onClick = [this]
+    {
+        const int s = timeline.getSelectedSlot();
+        if (s >= 0)
+            processor.edit ([s] (cs::Progression& pr, cs::Rng& rng) { cs::rollSlotColor (pr, s, rng); });
+    };
+    addChildComponent (rollColorBtn);
+
+    rollBassBtn.setTooltip ("Cycle or reroll the bass inversion of this slot");
+    rollBassBtn.onClick = [this]
+    {
+        const int s = timeline.getSelectedSlot();
+        if (s >= 0)
+            processor.edit ([s] (cs::Progression& pr, cs::Rng&) { cs::rollSlotBass (pr, s); });
+    };
+    addChildComponent (rollBassBtn);
+
+    inspectBtn.setTooltip ("Open full chord inspector & alternative substitutions");
+    inspectBtn.onClick = [this]
+    {
+        const int s = timeline.getSelectedSlot();
+        if (s >= 0)
+        {
+            pickerOverlay.setSlot (s);
+            pickerOverlay.setVisible (true);
+            pickerOverlay.toFront (true);
+        }
+    };
+    addChildComponent (inspectBtn);
+
+    timeline.onSlotSelected = [this] (int s)
+    {
+        updateContextBar (s);
+        if (s >= 0 && pickerOverlay.isVisible())
+            pickerOverlay.setSlot (s);
+    };
+
+    hint.setFont (ui::font (12.0f));
     hint.setColour (juce::Label::textColourId, ui::textDim);
-    hint.setJustificationType (juce::Justification::centredLeft);
-    hint.setMinimumHorizontalScale (0.7f);
+    hint.setMinimumHorizontalScale (0.75f);
     addAndMakeVisible (hint);
 
     processor.addChangeListener (this);
     refresh();
 
+    setWantsKeyboardFocus (true);
     setResizable (true, true);
-    setResizeLimits (900, 540, 1800, 1100);
-    setSize (1040, 620);
+    setResizeLimits (900, 540, 1920, 1200);
+    setSize (1040, 650);
     startTimerHz (30);
 }
 
@@ -1016,7 +509,7 @@ ChordSlotsEditor::~ChordSlotsEditor()
 void ChordSlotsEditor::setupCombo (juce::ComboBox& box, juce::Label& label, const juce::String& caption)
 {
     label.setText (caption, juce::dontSendNotification);
-    label.setFont (ui::font (10.5f, true));
+    label.setFont (ui::font (10.0f, true));
     label.setColour (juce::Label::textColourId, ui::textDim);
     addAndMakeVisible (label);
     addAndMakeVisible (box);
@@ -1025,14 +518,58 @@ void ChordSlotsEditor::setupCombo (juce::ComboBox& box, juce::Label& label, cons
 void ChordSlotsEditor::setupKnob (juce::Slider& s, juce::Label& label, const juce::String& caption)
 {
     s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 56, 14);
     s.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
     addAndMakeVisible (s);
+
     label.setText (caption, juce::dontSendNotification);
-    label.setFont (ui::font (10.0f, true));
+    label.setFont (ui::font (9.5f, true));
     label.setColour (juce::Label::textColourId, ui::textDim);
     label.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (label);
+}
+
+void ChordSlotsEditor::showInputMenu()
+{
+    const cs::TriggerConfig tc = processor.getTriggerConfig();
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("MIDI TRIGGER MODE");
+    menu.addItem (1, "Auto (Priority to live keys)", true, tc.mode == cs::TriggerMode::Auto);
+    menu.addItem (2, "Trigger Only (Mute loop)", true, tc.mode == cs::TriggerMode::TriggerOnly);
+    menu.addItem (3, "Loop Only (Ignore live keys)", true, tc.mode == cs::TriggerMode::LoopOnly);
+
+    menu.addSeparator();
+    menu.addSectionHeader ("NOTE TO SLOT MAPPING");
+    const bool isWhite = (tc.layout == cs::TriggerLayout::WhiteKeys);
+    const bool isPad = (tc.layout == cs::TriggerLayout::Chromatic && tc.rootNote == 36);
+    const bool isChromC3 = (tc.layout == cs::TriggerLayout::Chromatic && tc.rootNote == 60);
+
+    menu.addItem (10, "White Keys (C3 = Slot 0)", true, isWhite);
+    menu.addItem (11, "Chromatic (C3 = Slot 0)", true, isChromC3);
+    menu.addItem (12, "Pads (C1 = Slot 0)", true, isPad);
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&inputButton),
+                        [this] (int result)
+    {
+        if (result == 0) return;
+        if (result >= 1 && result <= 3)
+        {
+            if (auto* param = processor.apvts.getParameter ("triggerMode"))
+                param->setValueNotifyingHost (param->convertTo0to1 ((float) (result - 1)));
+        }
+        else if (result >= 10 && result <= 12)
+        {
+            int root = 60, layout = 0;
+            if (result == 11) { root = 60; layout = 1; }
+            else if (result == 12) { root = 36; layout = 1; }
+
+            if (auto* param = processor.apvts.getParameter ("triggerRoot"))
+                param->setValueNotifyingHost (param->convertTo0to1 ((float) root));
+            if (auto* param = processor.apvts.getParameter ("triggerLayout"))
+                param->setValueNotifyingHost (param->convertTo0to1 ((float) layout));
+        }
+        refresh();
+    });
 }
 
 void ChordSlotsEditor::rebuildKeyNames (int scale)
@@ -1054,6 +591,7 @@ void ChordSlotsEditor::refresh()
     keyBox.setSelectedId (p.tonic + 1, juce::dontSendNotification);
     scaleBox.setSelectedId (p.scale + 1, juce::dontSendNotification);
     barsBox.setSelectedId (p.bars, juce::dontSendNotification);
+
     if (processor.isFollowingHostMeter())
     {
         meterBox.setSelectedId (4, juce::dontSendNotification);
@@ -1065,6 +603,7 @@ void ChordSlotsEditor::refresh()
         else if (p.timeSigNum == 6 && p.timeSigDen == 8) meterId = 3;
         meterBox.setSelectedId (meterId, juce::dontSendNotification);
     }
+
     slotsBox.setSelectedId (p.numSlots, juce::dontSendNotification);
     snapBox.setSelectedId (p.snap, juce::dontSendNotification);
     moodBox.setSelectedId (p.mood + 1, juce::dontSendNotification);
@@ -1073,16 +612,14 @@ void ChordSlotsEditor::refresh()
     lockRoots.setToggleState (p.locks.roots, juce::dontSendNotification);
     lockColors.setToggleState (p.locks.colors, juce::dontSendNotification);
     lockVoicing.setToggleState (p.locks.voicing, juce::dontSendNotification);
+
     adventure.setValue (p.adventure, juce::dontSendNotification);
     syncopation.setValue (p.syncopation, juce::dontSendNotification);
     bassMotion.setValue (p.bassMotion, juce::dontSendNotification);
 
     const cs::TriggerConfig tc = processor.getTriggerConfig();
-    triggerModeBox.setSelectedId ((int) tc.mode + 1, juce::dontSendNotification);
-    int mapId = 1;
-    if (tc.layout == cs::TriggerLayout::Chromatic)
-        mapId = (tc.rootNote == 36) ? 3 : 2;
-    triggerMapBox.setSelectedId (mapId, juce::dontSendNotification);
+    const char* modeNames[] = { "Auto", "Trig", "Loop" };
+    inputButton.setButtonText (juce::String ("In: ") + modeNames[(int) tc.mode] + " ▾");
 
     const int fit = juce::roundToInt (100.0f * cs::fitScore (p));
     fitLabel.setText (juce::String (fit) + "%", juce::dontSendNotification);
@@ -1092,8 +629,45 @@ void ChordSlotsEditor::refresh()
     const char varLetters[] = { 'A', 'B', 'C', 'D' };
     const int edVar = processor.getEditVariation();
     undoButton.setTooltip (juce::String ("Undo (Variation ") + varLetters[edVar] + ")");
+
     timeline.setProgression (p);
     lanes.setProgression (p);
+    updateContextBar (timeline.getSelectedSlot());
+}
+
+void ChordSlotsEditor::updateContextBar (int slot)
+{
+    const auto p = processor.getProgression();
+    if (slot >= 0 && slot < p.numSlots)
+    {
+        const cs::Slot& s = p.slots[(size_t) slot];
+        juce::String text = "Slot " + juce::String (slot + 1) + ": " + utf8 (cs::chordName (s.chord, p.tonic, p.scale))
+                            + " (" + utf8 (cs::romanNumeral (s.chord, p.tonic)) + ")   Safe notes: ";
+        const auto safe = cs::safeMelodyNotes (s.chord, p.tonic, p.scale);
+        for (size_t i = 0; i < safe.size(); ++i)
+        {
+            if (i > 0) text << " ";
+            text << utf8 (cs::pitchClassName (safe[i], p.tonic, p.scale));
+        }
+        hint.setText (text, juce::dontSendNotification);
+        hint.setJustificationType (juce::Justification::centredLeft);
+        rollRootBtn.setVisible (true);
+        rollColorBtn.setVisible (true);
+        rollBassBtn.setVisible (true);
+        inspectBtn.setVisible (true);
+    }
+    else
+    {
+        hint.setText (juce::String::fromUTF8 ("Card Fill: Brightness  \xc2\xb7  Red Strip: Tension  \xc2\xb7  "
+                                              "Click slot to select/audition  \xc2\xb7  Press 'L' to pin  \xc2\xb7  'R' to roll"),
+                      juce::dontSendNotification);
+        hint.setJustificationType (juce::Justification::centred);
+        rollRootBtn.setVisible (false);
+        rollColorBtn.setVisible (false);
+        rollBassBtn.setVisible (false);
+        inspectBtn.setVisible (false);
+    }
+    resized();
 }
 
 void ChordSlotsEditor::changeListenerCallback (juce::ChangeBroadcaster*) { refresh(); }
@@ -1148,10 +722,9 @@ void ChordSlotsEditor::timerCallback()
 void ChordSlotsEditor::saveMidi()
 {
     const auto start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                           .getChildFile (juce::File::createLegalFileName ("ChordSlots " + processor.describeProgression()) + ".mid");
-    chooser = std::make_unique<juce::FileChooser> ("Save progression as MIDI", start, "*.mid");
-    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
-                              | juce::FileBrowserComponent::warnAboutOverwriting,
+                           .getChildFile ("ChordSlots - " + processor.describeProgression() + ".mid");
+    chooser = std::make_unique<juce::FileChooser> ("Save MIDI progression...", start, "*.mid");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
                           [this] (const juce::FileChooser& fc)
     {
         auto file = fc.getResult();
@@ -1165,15 +738,161 @@ void ChordSlotsEditor::saveMidi()
     });
 }
 
+void ChordSlotsEditor::applyShapeStamp (int stampId)
+{
+    processor.edit ([stampId] (cs::Progression& pr, cs::Rng& rng)
+    {
+        const int n = pr.numSlots;
+        if (n <= 0) return;
+
+        for (int i = 0; i < n; ++i)
+        {
+            const float t = (float) i / (float) std::max (1, n - 1);
+            float b = 0.5f, tens = 0.5f, e = 0.5f;
+
+            switch (stampId)
+            {
+                case 1: // Rise
+                    b = 0.25f + 0.65f * t;
+                    tens = 0.20f + 0.70f * (t * t);
+                    e = 0.30f + 0.60f * t;
+                    break;
+                case 2: // Drop
+                    b = 0.85f - 0.60f * t;
+                    tens = 0.80f - 0.60f * (t * t);
+                    e = 0.85f - 0.65f * t;
+                    break;
+                case 3: // Arch
+                {
+                    const float arc = 1.0f - 4.0f * (t - 0.5f) * (t - 0.5f);
+                    b = 0.30f + 0.55f * arc;
+                    tens = 0.25f + 0.65f * arc;
+                    e = 0.35f + 0.50f * arc;
+                    break;
+                }
+                case 4: // Pop Build
+                {
+                    const float step = std::floor (t * 4.0f) / 3.0f;
+                    b = 0.35f + 0.50f * step;
+                    tens = 0.30f + 0.60f * step;
+                    e = 0.40f + 0.55f * step;
+                    break;
+                }
+                case 5: // Valley
+                {
+                    const float val = 4.0f * (t - 0.5f) * (t - 0.5f);
+                    b = 0.30f + 0.55f * val;
+                    tens = 0.25f + 0.60f * val;
+                    e = 0.35f + 0.50f * val;
+                    break;
+                }
+                default:
+                    break;
+            }
+            pr.slots[(size_t) i].targetB = juce::jlimit (0.05f, 0.95f, b);
+            pr.slots[(size_t) i].targetT = juce::jlimit (0.05f, 0.95f, tens);
+            pr.slots[(size_t) i].targetE = juce::jlimit (0.05f, 0.95f, e);
+        }
+        cs::roll (pr, rng);
+    });
+}
+
+void ChordSlotsEditor::analyzeMidi()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Select MIDI file to extract curves...",
+                                                    juce::File::getSpecialLocation (juce::File::userHomeDirectory),
+                                                    "*.mid;*.midi");
+    const auto browserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
+    chooser->launchAsync (browserFlags, [this] (const juce::FileChooser& fc)
+    {
+        const auto result = fc.getResult();
+        if (result.existsAsFile())
+        {
+            if (processor.loadMidiToCurves (result))
+            {
+                processor.edit ([] (cs::Progression& pr, cs::Rng& rng) { cs::roll (pr, rng); });
+            }
+        }
+    });
+}
+
+bool ChordSlotsEditor::keyPressed (const juce::KeyPress& key)
+{
+    // Cmd/Ctrl + Z: Undo
+    if (key.getKeyCode() == 'Z' && key.getModifiers().isCommandDown())
+    {
+        processor.undo();
+        return true;
+    }
+
+    // 1..4: Switch Variation
+    if (key.getKeyCode() >= '1' && key.getKeyCode() <= '4' && ! key.getModifiers().isAnyModifierKeyDown())
+    {
+        const int v = key.getKeyCode() - '1';
+        processor.setPlayingVariation (v);
+        processor.setEditVariation (v);
+        return true;
+    }
+
+    // L: Toggle pin on selected slot
+    if ((key.getKeyCode() == 'L' || key.getKeyCode() == 'l') && ! key.getModifiers().isAnyModifierKeyDown())
+    {
+        const int sel = timeline.getSelectedSlot();
+        if (sel >= 0)
+        {
+            processor.edit ([sel] (cs::Progression& pr, cs::Rng&)
+            {
+                if (sel < pr.numSlots)
+                    pr.slots[(size_t) sel].locked = ! pr.slots[(size_t) sel].locked;
+            });
+            return true;
+        }
+    }
+
+    // R: Targeted roll on selected slot or full roll
+    if ((key.getKeyCode() == 'R' || key.getKeyCode() == 'r') && ! key.getModifiers().isAnyModifierKeyDown())
+    {
+        const int sel = timeline.getSelectedSlot();
+        if (sel >= 0)
+        {
+            processor.edit ([sel] (cs::Progression& pr, cs::Rng& rng)
+            {
+                cs::rerollSlots (pr, 1u << sel, rng);
+            });
+        }
+        else
+        {
+            rollButton.triggerClick();
+        }
+        return true;
+    }
+
+    // Space: Toggle playback
+    if (key.getKeyCode() == juce::KeyPress::spaceKey)
+    {
+        playButton.triggerClick();
+        return true;
+    }
+
+    // Escape: close overlay
+    if (key.getKeyCode() == juce::KeyPress::escapeKey && pickerOverlay.isVisible())
+    {
+        pickerOverlay.setVisible (false);
+        return true;
+    }
+
+    return false;
+}
+
 void ChordSlotsEditor::paint (juce::Graphics& g)
 {
     g.fillAll (ui::background);
     g.setColour (ui::text);
-    g.setFont (ui::font (22.0f, true));
-    g.drawText ("ChordSlots", 18, 16, 150, 30, juce::Justification::centredLeft);
+    g.setFont (ui::font (20.0f, true));
+    g.drawText ("ChordSlots", 16, 14, 130, 26, juce::Justification::centredLeft);
     g.setColour (ui::textDim);
-    g.setFont (ui::font (10.5f));
-    g.drawText ("target-driven harmony", 19, 42, 150, 14, juce::Justification::centredLeft);
+    g.setFont (ui::font (10.0f));
+    g.drawText ("target-driven harmony", 17, 38, 130, 14, juce::Justification::centredLeft);
 
     auto drawPanel = [&g] (juce::Rectangle<int> r, const juce::String& title, const juce::Colour& titleColour)
     {
@@ -1186,7 +905,7 @@ void ChordSlotsEditor::paint (juce::Graphics& g)
 
         g.setColour (titleColour);
         g.setFont (ui::font (10.0f, true));
-        g.drawText (title, r.getX() + 10, r.getY() + 3, r.getWidth() - 20, 14, juce::Justification::centredLeft);
+        g.drawText (title, r.getX() + 10, r.getY() + 4, r.getWidth() - 20, 14, juce::Justification::centredLeft);
     };
 
     drawPanel (harmonyPanelBounds, "1. HARMONY GENERATOR", ui::accent);
@@ -1196,61 +915,94 @@ void ChordSlotsEditor::paint (juce::Graphics& g)
 
 void ChordSlotsEditor::resized()
 {
-    auto area = getLocalBounds().reduced (16, 12);
+    auto area = getLocalBounds().reduced (14, 10);
 
-    // Header
-    auto header = area.removeFromTop (52);
-    header.removeFromLeft (145);
-    auto fitArea = header.removeFromRight (70);
+    // =========================================================================
+    // Header Row (~54px)
+    // =========================================================================
+    auto header = area.removeFromTop (54);
+    header.removeFromLeft (136); // logo area
+
+    // Right side: Fit score badge
+    auto fitArea = header.removeFromRight (64);
     fitCaption.setBounds (fitArea.removeFromTop (14));
     fitLabel.setBounds (fitArea);
 
     header.removeFromRight (10);
-    auto varArea = header.removeFromRight (144);
+
+    // Variation bank area
+    auto varArea = header.removeFromRight (186);
     auto varTop = varArea.removeFromTop (16);
-    variationLabel.setBounds (varTop.removeFromLeft (64));
+    variationLabel.setBounds (varTop.removeFromLeft (74));
     followButton.setBounds (varTop);
+
+    varArea.removeFromTop (2);
     auto varBottom = varArea.removeFromTop (28);
-    const int btnW = 20;
+    const int btnW = 28;
     for (int i = 0; i < cs::kNumVariations; ++i)
     {
         varButtons[i].setBounds (varBottom.removeFromLeft (btnW));
-        varBottom.removeFromLeft (2);
+        varBottom.removeFromLeft (3);
     }
     varBottom.removeFromLeft (4);
     copyVarButton.setBounds (varBottom);
 
-    header.removeFromRight (10);
+    header.removeFromRight (12);
 
+    // Left combos: KEY, SCALE, BARS, METER, SLOTS, GRID, INPUT
     auto place = [&header] (juce::ComboBox& box, juce::Label& label, int width)
     {
         auto cell = header.removeFromLeft (width);
-        header.removeFromLeft (10);
-        label.setBounds (cell.removeFromTop (16));
+        header.removeFromLeft (8);
+        label.setBounds (cell.removeFromTop (15));
         box.setBounds (cell.removeFromTop (28));
     };
-    place (keyBox, keyLabel, 48);
-    place (scaleBox, scaleLabel, 88);
-    place (barsBox, barsLabel, 42);
-    place (meterBox, meterLabel, 48);
-    place (slotsBox, slotsLabel, 42);
-    place (snapBox, snapLabel, 60);
-    place (moodBox, moodLabel, 88);
-    place (triggerModeBox, triggerModeLabel, 72);
-    place (triggerMapBox, triggerMapLabel, juce::jmax (60, header.getWidth() - 10));
 
-    area.removeFromTop (12);
+    place (keyBox, keyLabel, 56);
+    place (scaleBox, scaleLabel, 110);
+    place (barsBox, barsLabel, 66);
+    place (meterBox, meterLabel, 66);
+    place (slotsBox, slotsLabel, 60);
+    place (snapBox, snapLabel, 76);
 
-    // Footer
-    hint.setBounds (area.removeFromBottom (18));
+    // Input/Trigger button in remaining header width
+    if (header.getWidth() > 60)
+    {
+        auto inCell = header.removeFromLeft (juce::jmin (92, header.getWidth()));
+        inCell.removeFromTop (15);
+        inputButton.setBounds (inCell.removeFromTop (28));
+    }
+
+    area.removeFromTop (10);
+
+    // =========================================================================
+    // Footer & Context Bar
+    // =========================================================================
+    auto ctxArea = area.removeFromBottom (26);
+    if (rollRootBtn.isVisible())
+    {
+        auto btnArea = ctxArea.removeFromRight (320);
+        const int bw = (btnArea.getWidth() - 12) / 4;
+        rollRootBtn.setBounds (btnArea.removeFromLeft (bw));
+        btnArea.removeFromLeft (4);
+        rollColorBtn.setBounds (btnArea.removeFromLeft (bw));
+        btnArea.removeFromLeft (4);
+        rollBassBtn.setBounds (btnArea.removeFromLeft (bw));
+        btnArea.removeFromLeft (4);
+        inspectBtn.setBounds (btnArea);
+        ctxArea.removeFromRight (8);
+    }
+    hint.setBounds (ctxArea);
     area.removeFromBottom (6);
-    auto footer = area.removeFromBottom (86);
-    area.removeFromBottom (12);
+
+    // Expanded Footer (104px tall)
+    auto footer = area.removeFromBottom (104);
+    area.removeFromBottom (10);
 
     const int totalWidth = footer.getWidth();
-    const int gap = 10;
-    const int harmWidth = juce::roundToInt ((totalWidth - 2 * gap) * 0.44f);
-    const int grooWidth = juce::roundToInt ((totalWidth - 2 * gap) * 0.27f);
+    const int gap = 8;
+    const int harmWidth = juce::roundToInt ((totalWidth - 2 * gap) * 0.38f);
+    const int grooWidth = juce::roundToInt ((totalWidth - 2 * gap) * 0.31f);
 
     harmonyPanelBounds = footer.removeFromLeft (harmWidth);
     footer.removeFromLeft (gap);
@@ -1263,12 +1015,12 @@ void ChordSlotsEditor::resized()
     // --- Panel 1: Harmony Generator ---
     {
         auto hInner = harmonyPanelBounds.reduced (8, 4);
-        hInner.removeFromTop (14);
+        hInner.removeFromTop (16);
 
-        auto locks = hInner.removeFromLeft (176);
+        auto locks = hInner.removeFromLeft (168);
         lockCaption.setBounds (locks.removeFromTop (14));
-        locks.removeFromTop (2);
-        auto lockButtons = locks.removeFromTop (28);
+        locks.removeFromTop (4);
+        auto lockButtons = locks.removeFromTop (26);
         const int lw = (lockButtons.getWidth() - 9) / 4;
         for (auto* b : { &lockRhythm, &lockRoots, &lockColors, &lockVoicing })
         {
@@ -1278,9 +1030,9 @@ void ChordSlotsEditor::resized()
         hInner.removeFromLeft (8);
 
         auto harmActions = hInner.removeFromRight (74);
-        undoButton.setBounds (harmActions.removeFromTop (24).reduced (0, 1));
-        harmActions.removeFromTop (2);
-        rollButton.setBounds (harmActions.removeFromTop (32).reduced (0, 1));
+        undoButton.setBounds (harmActions.removeFromTop (26));
+        harmActions.removeFromTop (4);
+        rollButton.setBounds (harmActions.removeFromTop (36));
         hInner.removeFromRight (6);
 
         auto harmKnobs = hInner;
@@ -1289,7 +1041,7 @@ void ChordSlotsEditor::resized()
                                Knob { &bassMotion, &bassMotionLabel } })
         {
             auto cell = harmKnobs.removeFromLeft (hkw);
-            k.l->setBounds (cell.removeFromBottom (13));
+            k.l->setBounds (cell.removeFromTop (13));
             k.s->setBounds (cell.reduced (1, 0));
         }
     }
@@ -1297,10 +1049,15 @@ void ChordSlotsEditor::resized()
     // --- Panel 2: Groove & Feel ---
     {
         auto gInner = groovePanelBounds.reduced (8, 4);
-        gInner.removeFromTop (14);
+        gInner.removeFromTop (16);
 
-        auto refeelArea = gInner.removeFromRight (62);
-        refeelButton.setBounds (refeelArea.withSizeKeepingCentre (58, 28));
+        auto compCell = gInner.removeFromLeft (86);
+        compLabel.setBounds (compCell.removeFromTop (13));
+        compBox.setBounds (compCell.removeFromTop (28));
+        gInner.removeFromLeft (6);
+
+        auto refeelArea = gInner.removeFromRight (64);
+        refeelButton.setBounds (refeelArea.removeFromTop (32).withSizeKeepingCentre (60, 30));
         gInner.removeFromRight (6);
 
         auto grooveKnobs = gInner;
@@ -1308,7 +1065,7 @@ void ChordSlotsEditor::resized()
         for (const Knob& k : { Knob { &strum, &strumLabel }, Knob { &accent, &accentLabel }, Knob { &humanize, &humanizeLabel } })
         {
             auto cell = grooveKnobs.removeFromLeft (gkw);
-            k.l->setBounds (cell.removeFromBottom (13));
+            k.l->setBounds (cell.removeFromTop (13));
             k.s->setBounds (cell.reduced (1, 0));
         }
     }
@@ -1316,9 +1073,14 @@ void ChordSlotsEditor::resized()
     // --- Panel 3: Output & Export ---
     {
         auto oInner = outputPanelBounds.reduced (8, 4);
-        oInner.removeFromTop (14);
+        oInner.removeFromTop (16);
 
-        auto dragArea = oInner.removeFromRight (86).reduced (0, 2);
+        auto synthCell = oInner.removeFromLeft (86);
+        synthModelLabel.setBounds (synthCell.removeFromTop (13));
+        synthModelBox.setBounds (synthCell.removeFromTop (28));
+        oInner.removeFromLeft (6);
+
+        auto dragArea = oInner.removeFromRight (92).reduced (0, 2);
         dragTile.setBounds (dragArea);
         auto splitDragTop = dragArea.removeFromTop (dragArea.getHeight() / 2).withTrimmedBottom (1);
         dragChordsTile.setBounds (splitDragTop);
@@ -1329,13 +1091,14 @@ void ChordSlotsEditor::resized()
         dragChordsTile.setVisible (isSplit);
         dragBassTile.setVisible (isSplit);
 
-        oInner.removeFromRight (6);
+        oInner.removeFromRight (8);
 
-        auto btnArea = oInner.removeFromRight (80).reduced (0, 2);
+        auto btnArea = oInner.removeFromRight (88).reduced (0, 2);
         auto topBtns = btnArea.removeFromTop (btnArea.getHeight() / 2).withTrimmedBottom (1);
         playButton.setBounds (topBtns.removeFromLeft (topBtns.getWidth() / 2).withTrimmedRight (1));
         saveButton.setBounds (topBtns.withTrimmedLeft (1));
         splitMidiButton.setBounds (btnArea.withTrimmedTop (1));
+
         oInner.removeFromRight (6);
 
         auto outKnobs = oInner;
@@ -1343,13 +1106,47 @@ void ChordSlotsEditor::resized()
         for (const Knob& k : { Knob { &gate, &gateLabel }, Knob { &volume, &volumeLabel } })
         {
             auto cell = outKnobs.removeFromLeft (okw);
-            k.l->setBounds (cell.removeFromBottom (13));
+            k.l->setBounds (cell.removeFromTop (13));
             k.s->setBounds (cell.reduced (1, 0));
         }
     }
 
-    // Main: slots on top, target lanes below, sharing the same time axis
-    timeline.setBounds (area.removeFromTop (juce::jlimit (120, 190, area.getHeight() * 2 / 5)));
-    area.removeFromTop (12);
+    // =========================================================================
+    // Main Area: Timeline Cards & Lanes & Lane Toolbar
+    // =========================================================================
+    const int timelineH = 135;
+    timeline.setBounds (area.removeFromTop (timelineH));
+
+    area.removeFromTop (6);
+
+    // Lane Toolbar (~26px)
+    auto laneBar = area.removeFromTop (26);
+    laneToolbarLabel.setBounds (laneBar.removeFromLeft (88).withTrimmedTop (4));
+    laneBar.removeFromLeft (6);
+
+    auto placeLaneBarCombo = [&laneBar] (juce::ComboBox& box, juce::Label& label, int width)
+    {
+        auto cell = laneBar.removeFromLeft (width);
+        laneBar.removeFromLeft (6);
+        label.setBounds (cell.removeFromTop (12));
+        box.setBounds (cell.removeFromTop (24));
+    };
+
+    placeLaneBarCombo (moodBox, moodLabel, 120);
+    placeLaneBarCombo (styleBox, styleLabel, 130);
+    placeLaneBarCombo (shapeBox, shapeLabel, 120);
+
+    resetCurvesBtn.setBounds (laneBar.removeFromRight (58).withSizeKeepingCentre (56, 24));
+    laneBar.removeFromRight (6);
+    analyzeMidiBtn.setBounds (laneBar.removeFromRight (112).withSizeKeepingCentre (110, 24));
+
+    area.removeFromTop (4);
     lanes.setBounds (area);
+
+    if (pickerOverlay.isVisible())
+    {
+        pickerOverlay.setBounds (timeline.getBounds().expanded (20, 70)
+                                     .withWidth (juce::jmin (600, getWidth() - 40))
+                                     .withCentre ({ getWidth() / 2, getHeight() / 2 }));
+    }
 }

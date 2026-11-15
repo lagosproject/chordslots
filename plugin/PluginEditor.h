@@ -3,118 +3,11 @@
 #pragma once
 
 #include "PluginProcessor.h"
-
-namespace ui
-{
-const juce::Colour background { 0xff12141a };
-const juce::Colour panel { 0xff1b1e27 };
-const juce::Colour panelHi { 0xff262a36 };
-const juce::Colour outline { 0xff343949 };
-const juce::Colour text { 0xffe9ebf2 };
-const juce::Colour textDim { 0xff8d93a6 };
-const juce::Colour accent { 0xff8b7bff };
-const juce::Colour brightness { 0xfff3b743 };
-const juce::Colour tension { 0xffef5d6e };
-const juce::Colour energy { 0xff3ec9bf };
-
-juce::Font font (float height, bool bold = false);
-/** Slot colour: deep blue for dark chords, warm gold for bright ones. */
-juce::Colour colourForBrightness (float b);
-} // namespace ui
-
-//==============================================================================
-class ChordSlotsLookAndFeel final : public juce::LookAndFeel_V4
-{
-public:
-    ChordSlotsLookAndFeel();
-
-    void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool, bool) override;
-    juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
-    void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
-                           float startAngle, float endAngle, juce::Slider&) override;
-    void drawComboBox (juce::Graphics&, int w, int h, bool, int, int, int, int, juce::ComboBox&) override;
-    juce::Font getComboBoxFont (juce::ComboBox&) override;
-    juce::Font getPopupMenuFont() override;
-    juce::Font getLabelFont (juce::Label&) override;
-};
-
-//==============================================================================
-/** The slots: one block per chord, cut handles between them. */
-class TimelineView final : public juce::Component
-{
-public:
-    explicit TimelineView (ChordSlotsProcessor&);
-
-    void setProgression (const cs::Progression&);
-    void setPlayhead (double step);
-
-    void paint (juce::Graphics&) override;
-    void mouseMove (const juce::MouseEvent&) override;
-    void mouseExit (const juce::MouseEvent&) override;
-    void mouseDown (const juce::MouseEvent&) override;
-    void mouseDrag (const juce::MouseEvent&) override;
-    void mouseUp (const juce::MouseEvent&) override;
-    void mouseDoubleClick (const juce::MouseEvent&) override;
-
-private:
-    float xForStep (double step) const;
-    int stepForX (float x) const;
-    int cutAt (float x) const;
-    int slotAt (float x) const;
-    juce::Rectangle<float> slotBounds (int i) const;
-    juce::Rectangle<float> lockBounds (int i) const;
-    void showSlotMenu (int slot, int step);
-
-    ChordSlotsProcessor& processor;
-    cs::Progression prog;
-    double playhead = -1.0;
-    int hoverSlot = -1, hoverCut = -1, dragCut = -1, selected = -1;
-    bool hoverLock = false;
-};
-
-//==============================================================================
-/** Three lanes of per-slot targets (bars) with the measured value on top. */
-class LanesView final : public juce::Component
-{
-public:
-    explicit LanesView (ChordSlotsProcessor&);
-
-    void setProgression (const cs::Progression&);
-    void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override;
-    void mouseDrag (const juce::MouseEvent&) override;
-    void mouseUp (const juce::MouseEvent&) override;
-
-private:
-    juce::Rectangle<float> laneBounds (int lane) const;
-    void applyDrag (const juce::MouseEvent&);
-
-    ChordSlotsProcessor& processor;
-    cs::Progression prog;
-    int dragLane = -1;
-    unsigned editedMask = 0;
-};
-
-//==============================================================================
-/** Drag this onto a DAW track to drop the progression as a MIDI clip. */
-class MidiDragTile final : public juce::Component
-{
-public:
-    explicit MidiDragTile (ChordSlotsProcessor&,
-                           ChordSlotsProcessor::MidiExportMode mode = ChordSlotsProcessor::MidiExportMode::Master,
-                           const juce::String& label = "Drag MIDI");
-    void paint (juce::Graphics&) override;
-    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
-    void mouseExit (const juce::MouseEvent&) override { repaint(); }
-    void mouseDrag (const juce::MouseEvent&) override;
-    void mouseUp (const juce::MouseEvent&) override { dragging = false; }
-
-private:
-    ChordSlotsProcessor& processor;
-    ChordSlotsProcessor::MidiExportMode exportMode;
-    juce::String tileLabel;
-    bool dragging = false;
-};
+#include "ui/LookAndFeel.h"
+#include "ui/TimelineView.h"
+#include "ui/LanesView.h"
+#include "ui/MidiDragTile.h"
+#include "ui/ChordPickerOverlay.h"
 
 //==============================================================================
 class ChordSlotsEditor final : public juce::AudioProcessorEditor,
@@ -135,38 +28,77 @@ private:
     void rebuildKeyNames (int scale);
     void setupCombo (juce::ComboBox&, juce::Label&, const juce::String& caption);
     void setupKnob (juce::Slider&, juce::Label&, const juce::String& caption);
+    void showInputMenu();
     void saveMidi();
+    void analyzeMidi();
+    void applyShapeStamp (int stampId);
+    bool keyPressed (const juce::KeyPress& key) override;
 
     ChordSlotsProcessor& processor;
     ChordSlotsLookAndFeel lnf;
 
-    juce::ComboBox keyBox, scaleBox, barsBox, meterBox, slotsBox, snapBox, moodBox, triggerModeBox, triggerMapBox;
-    juce::Label keyLabel, scaleLabel, barsLabel, meterLabel, slotsLabel, snapLabel, moodLabel, triggerModeLabel, triggerMapLabel;
+    // Header controls
+    juce::ComboBox keyBox, scaleBox, barsBox, meterBox, slotsBox, snapBox;
+    juce::Label keyLabel, scaleLabel, barsLabel, meterLabel, slotsLabel, snapLabel;
+    juce::TextButton inputButton { "MIDI In ▾" };
     juce::Label fitLabel, fitCaption;
 
+    // Variations
     juce::Label variationLabel;
     juce::TextButton varButtons[cs::kNumVariations];
-    juce::ToggleButton followButton { "Follow" };
+    juce::TextButton followButton { "Follow" };
     juce::TextButton copyVarButton { "Copy..." };
 
+    // Views
     TimelineView timeline;
+    ChordPickerOverlay pickerOverlay;
+
+    // Lane Toolbar controls
+    juce::Label laneToolbarLabel;
+    juce::ComboBox moodBox, styleBox, shapeBox;
+    juce::Label moodLabel, styleLabel, shapeLabel;
+    juce::TextButton resetCurvesBtn { "Reset" };
+    juce::TextButton analyzeMidiBtn;
+
     LanesView lanes;
 
+    // Footer Panel 1: Harmony Generator
     juce::TextButton lockRhythm { "Rhythm" }, lockRoots { "Roots" }, lockColors { "Colors" }, lockVoicing { "Voicing" };
     juce::Label lockCaption;
-    juce::Slider adventure, syncopation, bassMotion, strum, accent, humanize, gate, volume;
-    juce::Label adventureLabel, syncopationLabel, bassMotionLabel, strumLabel, accentLabel, humanizeLabel, gateLabel, volumeLabel;
+    juce::Slider adventure, syncopation, bassMotion;
+    juce::Label adventureLabel, syncopationLabel, bassMotionLabel;
+    juce::TextButton undoButton { "Undo" }, rollButton { "ROLL" };
+
+    // Footer Panel 2: Groove & Feel
+    juce::ComboBox compBox;
+    juce::Label compLabel;
+    juce::Slider strum, accent, humanize;
+    juce::Label strumLabel, accentLabel, humanizeLabel;
     juce::TextButton refeelButton { "Re-Feel" };
-    juce::TextButton undoButton { "Undo" }, rollButton { "ROLL" }, playButton { "Play" }, saveButton { "Save .mid" };
+
+    // Footer Panel 3: Output & Export
+    juce::ComboBox synthModelBox;
+    juce::Label synthModelLabel;
+    juce::Slider gate, volume;
+    juce::Label gateLabel, volumeLabel;
+    juce::TextButton playButton { "Play" }, saveButton { "Save .mid" };
     juce::TextButton splitMidiButton { "Split Ch 1/2" };
     MidiDragTile dragTile;
     MidiDragTile dragChordsTile;
     MidiDragTile dragBassTile;
-    juce::Label hint;
 
+    // Context / Hint bar & Targeted Rolls
+    juce::Label hint;
+    juce::TextButton rollRootBtn { "Roll Root" }, rollColorBtn { "Roll Color" }, rollBassBtn { "Roll Bass" }, inspectBtn { "Inspect ⋯" };
+
+    void updateContextBar (int slot);
+
+    // Attachments
     juce::AudioProcessorValueTreeState::SliderAttachment gateAttachment, volumeAttachment,
         strumAttachment, accentAttachment, humanizeAttachment;
     juce::AudioProcessorValueTreeState::ButtonAttachment splitMidiAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> compAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> synthModelAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
     int keyNamesScale = -1;
     bool refreshing = false;

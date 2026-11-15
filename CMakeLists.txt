@@ -82,7 +82,7 @@ juce_add_plugin(ChordSlots
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT TRUE
     IS_MIDI_EFFECT FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     VST3_CATEGORIES Instrument Generator
     AU_MAIN_TYPE kAudioUnitType_MusicDevice
     LV2URI "https://chordslots.org/plugins/chordslots"
@@ -91,7 +91,14 @@ juce_add_plugin(ChordSlots
 target_sources(ChordSlots PRIVATE
     plugin/PluginProcessor.cpp
     plugin/PluginEditor.cpp
-    plugin/PreviewSynth.cpp)
+    plugin/PreviewSynth.cpp
+    plugin/ui/LookAndFeel.cpp
+    plugin/ui/TimelineView.cpp
+    plugin/ui/LanesView.cpp
+    plugin/ui/MidiDragTile.cpp
+    plugin/ui/ChordPickerOverlay.cpp)
+
+target_include_directories(ChordSlots PRIVATE plugin)
 
 target_compile_definitions(ChordSlots PUBLIC
     JUCE_WEB_BROWSER=0

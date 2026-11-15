@@ -4,3 +4,4 @@ third_party/
 *.swp
 .vscode/
 .idea/
+ui_snapshot*.png
