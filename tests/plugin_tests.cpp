@@ -1053,6 +1053,140 @@ void testMeterAndTripletGrid()
     }
 }
 
+// P1.7: Export parity test across comp styles, split on/off, strum 0/max
+void testExportPlaybackParity()
+{
+    const std::vector<cs::CompStyle> compStyles = {
+        cs::CompStyle::Sustain,
+        cs::CompStyle::PulseQuarter,
+        cs::CompStyle::PulseEighth,
+        cs::CompStyle::OffbeatReggae,
+        cs::CompStyle::BalladStabs,
+        cs::CompStyle::TrapStabs,
+        cs::CompStyle::TripletSwing
+    };
+
+    for (auto style : compStyles)
+    {
+        for (bool split : { false, true })
+        {
+            for (float strum : { 0.0f, 1.0f })
+            {
+                Host h (48000.0, 256);
+                h.playHead.bpm = 120.0;
+
+                if (auto* p = h.processor.apvts.getParameter ("compStyle"))
+                    p->setValueNotifyingHost (p->convertTo0to1 ((float) (int) style));
+                if (auto* p = h.processor.apvts.getParameter ("splitMidi"))
+                    p->setValueNotifyingHost (split ? 1.0f : 0.0f);
+                if (auto* p = h.processor.apvts.getParameter ("strum"))
+                    p->setValueNotifyingHost (p->convertTo0to1 (strum));
+
+                const cs::Progression prog = h.processor.getProgression();
+                const double sps = samplesPerStep (h);
+                constexpr int kTicksPerQuarter = 480;
+                constexpr int kTicksPerStep = 20;
+                const double ticksPerSample = (h.playHead.bpm * (double) kTicksPerQuarter) / (60.0 * h.sampleRate);
+                const int totalBlocks = (int) std::ceil ((double) prog.lengthSteps() * sps / (double) h.blockSize);
+
+                // Export reference (Format 1 master file if split, Format 0 if non-split)
+                const juce::MidiFile file = h.processor.createMidiFile (ChordSlotsProcessor::MidiExportMode::Master);
+                struct EventKey
+                {
+                    int channel;
+                    int note;
+                    bool on;
+                    int velocity;
+                    double tick;
+                };
+                std::vector<EventKey> exportEvents;
+                for (int t = 0; t < file.getNumTracks(); ++t)
+                {
+                    const auto* track = file.getTrack (t);
+                    for (int e = 0; e < track->getNumEvents(); ++e)
+                    {
+                        const auto& m = track->getEventPointer (e)->message;
+                        if (m.isNoteOn() || m.isNoteOff())
+                        {
+                            exportEvents.push_back ({
+                                m.getChannel(),
+                                m.getNoteNumber(),
+                                m.isNoteOn(),
+                                m.isNoteOn() ? (int) m.getVelocity() : 0,
+                                m.getTimeStamp()
+                            });
+                        }
+                    }
+                }
+
+                // Render 1 loop through processBlock
+                h.playHead.ppq = 0.0;
+                h.playHead.playing = true;
+                h.run (totalBlocks);
+
+                // Stop transport
+                h.playHead.playing = false;
+                h.run (10);
+                CHECK (h.heldAfterReplay() == 0); // Zero stuck notes at transport stop
+
+                // Collect rendered events during the 1 loop
+                const double loopEndTick = (double) prog.lengthSteps() * (double) kTicksPerStep;
+                std::vector<EventKey> renderedEvents;
+                for (const auto& ev : h.events)
+                {
+                    const double tick = (double) ev.sample * ticksPerSample;
+                    if (tick < loopEndTick + 1.0)
+                    {
+                        renderedEvents.push_back ({
+                            ev.channel,
+                            ev.note,
+                            ev.on,
+                            ev.on ? ev.velocity : 0,
+                            tick
+                        });
+                    }
+                }
+
+                CHECK (renderedEvents.size() == exportEvents.size());
+
+                // Match each export event with a rendered event within +-1 tick
+                std::vector<bool> matched (renderedEvents.size(), false);
+                int matchCount = 0;
+                for (const auto& exp : exportEvents)
+                {
+                    bool found = false;
+                    for (size_t r = 0; r < renderedEvents.size(); ++r)
+                    {
+                        if (matched[r])
+                            continue;
+                        const auto& ren = renderedEvents[r];
+                        if (ren.channel == exp.channel &&
+                            ren.note == exp.note &&
+                            ren.on == exp.on &&
+                            (! exp.on || ren.velocity == exp.velocity) &&
+                            std::abs (ren.tick - exp.tick) <= 1.0)
+                        {
+                            matched[r] = true;
+                            found = true;
+                            ++matchCount;
+                            break;
+                        }
+                    }
+                    if (! found)
+                    {
+                        std::printf ("Mismatch in style %d split %d strum %.1f: exp ch%d note%d on%d vel%d tick%.2f (matched %d/%zu)\n",
+                                     (int) style, (int) split, (double) strum,
+                                     exp.channel, exp.note, (int) exp.on, exp.velocity, exp.tick,
+                                     matchCount, exportEvents.size());
+                        break;
+                    }
+                }
+                CHECK (matchCount == (int) exportEvents.size());
+            }
+        }
+    }
+}
+
 } // namespace
 
 int main (int argc, char** argv)
@@ -1092,6 +1226,7 @@ int main (int argc, char** argv)
     testPerformanceAndStrum();
     testIncomingMidiTriggerIntegration();
     testSplitMidiOutput();
+    testExportPlaybackParity();
     testVariationBankAndHistory();
     testMeterAndTripletGrid();
     std::printf ("%d checks, %d failures\n", checks, failures);

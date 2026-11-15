@@ -599,6 +599,22 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         pendingCount = 0;
     };
 
+    auto releaseAudition = [&] (int sample)
+    {
+        for (int i = 0; i < auditionCount; ++i)
+            midi.addEvent (juce::MidiMessage::noteOff (auditionNotes[i].channel, auditionNotes[i].note), sample);
+        auditionCount = 0;
+    };
+
+    auto triggerNote = [&] (int note, int vel, int sample, int channel = kMidiChannelChords, bool isBass = false)
+    {
+        if (heldCount < kMaxHeldNotes)
+        {
+            held[heldCount++] = { note, channel, isBass };
+            midi.addEvent (juce::MidiMessage::noteOn (channel, note, (juce::uint8) juce::jlimit (1, 127, vel)), sample);
+        }
+    };
+
     auto releaseHeld = [&] (int sample)
     {
         for (int i = 0; i < heldCount; ++i)
@@ -607,20 +623,38 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         heldSlot = -1;
     };
 
-    auto releaseAudition = [&] (int sample)
+    auto releaseBass = [&] (int sample)
     {
-        for (int i = 0; i < auditionCount; ++i)
-            midi.addEvent (juce::MidiMessage::noteOff (auditionNotes[i].channel, auditionNotes[i].note), sample);
-        auditionCount = 0;
+        int remaining = 0;
+        for (int i = 0; i < heldCount; ++i)
+        {
+            if (held[i].isBass)
+                midi.addEvent (juce::MidiMessage::noteOff (held[i].channel, held[i].note), sample);
+            else
+                held[remaining++] = held[i];
+        }
+        heldCount = remaining;
     };
 
-    auto triggerNote = [&] (int note, int vel, int sample, int channel = kMidiChannelChords)
+    auto releaseUpper = [&] (int sample)
     {
-        if (heldCount < cs::kMaxNotes)
+        int remaining = 0;
+        for (int i = 0; i < heldCount; ++i)
         {
-            held[heldCount++] = { note, channel };
-            midi.addEvent (juce::MidiMessage::noteOn (channel, note, (juce::uint8) juce::jlimit (1, 127, vel)), sample);
+            if (! held[i].isBass)
+                midi.addEvent (juce::MidiMessage::noteOff (held[i].channel, held[i].note), sample);
+            else
+                held[remaining++] = held[i];
         }
+        heldCount = remaining;
+
+        int remainingP = 0;
+        for (int pIdx = 0; pIdx < pendingCount; ++pIdx)
+        {
+            if (pendingNotes[pIdx].channel == kMidiChannelBass)
+                pendingNotes[remainingP++] = pendingNotes[pIdx];
+        }
+        pendingCount = remainingP;
     };
 
     auto emitReleases = [&] (const cs::TriggerEngine::TriggerAction& act, int sample)
@@ -646,6 +680,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     auto triggerLiveSlot = [&] (int slot, int incomingVel, int sample)
     {
+        // Notes triggered live from a MIDI keyboard stay sustained until released (not comped).
         if (slot < 0 || slot >= play.numSlots)
             return;
 
@@ -686,7 +721,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                     voices[voiceCount++] = { note, kMidiChannelChords };
 
                 if (onSample < numSamples)
-                    triggerNote (note, vel, onSample, kMidiChannelChords);
+                    triggerNote (note, vel, onSample, kMidiChannelChords, false);
                 else if (pendingCount < kMaxPendingNotes)
                     pendingNotes[pendingCount++] = { note, vel, kMidiChannelChords, onSample - numSamples, slot };
             }
@@ -699,7 +734,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             if (voiceCount < cs::kMaxNotes)
                 voices[voiceCount++] = { bassNote, kMidiChannelBass };
 
-            triggerNote (bassNote, bassVel, sample, kMidiChannelBass);
+            triggerNote (bassNote, bassVel, sample, kMidiChannelBass, true);
 
             triggerEngine.setSoundingVoices (voices, voiceCount);
         }
@@ -719,7 +754,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                 const int onSample = sample + delaySamples;
 
                 if (onSample < numSamples)
-                    triggerNote (note, vel, onSample, kMidiChannelChords);
+                    triggerNote (note, vel, onSample, kMidiChannelChords, false);
                 else if (pendingCount < kMaxPendingNotes)
                     pendingNotes[pendingCount++] = { note, vel, kMidiChannelChords, onSample - numSamples, slot };
             }
@@ -731,83 +766,85 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         triggerGlowExpirySamples = totalSamplesProcessed + sample + (juce::int64) (0.12 * sampleRate);
     };
 
-    auto startSlot = [&] (int slot, int slotSampleOffset, double slotStartStep = -1.0, double currentPlayStep = -1.0)
+    const double msToTicks = (double) kTicksPerQuarter * bpm / 60000.0;
+    const double ticksPerSample = stepsPerSample * (double) kTicksPerStep;
+
+    auto slotDurationSteps = [&] (int slot) -> double
     {
-        releaseHeld (slotSampleOffset);
-        clearPending();
-
-        const cs::PlaySlot& s = play.slots[slot];
-        double elapsedMs = 0.0;
-        if (slotStartStep >= 0.0 && currentPlayStep > slotStartStep)
-        {
-            const double elapsedSteps = currentPlayStep - slotStartStep;
-            elapsedMs = (elapsedSteps / stepsPerSample) * (1000.0 / sampleRate);
-        }
-
-        if (split)
-        {
-            // Upper voices to Ch 1
-            for (int i = s.bassCount; i < s.n && i < cs::kMaxNotes; ++i)
-            {
-                const int note = s.notes[i];
-                const int vel = s.velocities[i] > 0 ? s.velocities[i] : s.velocity;
-                const float offsetMs = s.offsetMs[i];
-
-                if (elapsedMs >= (double) offsetMs)
-                {
-                    triggerNote (note, vel, slotSampleOffset, kMidiChannelChords);
-                }
-                else
-                {
-                    const double remainingMs = (double) offsetMs - elapsedMs;
-                    const int delaySamples = (int) std::lround (remainingMs * 0.001 * sampleRate);
-                    const int onSample = slotSampleOffset + delaySamples;
-
-                    if (onSample < numSamples)
-                        triggerNote (note, vel, onSample, kMidiChannelChords);
-                    else if (pendingCount < kMaxPendingNotes)
-                        pendingNotes[pendingCount++] = { note, vel, kMidiChannelChords, onSample - numSamples, slot };
-                }
-            }
-
-            // Monophonic bass note to Ch 2 on the grid
-            const int bassNote = s.primaryBass >= 0 ? s.primaryBass : (s.bassCount > 0 ? s.notes[(size_t) (s.bassCount - 1)] : 36);
-            const int bassVel = (s.bassCount > 0 && s.velocities[(size_t) (s.bassCount - 1)] > 0) ? s.velocities[(size_t) (s.bassCount - 1)] : s.velocity;
-            triggerNote (bassNote, bassVel, slotSampleOffset, kMidiChannelBass);
-        }
-        else
-        {
-            for (int i = 0; i < s.n && i < cs::kMaxNotes; ++i)
-            {
-                const int note = s.notes[i];
-                const int vel = s.velocities[i] > 0 ? s.velocities[i] : s.velocity;
-                const float offsetMs = s.offsetMs[i];
-
-                if (elapsedMs >= (double) offsetMs)
-                {
-                    triggerNote (note, vel, slotSampleOffset, kMidiChannelChords);
-                }
-                else
-                {
-                    const double remainingMs = (double) offsetMs - elapsedMs;
-                    const int delaySamples = (int) std::lround (remainingMs * 0.001 * sampleRate);
-                    const int onSample = slotSampleOffset + delaySamples;
-
-                    if (onSample < numSamples)
-                        triggerNote (note, vel, onSample, kMidiChannelChords);
-                    else if (pendingCount < kMaxPendingNotes)
-                        pendingNotes[pendingCount++] = { note, vel, kMidiChannelChords, onSample - numSamples, slot };
-                }
-            }
-        }
-        heldSlot = slot;
-        currentSlot = slot;
+        const auto& s = play.slots[slot];
+        const double durTicks = juce::jmax (1.0, (double) (s.end - s.start) * (double) kTicksPerStep * (double) gate - (gate >= 0.999f ? 1.0 : 0.0));
+        return durTicks / (double) kTicksPerStep;
     };
 
-    auto offStep = [&] (int slot)
+    auto hitDurationSteps = [&] (int slot, int hitIdx) -> double
     {
+        const auto& s = play.slots[slot];
+        if (hitIdx < 0 || hitIdx >= s.numHits)
+            return 0.0;
+        const double durTicks = juce::jmax (1.0, (double) s.hits[hitIdx].durationSteps * (double) kTicksPerStep * (double) gate - (gate >= 0.999f ? 1.0 : 0.0));
+        return durTicks / (double) kTicksPerStep;
+    };
+
+    auto startSlotBass = [&] (int slot, int sample)
+    {
+        releaseBass (sample);
         const cs::PlaySlot& s = play.slots[slot];
-        return (double) s.start + (double) (s.end - s.start) * (double) gate;
+        if (split)
+        {
+            const int bassNote = s.primaryBass >= 0 ? s.primaryBass : (s.bassCount > 0 ? s.notes[(size_t) (s.bassCount - 1)] : 36);
+            const int bassVel = (s.bassCount > 0 && s.velocities[(size_t) (s.bassCount - 1)] > 0) ? s.velocities[(size_t) (s.bassCount - 1)] : s.velocity;
+            triggerNote (bassNote, bassVel, sample, kMidiChannelBass, true);
+        }
+        else if (s.numHits > 1)
+        {
+            for (int i = 0; i < s.bassCount && i < s.n && i < cs::kMaxNotes; ++i)
+            {
+                const int note = s.notes[i];
+                const int vel = s.velocities[i] > 0 ? s.velocities[i] : s.velocity;
+                triggerNote (note, vel, sample, kMidiChannelChords, true);
+            }
+        }
+    };
+
+    auto startSlotUpperHit = [&] (int slot, int hitIdx, int sample, double hitStartStep = -1.0, double currentPlayStep = -1.0)
+    {
+        releaseUpper (sample);
+        const cs::PlaySlot& s = play.slots[slot];
+        if (hitIdx < 0 || hitIdx >= s.numHits)
+            return;
+
+        const auto& hit = s.hits[hitIdx];
+        double elapsedTicks = 0.0;
+        if (hitStartStep >= 0.0 && currentPlayStep > hitStartStep)
+            elapsedTicks = (currentPlayStep - hitStartStep) * (double) kTicksPerStep;
+
+        const int firstUpper = (split || s.numHits > 1) ? s.bassCount : 0;
+        const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * (double) kTicksPerStep * (double) gate - 1.0);
+
+        for (int i = firstUpper; i < s.n && i < cs::kMaxNotes; ++i)
+        {
+            const int note = s.notes[i];
+            const int baseVel = s.velocities[i] > 0 ? s.velocities[i] : s.velocity;
+            const int vel = juce::jlimit (1, 127, (int) std::lround ((float) baseVel * hit.velScale));
+            const double noteOffsetTicks = (double) s.offsetMs[i] * msToTicks;
+            const double delayTicks = std::min (hitDurTicks - 1.0, noteOffsetTicks);
+
+            if (elapsedTicks >= delayTicks)
+            {
+                triggerNote (note, vel, sample, kMidiChannelChords, false);
+            }
+            else
+            {
+                const double remainingTicks = delayTicks - elapsedTicks;
+                const int delaySamples = (int) std::lround (remainingTicks / ticksPerSample);
+                const int onSample = sample + delaySamples;
+
+                if (onSample < numSamples)
+                    triggerNote (note, vel, onSample, kMidiChannelChords, false);
+                else if (pendingCount < kMaxPendingNotes)
+                    pendingNotes[pendingCount++] = { note, vel, kMidiChannelChords, onSample - numSamples, slot };
+            }
+        }
     };
 
     // --- Ingest incoming MIDI events ---
@@ -974,65 +1011,129 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
         // Make sure the chord under the playhead is the one sounding. This
         // covers starting mid-slot, relocations and edits made while playing.
-        bool startedAtZero = false;
+        bool startedAtZeroBass = false;
+        bool startedAtZeroHit = false;
+        int startedHitIdx = -1;
+
         const int slotNow = play.slotAt (startStep);
         if (slotNow >= 0 && slotNow != currentSlot)
         {
-            if (startStep < offStep (slotNow))
+            currentSlot = slotNow;
+            heldSlot = slotNow;
+            const auto& ps = play.slots[slotNow];
+            const double bassOff = (double) ps.start + slotDurationSteps (slotNow);
+            if (startStep < bassOff)
             {
-                startSlot (slotNow, 0, (double) play.slots[slotNow].start, startStep);
-                startedAtZero = true;
+                startSlotBass (slotNow, 0);
+                startedAtZeroBass = true;
             }
             else
             {
-                releaseHeld (0);
-                clearPending();
-                currentSlot = slotNow;
+                releaseBass (0);
             }
+
+            for (int h = 0; h < ps.numHits; ++h)
+            {
+                const double tHitOn = (double) (ps.start + ps.hits[h].stepOffset);
+                const double tHitOff = tHitOn + hitDurationSteps (slotNow, h);
+                if (startStep >= tHitOn && startStep < tHitOff)
+                {
+                    startSlotUpperHit (slotNow, h, 0, tHitOn, startStep);
+                    startedAtZeroHit = true;
+                    startedHitIdx = h;
+                    break;
+                }
+            }
+            if (! startedAtZeroHit)
+                releaseUpper (0);
         }
 
+        enum class EventType { SlotStart, SlotOff, HitStart, HitOff };
         struct Event
         {
             int sample;
-            bool on;
+            EventType type;
             int slot;
+            int hitIdx;
         };
-        Event events[cs::kMaxSlots * 4];
+        Event events[512];
         int numEvents = 0;
         const double endStep = startStep + numSamples * stepsPerSample;
 
         for (int k = 0; k < 2; ++k)
+        {
+            const double loopOffset = (double) k * len;
             for (int i = 0; i < play.numSlots; ++i)
             {
-                const double tOn = (double) play.slots[i].start + k * len;
-                if (tOn >= startStep && tOn < endStep)
+                const auto& ps = play.slots[i];
+                // Bass note timeline
+                const double tBassOn = (double) ps.start + loopOffset;
+                const double tBassOff = (double) ps.start + slotDurationSteps (i) + loopOffset;
+
+                if (tBassOn >= startStep && tBassOn < endStep)
                 {
-                    const int sample = juce::jlimit (0, numSamples - 1, (int) ((tOn - startStep) / stepsPerSample));
-                    if (! (sample == 0 && startedAtZero && i == currentSlot))
-                        events[numEvents++] = { sample, true, i };
+                    const int sample = juce::jlimit (0, numSamples - 1, (int) std::lround ((tBassOn - startStep) / stepsPerSample));
+                    if (! (sample == 0 && startedAtZeroBass && i == currentSlot))
+                        events[numEvents++] = { sample, EventType::SlotStart, i, 0 };
                 }
 
-                if (gate < 0.999f)
+                if (tBassOff > startStep && tBassOff < endStep)
                 {
-                    const double tOff = offStep (i) + k * len;
-                    if (tOff > startStep && tOff < endStep)
-                        events[numEvents++] = { juce::jlimit (0, numSamples - 1, (int) ((tOff - startStep) / stepsPerSample)), false, i };
+                    const int sample = juce::jlimit (0, numSamples - 1, (int) std::lround ((tBassOff - startStep) / stepsPerSample));
+                    events[numEvents++] = { sample, EventType::SlotOff, i, 0 };
+                }
+
+                // Upper hits timeline
+                for (int h = 0; h < ps.numHits; ++h)
+                {
+                    const double tHitOn = (double) (ps.start + ps.hits[h].stepOffset) + loopOffset;
+                    const double tHitOff = (double) (ps.start + ps.hits[h].stepOffset) + hitDurationSteps (i, h) + loopOffset;
+
+                    if (tHitOn >= startStep && tHitOn < endStep)
+                    {
+                        const int sample = juce::jlimit (0, numSamples - 1, (int) std::lround ((tHitOn - startStep) / stepsPerSample));
+                        if (! (sample == 0 && startedAtZeroHit && i == currentSlot && h == startedHitIdx))
+                            events[numEvents++] = { sample, EventType::HitStart, i, h };
+                    }
+
+                    if (tHitOff > startStep && tHitOff < endStep)
+                    {
+                        const int sample = juce::jlimit (0, numSamples - 1, (int) std::lround ((tHitOff - startStep) / stepsPerSample));
+                        events[numEvents++] = { sample, EventType::HitOff, i, h };
+                    }
                 }
             }
+        }
 
         std::sort (events, events + numEvents, [] (const Event& a, const Event& b)
         {
-            return a.sample != b.sample ? a.sample < b.sample : (! a.on && b.on);
+            if (a.sample != b.sample)
+                return a.sample < b.sample;
+            const bool aIsOff = (a.type == EventType::SlotOff || a.type == EventType::HitOff);
+            const bool bIsOff = (b.type == EventType::SlotOff || b.type == EventType::HitOff);
+            if (aIsOff != bIsOff)
+                return aIsOff;
+            return false;
         });
 
         for (int e = 0; e < numEvents; ++e)
         {
-            if (events[e].on)
-                startSlot (events[e].slot, events[e].sample, -1.0, -1.0);
-            else if (heldSlot == events[e].slot)
+            switch (events[e].type)
             {
-                releaseHeld (events[e].sample);
-                clearPending();
+                case EventType::SlotStart:
+                    startSlotBass (events[e].slot, events[e].sample);
+                    heldSlot = events[e].slot;
+                    currentSlot = events[e].slot;
+                    break;
+                case EventType::SlotOff:
+                    releaseBass (events[e].sample);
+                    break;
+                case EventType::HitStart:
+                    startSlotUpperHit (events[e].slot, events[e].hitIdx, events[e].sample);
+                    break;
+                case EventType::HitOff:
+                    releaseUpper (events[e].sample);
+                    break;
             }
         }
 
@@ -1117,6 +1218,7 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
 
     const double msToTicks = (double) kTicksPerQuarter * bpm / 60000.0;
     const double endTick = (double) p.lengthSteps() * kTicksPerStep;
+    const double gateOffDiscount = gate >= 0.999f ? 1.0 : 0.0;
 
     juce::MidiFile file;
     file.setTicksPerQuarterNote (kTicksPerQuarter);
@@ -1138,7 +1240,7 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
             {
                 const cs::PlaySlot& ps = playData.slots[(size_t) i];
                 const double baseOn = (double) ps.start * kTicksPerStep;
-                const double off = baseOn + juce::jmax (1.0, (double) (p.slotEnd (i) - ps.start) * kTicksPerStep * (double) gate - 1.0);
+                const double off = baseOn + juce::jmax (1.0, (double) (p.slotEnd (i) - ps.start) * kTicksPerStep * (double) gate - gateOffDiscount);
 
                 // Add Chord Text & Marker meta-events for DAW arrangement display
                 const juce::String cName = juce::String::fromUTF8 (cs::chordName (p.slots[(size_t) i].chord, p.tonic, p.scale).c_str());
@@ -1160,11 +1262,11 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
                 }
                 else
                 {
-                    const auto hits = cs::getCompHits (perf.compStyle, p.slotEnd (i) - ps.start, p.timeSigNum, p.timeSigDen);
-                    for (const auto& hit : hits)
+                    for (int h = 0; h < ps.numHits; ++h)
                     {
+                        const auto& hit = ps.hits[h];
                         const double hitOn = baseOn + (double) hit.stepOffset * kTicksPerStep;
-                        const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * kTicksPerStep * (double) gate - 1.0);
+                        const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * kTicksPerStep * (double) gate - gateOffDiscount);
                         const double hitOff = hitOn + hitDurTicks;
 
                         for (int j = ps.bassCount; j < ps.n; ++j)
@@ -1207,7 +1309,7 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
             {
                 const cs::PlaySlot& ps = playData.slots[(size_t) i];
                 const double baseOn = (double) ps.start * kTicksPerStep;
-                const double off = baseOn + juce::jmax (1.0, (double) (p.slotEnd (i) - ps.start) * kTicksPerStep * (double) gate - 1.0);
+                const double off = baseOn + juce::jmax (1.0, (double) (p.slotEnd (i) - ps.start) * kTicksPerStep * (double) gate - gateOffDiscount);
 
                 const juce::String cName = juce::String::fromUTF8 (cs::chordName (p.slots[(size_t) i].chord, p.tonic, p.scale).c_str());
                 seq.addEvent (juce::MidiMessage::textMetaEvent (1, cName), baseOn);
@@ -1237,11 +1339,11 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
                     }
 
                     // Upper voices comp
-                    const auto hits = cs::getCompHits (perf.compStyle, p.slotEnd (i) - ps.start, p.timeSigNum, p.timeSigDen);
-                    for (const auto& hit : hits)
+                    for (int h = 0; h < ps.numHits; ++h)
                     {
+                        const auto& hit = ps.hits[h];
                         const double hitOn = baseOn + (double) hit.stepOffset * kTicksPerStep;
-                        const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * kTicksPerStep * (double) gate - 1.0);
+                        const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * kTicksPerStep * (double) gate - gateOffDiscount);
                         const double hitOff = hitOn + hitDurTicks;
 
                         for (int j = ps.bassCount; j < ps.n; ++j)
@@ -1273,7 +1375,7 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
         {
             const cs::PlaySlot& ps = playData.slots[(size_t) i];
             const double baseOn = (double) ps.start * kTicksPerStep;
-            const double off = baseOn + juce::jmax (1.0, (double) (p.slotEnd (i) - ps.start) * kTicksPerStep * (double) gate - 1.0);
+            const double off = baseOn + juce::jmax (1.0, (double) (p.slotEnd (i) - ps.start) * kTicksPerStep * (double) gate - gateOffDiscount);
 
             const juce::String cName = juce::String::fromUTF8 (cs::chordName (p.slots[(size_t) i].chord, p.tonic, p.scale).c_str());
             seq.addEvent (juce::MidiMessage::textMetaEvent (1, cName), baseOn);
@@ -1293,11 +1395,11 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
             }
             else
             {
-                const auto hits = cs::getCompHits (perf.compStyle, p.slotEnd (i) - ps.start, p.timeSigNum, p.timeSigDen);
-                for (const auto& hit : hits)
+                for (int h = 0; h < ps.numHits; ++h)
                 {
+                    const auto& hit = ps.hits[h];
                     const double hitOn = baseOn + (double) hit.stepOffset * kTicksPerStep;
-                    const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * kTicksPerStep * (double) gate - 1.0);
+                    const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * kTicksPerStep * (double) gate - gateOffDiscount);
                     const double hitOff = hitOn + hitDurTicks;
 
                     for (int j = ps.bassCount; j < ps.n; ++j)
@@ -1328,7 +1430,7 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
         {
             const cs::PlaySlot& ps = playData.slots[(size_t) i];
             const double baseOn = (double) ps.start * kTicksPerStep;
-            const double off = baseOn + juce::jmax (1.0, (double) (p.slotEnd (i) - ps.start) * kTicksPerStep * (double) gate - 1.0);
+            const double off = baseOn + juce::jmax (1.0, (double) (p.slotEnd (i) - ps.start) * kTicksPerStep * (double) gate - gateOffDiscount);
 
             const int bassNote = ps.primaryBass >= 0 ? ps.primaryBass : (ps.bassCount > 0 ? ps.notes[(size_t) (ps.bassCount - 1)] : 36);
             const int bassVel = (ps.bassCount > 0 && ps.velocities[(size_t) (ps.bassCount - 1)] > 0) ? ps.velocities[(size_t) (ps.bassCount - 1)] : ps.velocity;

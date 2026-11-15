@@ -19,6 +19,7 @@
 namespace cs {
 
 constexpr int kPerfMaxNotes = 12;
+constexpr int kMaxCompHitsPerSlot = 64;
 
 enum class CompStyle : int
 {
@@ -33,18 +34,28 @@ enum class CompStyle : int
 
 struct CompHit
 {
-    int stepOffset;      // in 24-step timebase relative to slot start
-    int durationSteps;   // gate length in steps
-    float velScale;      // velocity multiplier
+    int stepOffset = 0;      // in 24-step timebase relative to slot start
+    int durationSteps = 0;   // gate length in steps
+    float velScale = 1.0f;   // velocity multiplier
 };
 
-inline std::vector<CompHit> getCompHits (CompStyle style, int slotSteps, int /*meterNum*/ = 4, int /*meterDen*/ = 4)
+/** Non-allocating hit generator writing directly into a caller-provided fixed buffer. */
+inline int getCompHits (CompStyle style, int slotSteps, CompHit* outHits, int maxHits, int /*meterNum*/ = 4, int /*meterDen*/ = 4) noexcept
 {
-    std::vector<CompHit> hits;
+    if (outHits == nullptr || maxHits <= 0)
+        return 0;
+
+    int count = 0;
+    auto addHit = [&] (int stepOffset, int durationSteps, float velScale)
+    {
+        if (count < maxHits)
+            outHits[count++] = { stepOffset, durationSteps, velScale };
+    };
+
     if (style == CompStyle::Sustain || slotSteps <= 0)
     {
-        hits.push_back ({ 0, slotSteps, 1.0f });
-        return hits;
+        addHit (0, slotSteps, 1.0f);
+        return count;
     }
 
     if (style == CompStyle::PulseQuarter)
@@ -52,7 +63,7 @@ inline std::vector<CompHit> getCompHits (CompStyle style, int slotSteps, int /*m
         for (int st = 0; st < slotSteps; st += 24)
         {
             int dur = std::min (18, slotSteps - st);
-            hits.push_back ({ st, dur, 1.0f });
+            addHit (st, dur, 1.0f);
         }
     }
     else if (style == CompStyle::PulseEighth)
@@ -61,7 +72,7 @@ inline std::vector<CompHit> getCompHits (CompStyle style, int slotSteps, int /*m
         {
             int dur = std::min (9, slotSteps - st);
             float v = (st % 24 == 0) ? 1.0f : 0.85f;
-            hits.push_back ({ st, dur, v });
+            addHit (st, dur, v);
         }
     }
     else if (style == CompStyle::OffbeatReggae)
@@ -69,27 +80,27 @@ inline std::vector<CompHit> getCompHits (CompStyle style, int slotSteps, int /*m
         for (int st = 12; st < slotSteps; st += 24)
         {
             int dur = std::min (8, slotSteps - st);
-            hits.push_back ({ st, dur, 1.0f });
+            addHit (st, dur, 1.0f);
         }
-        if (hits.empty())
-            hits.push_back ({ 0, std::min (12, slotSteps), 1.0f });
+        if (count == 0)
+            addHit (0, std::min (12, slotSteps), 1.0f);
     }
     else if (style == CompStyle::BalladStabs)
     {
         for (int st = 0; st < slotSteps; st += 48)
         {
-            hits.push_back ({ st, std::min (24, slotSteps - st), 1.0f });
+            addHit (st, std::min (24, slotSteps - st), 1.0f);
             if (st + 36 < slotSteps)
-                hits.push_back ({ st + 36, std::min (10, slotSteps - (st + 36)), 0.9f });
+                addHit (st + 36, std::min (10, slotSteps - (st + 36)), 0.9f);
         }
     }
     else if (style == CompStyle::TrapStabs)
     {
         for (int st = 0; st < slotSteps; st += 24)
         {
-            hits.push_back ({ st, std::min (5, slotSteps - st), 1.0f });
+            addHit (st, std::min (5, slotSteps - st), 1.0f);
             if (st + 18 < slotSteps)
-                hits.push_back ({ st + 18, std::min (5, slotSteps - (st + 18)), 0.85f });
+                addHit (st + 18, std::min (5, slotSteps - (st + 18)), 0.85f);
         }
     }
     else if (style == CompStyle::TripletSwing)
@@ -98,13 +109,20 @@ inline std::vector<CompHit> getCompHits (CompStyle style, int slotSteps, int /*m
         {
             int dur = std::min (10, slotSteps - st);
             float v = (st % 48 == 0) ? 1.0f : 0.88f;
-            hits.push_back ({ st, dur, v });
+            addHit (st, dur, v);
         }
     }
 
-    if (hits.empty())
-        hits.push_back ({ 0, slotSteps, 1.0f });
-    return hits;
+    if (count == 0)
+        addHit (0, slotSteps, 1.0f);
+    return count;
+}
+
+inline std::vector<CompHit> getCompHits (CompStyle style, int slotSteps, int meterNum = 4, int meterDen = 4)
+{
+    CompHit buf[kMaxCompHitsPerSlot];
+    const int count = getCompHits (style, slotSteps, buf, kMaxCompHitsPerSlot, meterNum, meterDen);
+    return std::vector<CompHit> (buf, buf + count);
 }
 
 struct PerformanceParams

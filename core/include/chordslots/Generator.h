@@ -1552,7 +1552,14 @@ struct PlaySlot
     int velocity = 96;
     int bassCount = 0;
     int primaryBass = -1;
+    int numHits = 0;
+    CompHit hits[kMaxCompHitsPerSlot] = {};
 };
+
+static_assert (kMaxBars * kStepsPerBar / 12 <= kMaxCompHitsPerSlot,
+               "kMaxCompHitsPerSlot must hold the densest comp pattern across max bars");
+static_assert (std::is_trivially_copyable<CompHit>::value, "CompHit must be trivially copyable");
+static_assert (std::is_trivially_copyable<PlaySlot>::value, "PlaySlot must be trivially copyable");
 
 struct PlayData
 {
@@ -1569,6 +1576,8 @@ struct PlayData
         return numSlots > 0 ? 0 : -1;
     }
 };
+
+static_assert (std::is_trivially_copyable<PlayData>::value, "PlayData must be trivially copyable");
 
 inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf = {}, double bpm = 120.0, int pass = 0)
 {
@@ -1594,6 +1603,8 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
         if (pb < 0)
             pb = pickBassRegister (s.chord.bassPc(), -1, kUpperFloor);
         o.primaryBass = pb;
+
+        o.numHits = getCompHits (perf.compStyle, o.end - o.start, o.hits, kMaxCompHitsPerSlot, p.timeSigNum, p.timeSigDen);
 
         PerfInput in;
         in.n = std::min (s.voicing.n, kPerfMaxNotes);

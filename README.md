@@ -169,7 +169,6 @@ Subsequent stages and upcoming development are prioritized in [IMPLEMENTATION_PL
 ## Limitations
 
 - Meters 4/4, 3/4, and 6/8 supported; 24 steps per quarter note; up to `kMaxBars` (8) bars and `kMaxSlots` (16) slots.
-- Comping rhythm styles are currently baked into MIDI export; live playback uses sustained voicing playback (comping in live playback is planned for P1).
 - The metric calibration has not been validated with large-scale listening tests.
 - Tested on Linux; macOS and Windows build through JUCE CMake.
 

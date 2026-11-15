@@ -155,8 +155,10 @@ private:
     {
         int note = 0;
         int channel = 1;
+        bool isBass = false;
     };
-    HeldVoice held[cs::kMaxNotes] = {};
+    static constexpr int kMaxHeldNotes = 32;
+    HeldVoice held[kMaxHeldNotes] = {};
     int heldCount = 0;
     int heldSlot = -1;
     int currentSlot = -1;
@@ -187,6 +189,12 @@ private:
         int samplesUntilOn = 0;
         int slot = -1;
     };
+    // Worst case pending note analysis:
+    // Strum/humanize timing delay max is 80ms + 6ms = 86ms. At 120 bpm, 86ms spans ~0.17 beats (~4 steps).
+    // The densest comp pattern (PulseEighth/TrapStabs) spaces hits by >= 12 steps (250ms at 120 bpm,
+    // or 100ms at 300 bpm). Across audio block boundaries, at most 2 hits can have strummed voices
+    // pending simultaneously. With at most 7 upper voices per chord, at most 14 notes can be pending
+    // concurrently. kMaxPendingNotes = 128 is therefore >4x the worst-case bound and completely safe.
     static constexpr int kMaxPendingNotes = 128;
     PendingNote pendingNotes[kMaxPendingNotes] = {};
     int pendingCount = 0;
