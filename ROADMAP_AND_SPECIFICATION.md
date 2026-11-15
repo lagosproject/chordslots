@@ -66,21 +66,8 @@
 - [x] **Section 4: Split-MIDI Output / Dual-Channel Voicing (Channel 1 Chords, Channel 2 Monophonic Bass)**
 - [x] **Section 5: 4-Variation Bank (A/B/C/D), Follow Playback, and Independent Undo History**
 - [x] **Section 6: Meter & Triplet Grid (24-Step Timebase, 4/4, 3/4, 6/8, Triplet Grids)**
-- [x] **Section 7: Modern Transition Prior (Billboard & RS200 Corpora Integration)**
-- [ ] **Section 8: Interactive Targeted Randomization & Relative Chord Metric Substitutions (Future Task)**
-* **Goal**: Enable musicians to perform chord slots live using a MIDI keyboard or pad controller (e.g. Push, Launchpad, MPC, KeyStep).
-* **Requirements & Invariants**:
-  1. **Mapping Modes**:
-     * **White Keys / Keyboard Mode**: Starting at $C_3$ (MIDI Note 60), white keys map sequentially: $C_3 \to \text{Slot } 0$, $D_3 \to \text{Slot } 1$, $E_3 \to \text{Slot } 2$, etc.
-     * **Chromatic / Pad Mode**: Starting at $C_1$ (MIDI Note 36) or $C_3$ (60): each consecutive semitone maps to Slot $0 \dots N-1$.
-  2. **Real-time Velocity & Gate**:
-     * Incoming Note-On velocity scales the chord's base velocity proportionally: $V_{\text{final}} = \text{clamp}(1, 127, V_{\text{slot}} \times \frac{V_{\text{in}}}{100})$.
-     * Key release (Note-Off) sends immediate Note-Off to all sounding notes of that slot.
-     * Legato / overlap handling: Pressing a new slot key cleanly releases the previously held slot's notes.
-  3. **Phase 2 Integration**:
-     * Triggered slots pass through `applyPerformance()` so live play has the exact same strum stagger, melody accent, and microtiming feel as loop playback.
-  4. **UI Visual Feedback**:
-     * When a slot is triggered via MIDI, `currentSlot` updates and the timeline slot block highlights with a live glow.
+- [x] **Section 7: Hand-Authored Style Prior (Provisional)**
+- [ ] **Section 8: Interactive Targeted Randomization & Relative Chord Metric Substitutions (Future Task - Superseded by IMPLEMENTATION_PLAN.md)**
 
 ---
 
@@ -125,11 +112,11 @@
 
 ---
 
-### Section 7: Modern Transition Prior (Billboard & RS200 Corpora Integration) (Completed)
-* **Goal**: Incorporate data-driven transition probability matrices trained on contemporary songwriting chord movements.
+### Section 7: Hand-Authored Style Prior (Provisional) (Completed)
+* **Goal**: Incorporate style prior transition probability matrices reflecting contemporary songwriting chord movements. Hand-authored style prior (provisional): transition weights written by hand from common pop/rock, minor-loop and soul/R&B practice. Not derived from a corpus yet; replacement with licence-clean corpus data is planned (IMPLEMENTATION_PLAN.md, P4).
 * **Architecture & Invariants**:
   1. **Reproducible Pipeline (`tools/build_corpus.py`)**:
-     - Extracts and normalizes bigrams from the McGill Billboard Project (Hot 100, 739 songs, CC0) and the Rolling Stone 200 rock corpus.
+     - Encodes hand-authored transition counts across common pop/rock, minor-loop, and soul/R&B practice.
      - Collapses frame-based repeated chords to reflect actual chord changes.
      - Emits `core/include/chordslots/Corpus.h` with verifiable script SHA-256 hash and provenance comments.
   2. **Harmonic Tokenization & Style Clusters**:
@@ -140,13 +127,13 @@
      - Smooths zero-count cells via add-$k$ smoothing ($k = 0.5$).
      - Balances negative log-likelihood with Pointwise Mutual Information (PMI) discounting to prevent destination chords from dominating purely by raw unigram popularity.
   4. **Circular Loop-Closure Resolution**:
-     - Scores the loop wrap-around transition ($C_{N-1} \to C_0$) with the same empirical prior matrix, guaranteeing circular loop progressions resolve naturally without dead ends.
+     - Scores the loop wrap-around transition ($C_{N-1} \to C_0$) with the prior matrix, guaranteeing circular loop progressions resolve naturally without dead ends.
   5. **Modal Degree-Relative Scoring + Diatonic Bonus**:
      - Evaluates chords relative to chromatic degree from tonic, providing diatonic mode rewards for modal scale tones (e.g. $bVII$ in Mixolydian, $IV$ in Dorian).
   6. **Removal of Classical Retrogression Penalty**:
      - Eliminates the classical $V \to IV$ penalty, naturally embracing $V \to IV \to I$ blues/rock/pop movements.
   7. **Adventure Modulation**:
-     - Low adventure strictly guides progressions toward proven Billboard movements. High adventure relaxes the prior to give drawn target curves full discovery freedom.
+     - Low adventure strictly guides progressions toward common songwriting transitions. High adventure relaxes the prior to give drawn target curves full discovery freedom.
   8. **Zero Allocation & Cache Friendly**:
      - Quantized `constexpr uint8_t` matrices ($< 11\text{ KB}$ total), $O(1)$ lookup, zero audio/message thread dynamic allocation.
 
@@ -154,7 +141,9 @@
 
 ### Section 8: Interactive Targeted Randomization, Advanced Substitutions & Producer Workflow (Specification & Implementation Plan)
 
-* **Goal**: Deliver a comprehensive producer workflow upgrade: surgical parameter control via rich Timeline Cards and a dynamic Context Bar, in-context chord substitutions, phrase structure & anti-oscillation harmonic intelligence, a mathematically robust voice-leading engine that preserves Fit score, data-driven 24-step comping rhythms, MIDI-to-curve extraction, keyswitches, and a modularized, HiDPI-ready UI layout.
+> **Note**: The remaining stages of Section 8 are superseded by [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+
+* **Goal**: Deliver a comprehensive producer workflow upgrade: surgical parameter control via rich Timeline Cards and a dynamic Context Bar, in-context chord substitutions, phrase structure & anti-oscillation harmonic intelligence, a mathematically robust voice-leading engine that preserves Fit score, patterned 24-step comping rhythms, MIDI-to-curve extraction, keyswitches, and a modularized, HiDPI-ready UI layout.
 * **Core Philosophy**: Protect and showcase ChordSlots' true differentiators—**target curves and measured perceptual metrics**—while delivering table-stakes workflow tools (voice leading, chord suggestions, audition in context) with zero audio-thread allocations and strict determinism.
 
 ---
@@ -224,8 +213,8 @@ Analysis of sample progressions (e.g., $vi5 - I - IV - V - IV - V - Imaj7 - V7$)
 * Soft cost for soprano displacement ($\le 2$ semitones preferred).
 * Metric-bounded re-voicing to guarantee that Fit score does not regress. Governed by a `VOICE LEADING` knob (`Smooth` $\leftrightarrow$ `Free`).
 
-##### Stage 6: Data-Driven Comping Rhythm Engine (24-Step Grid)
-* Data-driven step masks with per-hit velocity and gate defined per meter (4/4, 3/4, 6/8).
+##### Stage 6: Patterned Comping Rhythm Engine (24-Step Grid)
+* Grid-aligned step masks with per-hit velocity and gate defined per meter (4/4, 3/4, 6/8).
 * Pre-bake comping note events into `PlayData` at publish time; expand `pendingNotes` ring buffer to 64–128 elements to prevent dropouts on dense stabs with strum/humanize.
 * Full parity across preview synth, live MIDI output, drag-and-drop `.mid`, and split-channel bass.
 
@@ -258,7 +247,7 @@ Analysis of sample progressions (e.g., $vi5 - I - IV - V - IV - V - Imaj7 - V7$)
 3. **Does dragging across lane bars paint multiple slots?**
    - Yes: `LanesView::applyDrag()` tracks `editedMask |= 1u << slot;` during `mouseDrag()`, allowing horizontal painting across consecutive slots within that lane.
 4. **Was the corpus prior active for the roll in the screenshot?**
-   - Yes: `Generator.h` lines 327–375 invoke the Billboard/RS200 bigram prior via `styleForProgression()`. The alternating $IV \leftrightarrow V \leftrightarrow IV \leftrightarrow V$ pattern demonstrates that bigram models without an A-B-A penalty can get trapped in high-probability two-chord cycles, validating Stage 4's anti-oscillation penalty.
+   - Yes: `Generator.h` lines 327–375 invoke the hand-authored style prior via `styleForProgression()`. The alternating $IV \leftrightarrow V \leftrightarrow IV \leftrightarrow V$ pattern demonstrates that bigram models without an A-B-A penalty can get trapped in high-probability two-chord cycles, validating Stage 4's anti-oscillation penalty.
 
 ---
 
@@ -272,16 +261,6 @@ Analysis of sample progressions (e.g., $vi5 - I - IV - V - IV - V - Imaj7 - V7$)
 
 ---
 
-#### 2. Test Suite Additions & Verification Standards
-
-To guarantee mathematical and architectural stability, Section 8 introduces four dedicated test suites:
-1. **Fit-Score Non-Regression Test**: Run 1,000 randomized progressions through the Voice-Leading DP pass across all scales and meters; verify $\text{Fit}_{\text{after}} \ge \text{Fit}_{\text{before}} - 0.02$.
-2. **Comping Note-Event Capacity Test**: Stress-test worst-case comping (e.g. 1/16T stabs + maximum strum + maximum humanize on 8-note chords) verifying zero dropped notes and zero queue overflow.
-3. **Determinism & Pinning Test**: Verify that a progression with Slot $k$ pinned produces identical chords and voicings across repeated rolls with the same seed.
-4. **Export Parity Test**: Verify bit-level equivalence between live audio-thread MIDI event queues and baked drag-and-drop `.mid` files for comping, split-MIDI, and strum offsets.
-
----
-
 ## 4. Verification & Testing Commands
 
 To verify the entire project at any time:
@@ -291,10 +270,12 @@ To verify the entire project at any time:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 
-# Run the 3 test suites:
-./build/chordslots_core_tests          # 62,682 checks (Theory, Metrics, Gibbs, Inversions)
+# Run the test suites:
+./build/chordslots_core_tests          # 67,092 checks (Theory, Metrics, Gibbs, Inversions, Harmonics)
 ./build/chordslots_performance_tests   # 11 checks (Phase 2 Strum, Accent, Humanize)
-./build/chordslots_plugin_tests        # 3,357 checks (Audio queue, Relocation, MIDI export)
+./build/chordslots_trigger_tests       # 55 checks (Held-stack, Last-note priority, CC64, White Keys/Chromatic)
+./build/chordslots_plugin_tests        # 4,385 checks (Audio queue, Relocation, MIDI export, Comping)
+./build/chordslots-cli eval 60 --compare tests/eval_baseline.json  # 128 metric checks (Harness non-regression)
 
 # Take a headless UI snapshot:
 ./build/chordslots_plugin_tests --snapshot ui_snapshot.png

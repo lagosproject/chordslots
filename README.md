@@ -39,7 +39,7 @@ finds chords whose *measured* properties follow those curves.
   with Auto priority, Trigger Only, or Loop Only, White Keys / Chromatic mapping,
   held-note priority stack, sustain pedal (CC64) support, and timeline glow.
 - **Meter & Triplet Grid (4/4, 3/4, 6/8)** – 24-steps-per-quarter timebase with exact integer step math across straight and triplet subdivisions (1/4T, 1/8T, 1/16T, 1/32). Per-variation meter settings, meter-aware rhythm generator (compound beat grouping for 6/8), per-bar cut remapping on meter change, timeline grid ticks & compound beat markers, and optional lock-free host meter tracking. Time-signature meta events written to MIDI export.
-- **Modern Transition Prior (Billboard & RS200 Corpora)** – Data-driven transition probability engine trained on empirical chord movements from the McGill Billboard Project (Hot 100, CC0) and the Rolling Stone 200 rock corpus. Features 3 style clusters (Pop/Rock, Minor Loops, Soul/R&B), add-$k$ smoothing, Pointwise Mutual Information (PMI) scoring, circular loop-closure resolution, and modal degree-relative scoring. Seamlessly balances against target curves via the **Adventure** knob.
+- **Hand-Authored Style Prior (Provisional)** – Transition probability engine with 3 style clusters (Pop/Rock, Minor Loops, Soul/R&B), add-$k$ smoothing, Pointwise Mutual Information (PMI) scoring, circular loop-closure resolution, and modal degree-relative scoring. Seamlessly balances against target curves via the **Adventure** knob. Hand-authored style prior (provisional): transition weights written by hand from common pop/rock, minor-loop and soul/R&B practice. Not derived from a corpus yet; replacement with licence-clean corpus data is planned (IMPLEMENTATION_PLAN.md, P4).
 - **Gets out of the way** – built-in preview synth, live MIDI output, and
   drag-and-drop MIDI clips with baked strum and humanization into any DAW.
 
@@ -106,9 +106,18 @@ Artefacts land in `build/ChordSlots_artefacts/Release/`. Options:
 - `-DCHORDSLOTS_LTO=ON` enables link-time optimisation for release binaries
   (much slower to link).
 
-`ctest` runs two suites: `core` (theory, metrics, generator, locks) and `plugin`
+`ctest` runs five suites: `core` (theory, metrics, generator, locks), `performance`
+(strum, accent, humanize), `trigger` (MIDI held stack, mapping, pedal), `plugin`
 (drives the real audio processor with a fake host transport and checks note
-timing, stuck notes, state save/restore and the MIDI export).
+timing, stuck notes, state save/restore and the MIDI export), and `eval`
+(musical evaluation regression harness against committed baseline).
+
+To update the evaluation baseline on purpose after intentional generator improvements:
+
+```sh
+./build/chordslots-cli eval 1000 --out tests/eval_baseline.json --bigrams tests/eval_bigrams_baseline.json
+```
+
 `build/chordslots_plugin_tests --snapshot ui.png` renders the editor to a PNG
 without a host. Before a release, also run
 [pluginval](https://github.com/Tracktion/pluginval) against the VST3.
@@ -152,12 +161,15 @@ plugin host, and could be wrapped for CLAP, a web UI or a hardware sequencer.
 - [x] **3-Panel Workflow Interface**: Dedicated visual sections for `HARMONY`, `GROOVE`, and `OUTPUT`.
 - [x] **Section 3: Incoming MIDI Trigger Mode**: Play and trigger chord slots live from a MIDI keyboard or pad controller (White Keys $C_3 \dots B_3$, Chromatic $C_3$, or Pads $C_1$), with last-note priority held-key stack, sustain pedal (CC64) support, live velocity scaling, and real-time timeline glow.
 - [x] **Section 4: Split-MIDI Output / Dual-Channel Voicing**: Split the monophonic bassline to MIDI Channel 2 and upper chord voicings to MIDI Channel 1, with continuous bass synthesis (no holes even at low energy), 808/monosynth safety (no octave glitches), on-the-grid bass timing with upper strum delays, two-track Format-1 master drag, and dedicated single-track **Drag Chords** / **Drag Bass** tiles.
-- [ ] **Section 5: A/B Snapshots & History Stack**: Compare two progression variations (A vs B) instantly with dedicated quick-switch slots.
-- [ ] **Section 6: Triplet & Polyrhythmic Grid**: Support for 3/4, 6/8, and triplet cut grids ($1/12$, $1/24$).
+- [x] **Section 5: 4-Variation Bank (A/B/C/D)**: 4 independent variations, quantized switching (`Next Bar`, `Next Slot`, `Immediate`), follow playback, and independent undo history.
+- [x] **Section 6: Meter & Triplet Grid**: Meters 4/4, 3/4, 6/8, 24-step-per-quarter timebase, and triplet cut grids (1/4T, 1/8T, 1/16T, 1/32).
+
+Subsequent stages and upcoming development are prioritized in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
 ## Limitations
 
-- 4/4 only, sixteenth-note cut resolution, up to 8 bars and 16 slots.
+- Meters 4/4, 3/4, and 6/8 supported; 24 steps per quarter note; up to `kMaxBars` (8) bars and `kMaxSlots` (16) slots.
+- Comping rhythm styles are currently baked into MIDI export; live playback uses sustained voicing playback (comping in live playback is planned for P1).
 - The metric calibration has not been validated with large-scale listening tests.
 - Tested on Linux; macOS and Windows build through JUCE CMake.
 
