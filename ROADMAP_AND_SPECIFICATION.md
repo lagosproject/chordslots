@@ -65,8 +65,8 @@
 - [x] **Section 3: Incoming MIDI Trigger Mode (Held-stack, Last-note priority, CC64, UI glow)**
 - [x] **Section 4: Split-MIDI Output / Dual-Channel Voicing (Channel 1 Chords, Channel 2 Monophonic Bass)**
 - [x] **Section 5: 4-Variation Bank (A/B/C/D), Follow Playback, and Independent Undo History**
-- [ ] **Section 6: Meter & Triplet Grid (In Progress)**
-- [ ] **Section 7: Modern Transition Prior / Billboard Corpus Integration**
+- [x] **Section 6: Meter & Triplet Grid (24-Step Timebase, 4/4, 3/4, 6/8, Triplet Grids)**
+- [x] **Section 7: Modern Transition Prior (Billboard & RS200 Corpora Integration)**
 - [ ] **Section 8: Interactive Targeted Randomization & Relative Chord Metric Substitutions (Future Task)**
 * **Goal**: Enable musicians to perform chord slots live using a MIDI keyboard or pad controller (e.g. Push, Launchpad, MPC, KeyStep).
 * **Requirements & Invariants**:
@@ -125,8 +125,30 @@
 
 ---
 
-### Section 7: Modern Transition Prior / Billboard Corpus Integration
+### Section 7: Modern Transition Prior (Billboard & RS200 Corpora Integration) (Completed)
 * **Goal**: Incorporate data-driven transition probability matrices trained on contemporary songwriting chord movements.
+* **Architecture & Invariants**:
+  1. **Reproducible Pipeline (`tools/build_corpus.py`)**:
+     - Extracts and normalizes bigrams from the McGill Billboard Project (Hot 100, 739 songs, CC0) and the Rolling Stone 200 rock corpus.
+     - Collapses frame-based repeated chords to reflect actual chord changes.
+     - Emits `core/include/chordslots/Corpus.h` with verifiable script SHA-256 hash and provenance comments.
+  2. **Harmonic Tokenization & Style Clusters**:
+     - 60 tokens: 12 chromatic scale degrees $\times$ 5 quality classes (`Major`, `Minor`, `Dominant`, `Diminished`, `SusOrAug`). Deterministic table-driven mapping for all 21 chord types.
+     - 3 Style Clusters: `PopRock` ($I, IV, V, vi, bVII, bVI, bIII, ii$), `MinorLoops` ($i, bVI, bVII, iv, v/V, bIII, ii^\circ$), and `SoulRnb` ($ii \to V, iii \to vi, IV, I$, secondary dominants).
+     - Selecting a Mood defaults to the appropriate style cluster (e.g. Euphoric $\to$ PopRock, Dark $\to$ MinorLoops, Dreamy $\to$ SoulRnb).
+  3. **PMI Scoring & Add-$k$ Smoothing**:
+     - Smooths zero-count cells via add-$k$ smoothing ($k = 0.5$).
+     - Balances negative log-likelihood with Pointwise Mutual Information (PMI) discounting to prevent destination chords from dominating purely by raw unigram popularity.
+  4. **Circular Loop-Closure Resolution**:
+     - Scores the loop wrap-around transition ($C_{N-1} \to C_0$) with the same empirical prior matrix, guaranteeing circular loop progressions resolve naturally without dead ends.
+  5. **Modal Degree-Relative Scoring + Diatonic Bonus**:
+     - Evaluates chords relative to chromatic degree from tonic, providing diatonic mode rewards for modal scale tones (e.g. $bVII$ in Mixolydian, $IV$ in Dorian).
+  6. **Removal of Classical Retrogression Penalty**:
+     - Eliminates the classical $V \to IV$ penalty, naturally embracing $V \to IV \to I$ blues/rock/pop movements.
+  7. **Adventure Modulation**:
+     - Low adventure strictly guides progressions toward proven Billboard movements. High adventure relaxes the prior to give drawn target curves full discovery freedom.
+  8. **Zero Allocation & Cache Friendly**:
+     - Quantized `constexpr uint8_t` matrices ($< 11\text{ KB}$ total), $O(1)$ lookup, zero audio/message thread dynamic allocation.
 
 ---
 

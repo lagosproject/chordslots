@@ -3,7 +3,9 @@
 
 #include "chordslots/Generator.h"
 
+#include <cmath>
 #include <cstdio>
+#include <map>
 #include <string>
 
 using namespace cs;
@@ -484,6 +486,148 @@ static void testMeterAndRhythm()
     }
 }
 
+static void testModernTransitionPrior()
+{
+    // 1. Table-driven assertion for all 21 chord types to QualityClass
+    CHECK (qualityClassOf (0) == QualityClass::Major);       // ""
+    CHECK (qualityClassOf (1) == QualityClass::Minor);       // "m"
+    CHECK (qualityClassOf (2) == QualityClass::Major);       // "5"
+    CHECK (qualityClassOf (3) == QualityClass::Diminished);  // "dim"
+    CHECK (qualityClassOf (4) == QualityClass::SusOrAug);    // "aug"
+    CHECK (qualityClassOf (5) == QualityClass::SusOrAug);    // "sus2"
+    CHECK (qualityClassOf (6) == QualityClass::SusOrAug);    // "sus4"
+    CHECK (qualityClassOf (7) == QualityClass::Major);       // "maj7"
+    CHECK (qualityClassOf (8) == QualityClass::Minor);       // "m7"
+    CHECK (qualityClassOf (9) == QualityClass::Dominant);    // "7"
+    CHECK (qualityClassOf (10) == QualityClass::Diminished); // "m7b5"
+    CHECK (qualityClassOf (11) == QualityClass::Diminished); // "dim7"
+    CHECK (qualityClassOf (12) == QualityClass::Minor);      // "mMaj7"
+    CHECK (qualityClassOf (13) == QualityClass::Major);      // "6"
+    CHECK (qualityClassOf (14) == QualityClass::Minor);      // "m6"
+    CHECK (qualityClassOf (15) == QualityClass::Major);      // "add9"
+    CHECK (qualityClassOf (16) == QualityClass::Minor);      // "madd9"
+    CHECK (qualityClassOf (17) == QualityClass::Major);      // "maj9"
+    CHECK (qualityClassOf (18) == QualityClass::Minor);      // "m9"
+    CHECK (qualityClassOf (19) == QualityClass::Dominant);   // "9"
+    CHECK (qualityClassOf (20) == QualityClass::SusOrAug);   // "7sus4"
+
+    // 2. Empirical bigram rankings in Pop/Rock (C Major: tonic = 0, scale = 0)
+    const Chord cI   = ch (0, "");  // C
+    const Chord cIV  = ch (5, "");  // F
+    const Chord cV   = ch (7, "");  // G
+    const Chord cvi  = ch (9, "m"); // Am
+    const Chord cii  = ch (2, "m"); // Dm
+    const Chord cbVII= ch (10, ""); // Bb
+
+    const float costI_IV = corpusTransitionCost (cI, cIV, 0, 0, CorpusStyle::PopRock);
+    const float costI_V  = corpusTransitionCost (cI, cV, 0, 0, CorpusStyle::PopRock);
+    const float costIV_I = corpusTransitionCost (cIV, cI, 0, 0, CorpusStyle::PopRock);
+    const float costV_I  = corpusTransitionCost (cV, cI, 0, 0, CorpusStyle::PopRock);
+    const float costV_IV = corpusTransitionCost (cV, cIV, 0, 0, CorpusStyle::PopRock);
+    const float costvi_IV= corpusTransitionCost (cvi, cIV, 0, 0, CorpusStyle::PopRock);
+    const float costbVII_IV = corpusTransitionCost (cbVII, cIV, 0, 0, CorpusStyle::PopRock);
+
+    // All staple songwriting transitions should have low surprise costs (< 0.25)
+    CHECK (costI_IV < 0.25f);
+    CHECK (costI_V < 0.25f);
+    CHECK (costIV_I < 0.25f);
+    CHECK (costV_I < 0.25f);
+    CHECK (costV_IV < 0.25f); // V -> IV is common in pop/rock, no penalty!
+    CHECK (costvi_IV < 0.25f);
+    CHECK (costbVII_IV < 0.25f);
+
+    // Awkward / rare chromatic jumps should have much higher surprise costs (> 0.60)
+    const Chord cFsharpDim = ch (6, "dim"); // F#dim in C major
+    const Chord cCsharpDim = ch (1, "dim"); // C#dim
+    const float costAwkward1 = corpusTransitionCost (cV, cFsharpDim, 0, 0, CorpusStyle::PopRock);
+    const float costAwkward2 = corpusTransitionCost (cI, cCsharpDim, 0, 0, CorpusStyle::PopRock);
+    CHECK (costAwkward1 > 0.60f);
+    CHECK (costAwkward2 > 0.60f);
+    CHECK (costAwkward1 > costV_IV * 2.0f);
+
+    // 3. MinorLoops rankings in A Minor (tonic = 9, scale = 1)
+    const Chord cAm = ch (9, "m"); // i
+    const Chord cF  = ch (5, "");  // bVI
+    const Chord cG  = ch (7, "");  // bVII
+    const Chord cDm = ch (2, "m"); // iv
+    const Chord cEm = ch (4, "m"); // v
+    const Chord cE7 = ch (4, "7"); // V7
+
+    const float costAm_F = corpusTransitionCost (cAm, cF, 9, 1, CorpusStyle::MinorLoops);
+    const float costAm_Dm= corpusTransitionCost (cAm, cDm, 9, 1, CorpusStyle::MinorLoops);
+    const float costF_G  = corpusTransitionCost (cF, cG, 9, 1, CorpusStyle::MinorLoops);
+    const float costG_Am = corpusTransitionCost (cG, cAm, 9, 1, CorpusStyle::MinorLoops);
+    const float costE7_Am= corpusTransitionCost (cE7, cAm, 9, 1, CorpusStyle::MinorLoops);
+
+    CHECK (costAm_F < 0.25f);
+    CHECK (costAm_Dm < 0.25f);
+    CHECK (costF_G < 0.25f);  // bVI -> bVII
+    CHECK (costG_Am < 0.25f); // bVII -> i
+    CHECK (costE7_Am < 0.25f); // V7 -> i
+
+    // 4. Overload and backward compatibility check
+    const float costOverload4 = transitionCost (cI, cIV, 0, 0.3f);
+    const float costOverload6 = transitionCost (cI, cIV, 0, 0.3f, 0, CorpusStyle::PopRock);
+    CHECK (std::abs (costOverload4 - costOverload6) < 1.0e-5f);
+
+    // Stutter penalty: immediate repetition of exact same chord has high cost
+    const float costRepeat = transitionCost (cI, cI, 0, 0.3f);
+    CHECK (costRepeat > costOverload4 * 2.0f);
+
+    // 5. 1,000 rolls distribution and entropy test
+    Rng rng (42);
+    Progression p;
+    layoutEven (p);
+    p.mood = 0; // Euphoric
+    applyMood (p, 0);
+
+    // Measure fit score maintenance and entropy at adventure = 0.0 vs adventure = 1.0
+    float sumFit = 0.0f;
+    std::map<int, int> chordCountsTame;
+    p.adventure = 0.0f;
+    for (int i = 0; i < 500; ++i)
+    {
+        roll (p, rng);
+        sumFit += fitScore (p);
+        for (int s = 0; s < p.numSlots; ++s)
+            chordCountsTame[p.slots[(size_t) s].chord.root * 100 + p.slots[(size_t) s].chord.type]++;
+    }
+    const float avgFit = sumFit / 500.0f;
+    CHECK (avgFit >= 0.80f); // Fit score remains >= 80% with Billboard prior
+
+    // Compute Shannon entropy for tame (adventure = 0.0)
+    double entropyTame = 0.0;
+    const double totalTame = 500.0 * p.numSlots;
+    for (const auto& kv : chordCountsTame)
+    {
+        const double prob = (double) kv.second / totalTame;
+        if (prob > 0.0)
+            entropyTame -= prob * std::log2 (prob);
+    }
+
+    // Now roll with adventure = 1.0
+    std::map<int, int> chordCountsWild;
+    p.adventure = 1.0f;
+    for (int i = 0; i < 500; ++i)
+    {
+        roll (p, rng);
+        for (int s = 0; s < p.numSlots; ++s)
+            chordCountsWild[p.slots[(size_t) s].chord.root * 100 + p.slots[(size_t) s].chord.type]++;
+    }
+    double entropyWild = 0.0;
+    const double totalWild = 500.0 * p.numSlots;
+    for (const auto& kv : chordCountsWild)
+    {
+        const double prob = (double) kv.second / totalWild;
+        if (prob > 0.0)
+            entropyWild -= prob * std::log2 (prob);
+    }
+
+    // Entropy at adventure = 1.0 must be significantly higher than at adventure = 0.0
+    CHECK (entropyWild > entropyTame);
+    CHECK (chordCountsWild.size() > chordCountsTame.size());
+}
+
 int main()
 {
     testSpelling();
@@ -494,6 +638,7 @@ int main()
     testTargetsSteerOutput();
     testEditing();
     testMeterAndRhythm();
+    testModernTransitionPrior();
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

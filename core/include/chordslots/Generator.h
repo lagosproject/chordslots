@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+#include "Corpus.h"
 #include "Metrics.h"
 #include "Performance.h"
 
+#include <cstring>
 #include <random>
 
 namespace cs
@@ -279,9 +281,50 @@ inline std::vector<Candidate> buildCandidates (int tonic, int scaleIdx, float ad
 }
 
 //==============================================================================
+// Moods: nothing more than named target curves. No tagged progression database.
+
+struct Mood
+{
+    const char* name;
+    int scale;               // suggested scale index
+    float adventure;
+    float syncopation;
+    std::vector<float> b, t, e; // control points spread across the loop
+};
+
+inline const std::vector<Mood>& moods()
+{
+    static const std::vector<Mood> m = {
+        { "Euphoric",    0, 0.30f, 0.25f, { 0.70f, 0.78f, 0.85f, 0.80f }, { 0.22f, 0.45f, 0.60f, 0.40f }, { 0.70f, 0.80f, 0.90f, 1.00f } },
+        { "Uplifting",   1, 0.30f, 0.30f, { 0.35f, 0.60f, 0.70f, 0.62f }, { 0.25f, 0.38f, 0.45f, 0.62f }, { 0.75f, 0.80f, 0.90f, 0.95f } },
+        { "Epic",        1, 0.35f, 0.20f, { 0.30f, 0.58f, 0.66f, 0.40f }, { 0.22f, 0.40f, 0.62f, 0.68f }, { 0.70f, 0.80f, 0.90f, 1.00f } },
+        { "Melancholic", 1, 0.40f, 0.20f, { 0.30f, 0.25f, 0.55f, 0.28f }, { 0.25f, 0.50f, 0.42f, 0.60f }, { 0.40f, 0.45f, 0.50f, 0.40f } },
+        { "Dark",        3, 0.50f, 0.35f, { 0.25f, 0.15f, 0.30f, 0.10f }, { 0.25f, 0.60f, 0.55f, 0.75f }, { 0.65f, 0.70f, 0.70f, 0.80f } },
+        { "Tense",       7, 0.65f, 0.45f, { 0.30f, 0.35f, 0.20f, 0.40f }, { 0.45f, 0.65f, 0.80f, 0.90f }, { 0.50f, 0.60f, 0.70f, 0.85f } },
+        { "Dreamy",      4, 0.60f, 0.15f, { 0.85f, 0.70f, 0.90f, 0.75f }, { 0.40f, 0.55f, 0.48f, 0.55f }, { 0.30f, 0.30f, 0.35f, 0.30f } },
+        { "Hard",        1, 0.15f, 0.50f, { 0.28f, 0.35f, 0.22f, 0.45f }, { 0.22f, 0.50f, 0.55f, 0.65f }, { 1.00f, 1.00f, 1.00f, 1.00f } },
+    };
+    return m;
+}
+
+inline CorpusStyle styleForProgression (const Progression& p) noexcept
+{
+    if (p.mood >= 0 && p.mood < (int) moods().size())
+    {
+        const auto& m = moods()[(size_t) p.mood];
+        if (std::strcmp (m.name, "Dreamy") == 0)
+            return CorpusStyle::SoulRnb;
+        if (std::strcmp (m.name, "Dark") == 0 || std::strcmp (m.name, "Melancholic") == 0 || std::strcmp (m.name, "Tense") == 0)
+            return CorpusStyle::MinorLoops;
+        return CorpusStyle::PopRock;
+    }
+    return scaleHasMinorThird (p.scale) ? CorpusStyle::MinorLoops : CorpusStyle::PopRock;
+}
+
+//==============================================================================
 // Cost model
 
-inline float transitionCost (Chord a, Chord b, int tonic, float adventure)
+inline float transitionCost (Chord a, Chord b, int tonic, float adventure, int scaleIdx, CorpusStyle style)
 {
     float c = 0.0f;
     if (a == b)
@@ -289,11 +332,24 @@ inline float transitionCost (Chord a, Chord b, int tonic, float adventure)
     else if (a.root == b.root)
         c += (a.isSlash() != b.isSlash() || a.bassInt != b.bassInt) ? 0.2f : 0.6f;
 
-    if (functionOf (a, tonic) == Function::dominant && functionOf (b, tonic) == Function::subdominant)
-        c += 0.4f; // mild penalty on retrogression
+    // Modern Billboard / RS200 Corpus Transition Prior
+    const float corpusCost = corpusTransitionCost (a, b, tonic, scaleIdx, style);
 
-    c += (1.0f - adventure) * 0.7f * chordDistance (a, b); // tame settings prefer close relatives
+    // Adventure modulates prior strength:
+    // Low adventure strictly guides progressions toward proven songwriting transitions.
+    // High adventure relaxes the prior to allow adventurous harmonic discoveries.
+    const float priorWeight = (1.0f - adventure * 0.75f);
+    c += priorWeight * 2.2f * corpusCost;
+
+    // Tame settings also prefer close relatives
+    c += (1.0f - adventure) * 0.3f * chordDistance (a, b);
     return 0.03f * c;
+}
+
+inline float transitionCost (Chord a, Chord b, int tonic, float adventure, int scaleIdx = 0)
+{
+    const CorpusStyle style = scaleHasMinorThird (scaleIdx) ? CorpusStyle::MinorLoops : CorpusStyle::PopRock;
+    return transitionCost (a, b, tonic, adventure, scaleIdx, style);
 }
 
 inline float slotCost (const Progression& p, int slot, const Candidate& cand,
@@ -312,10 +368,11 @@ inline float slotCost (const Progression& p, int slot, const Candidate& cand,
     if (slot == 0 && cand.chord.root == p.tonic)
         cost -= 0.012f; // a gentle pull towards starting at home
 
+    const CorpusStyle style = styleForProgression (p);
     if (prev != nullptr)
-        cost += transitionCost (*prev, cand.chord, p.tonic, p.adventure);
+        cost += transitionCost (*prev, cand.chord, p.tonic, p.adventure, p.scale, style);
     if (next != nullptr)
-        cost += transitionCost (cand.chord, *next, p.tonic, p.adventure);
+        cost += transitionCost (cand.chord, *next, p.tonic, p.adventure, p.scale, style);
     return cost;
 }
 
@@ -1062,31 +1119,7 @@ inline float fitScore (const Progression& p)
 }
 
 //==============================================================================
-// Moods: nothing more than named target curves. No tagged progression database.
-
-struct Mood
-{
-    const char* name;
-    int scale;               // suggested scale index
-    float adventure;
-    float syncopation;
-    std::vector<float> b, t, e; // control points spread across the loop
-};
-
-inline const std::vector<Mood>& moods()
-{
-    static const std::vector<Mood> m = {
-        { "Euphoric",    0, 0.30f, 0.25f, { 0.70f, 0.78f, 0.85f, 0.80f }, { 0.22f, 0.45f, 0.60f, 0.40f }, { 0.70f, 0.80f, 0.90f, 1.00f } },
-        { "Uplifting",   1, 0.30f, 0.30f, { 0.35f, 0.60f, 0.70f, 0.62f }, { 0.25f, 0.38f, 0.45f, 0.62f }, { 0.75f, 0.80f, 0.90f, 0.95f } },
-        { "Epic",        1, 0.35f, 0.20f, { 0.30f, 0.58f, 0.66f, 0.40f }, { 0.22f, 0.40f, 0.62f, 0.68f }, { 0.70f, 0.80f, 0.90f, 1.00f } },
-        { "Melancholic", 1, 0.40f, 0.20f, { 0.30f, 0.25f, 0.55f, 0.28f }, { 0.25f, 0.50f, 0.42f, 0.60f }, { 0.40f, 0.45f, 0.50f, 0.40f } },
-        { "Dark",        3, 0.50f, 0.35f, { 0.25f, 0.15f, 0.30f, 0.10f }, { 0.25f, 0.60f, 0.55f, 0.75f }, { 0.65f, 0.70f, 0.70f, 0.80f } },
-        { "Tense",       7, 0.65f, 0.45f, { 0.30f, 0.35f, 0.20f, 0.40f }, { 0.45f, 0.65f, 0.80f, 0.90f }, { 0.50f, 0.60f, 0.70f, 0.85f } },
-        { "Dreamy",      4, 0.60f, 0.15f, { 0.85f, 0.70f, 0.90f, 0.75f }, { 0.40f, 0.55f, 0.48f, 0.55f }, { 0.30f, 0.30f, 0.35f, 0.30f } },
-        { "Hard",        1, 0.15f, 0.50f, { 0.28f, 0.35f, 0.22f, 0.45f }, { 0.22f, 0.50f, 0.55f, 0.65f }, { 1.00f, 1.00f, 1.00f, 1.00f } },
-    };
-    return m;
-}
+// Mood curves sampling
 
 inline float sampleCurve (const std::vector<float>& pts, float x)
 {
