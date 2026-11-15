@@ -39,6 +39,7 @@ struct NoteEvent
     int note;
     bool on;
     int velocity;
+    int channel = 1;
 };
 
 struct Host
@@ -64,9 +65,9 @@ struct Host
                 const auto m = meta.getMessage();
                 CHECK (meta.samplePosition >= 0 && meta.samplePosition < blockSize);
                 if (m.isNoteOn())
-                    events.push_back ({ position + meta.samplePosition, m.getNoteNumber(), true, m.getVelocity() });
+                    events.push_back ({ position + meta.samplePosition, m.getNoteNumber(), true, m.getVelocity(), m.getChannel() });
                 else if (m.isNoteOff())
-                    events.push_back ({ position + meta.samplePosition, m.getNoteNumber(), false, 0 });
+                    events.push_back ({ position + meta.samplePosition, m.getNoteNumber(), false, 0, m.getChannel() });
             }
 
             for (int ch = 0; ch < 2; ++ch)
@@ -531,6 +532,236 @@ void testIncomingMidiTriggerIntegration()
     CHECK (h.heldAfterReplay() == 0);
 }
 
+void testSplitMidiOutput()
+{
+    // 1. Legacy migration: ensure bassCount is recomputed if 0
+    {
+        cs::Voicing v;
+        v.n = 4;
+        v.notes = { 36, 48, 64, 67 };
+        v.bassCount = 0; // Legacy state with 0 bassCount
+        CHECK (v.computeBassCount() == 1); // 36 is < 48
+    }
+
+    // 2. Playback routing with splitMidi = true
+    {
+        Host h (48000.0, 256);
+        if (auto* p = h.processor.apvts.getParameter ("splitMidi"))
+            p->setValueNotifyingHost (1.0f);
+        CHECK (h.processor.isSplitMidi());
+
+        h.playHead.playing = true;
+        h.run (100);
+        h.playHead.playing = false;
+        h.run (10);
+
+        CHECK (! h.events.empty());
+        int ch1Ons = 0, ch2Ons = 0;
+        int ch1Offs = 0, ch2Offs = 0;
+        int activeCh2Notes = 0;
+
+        for (const auto& e : h.events)
+        {
+            if (e.channel == 1)
+            {
+                if (e.on)
+                {
+                    ch1Ons++;
+                    CHECK (e.note >= cs::kUpperFloor); // Chords must be in upper register
+                }
+                else
+                {
+                    ch1Offs++;
+                }
+            }
+            else if (e.channel == 2)
+            {
+                if (e.on)
+                {
+                    ch2Ons++;
+                    activeCh2Notes++;
+                    // Monophonic bass safety: at most 1 simultaneous note on channel 2
+                    CHECK (activeCh2Notes <= 1);
+                    CHECK (e.note < cs::kUpperFloor); // Bass must be below upper floor
+                }
+                else
+                {
+                    ch2Offs++;
+                    activeCh2Notes--;
+                    CHECK (activeCh2Notes >= 0);
+                }
+            }
+            else
+            {
+                CHECK (false); // No other channels used
+            }
+        }
+        CHECK (ch1Ons > 0 && ch2Ons > 0);
+        CHECK (ch1Ons == ch1Offs);
+        CHECK (ch2Ons == ch2Offs);
+    }
+
+    // 3. Continuous bass even when slot has no bass note in voicing (bassCount == 0)
+    {
+        Host h (48000.0, 256);
+        if (auto* p = h.processor.apvts.getParameter ("splitMidi"))
+            p->setValueNotifyingHost (1.0f);
+
+        // Edit progression to have only high notes in voicing (bassCount = 0)
+        h.processor.edit ([] (cs::Progression& pr, cs::Rng&)
+        {
+            for (int i = 0; i < pr.numSlots; ++i)
+            {
+                pr.slots[(size_t) i].voicing.n = 3;
+                pr.slots[(size_t) i].voicing.notes = { 60, 64, 67 };
+                pr.slots[(size_t) i].voicing.bassCount = 0;
+            }
+        });
+
+        h.playHead.playing = true;
+        h.run (60);
+        h.playHead.playing = false;
+        h.run (10);
+
+        int ch2Ons = 0;
+        for (const auto& e : h.events)
+            if (e.channel == 2 && e.on)
+                ch2Ons++;
+
+        // Channel 2 must still receive synthesized continuous bass notes!
+        CHECK (ch2Ons > 0);
+    }
+
+    // 4. Strum separation: bass note on grid (sample offset 0), upper notes delayed
+    {
+        Host h (48000.0, 128);
+        if (auto* p = h.processor.apvts.getParameter ("splitMidi"))
+            p->setValueNotifyingHost (1.0f);
+        if (auto* p = h.processor.apvts.getParameter ("strum"))
+            p->setValueNotifyingHost (p->convertTo0to1 (0.8f)); // Upward strum
+
+        h.playHead.playing = true;
+        h.run (40);
+        h.playHead.playing = false;
+        h.run (10);
+
+        // Find the first chord's events (at sample ~0..4000)
+        juce::int64 firstBassSample = -1;
+        juce::int64 maxUpperSample = -1;
+        for (const auto& e : h.events)
+        {
+            if (e.sample < 4000)
+            {
+                if (e.channel == 2 && e.on && firstBassSample < 0)
+                    firstBassSample = e.sample;
+                if (e.channel == 1 && e.on)
+                    maxUpperSample = std::max (maxUpperSample, e.sample);
+            }
+        }
+        CHECK (firstBassSample == 0); // Bass is strictly on the grid
+        CHECK (maxUpperSample > firstBassSample); // Upper notes roll with strum
+    }
+
+    // 5. Live trigger in split mode
+    {
+        Host h (48000.0, 256);
+        if (auto* p = h.processor.apvts.getParameter ("splitMidi"))
+            p->setValueNotifyingHost (1.0f);
+
+        // Trigger note 60 (Slot 0)
+        h.injectNoteOn (60, 100, 0);
+        h.run (1);
+
+        int liveCh1Ons = 0, liveCh2Ons = 0;
+        for (const auto& e : h.events)
+        {
+            if (e.on && e.channel == 1) liveCh1Ons++;
+            if (e.on && e.channel == 2) liveCh2Ons++;
+        }
+        CHECK (liveCh1Ons > 0);
+        CHECK (liveCh2Ons == 1); // Strictly monophonic bass
+
+        // Release note 60
+        h.injectNoteOff (60, 0);
+        h.run (1);
+
+        int liveCh1Offs = 0, liveCh2Offs = 0;
+        for (const auto& e : h.events)
+        {
+            if (! e.on && e.channel == 1) liveCh1Offs++;
+            if (! e.on && e.channel == 2) liveCh2Offs++;
+        }
+        CHECK (liveCh1Ons == liveCh1Offs);
+        CHECK (liveCh2Ons == liveCh2Offs);
+    }
+
+    // 6. MIDI file export checks
+    {
+        Host h;
+        if (auto* p = h.processor.apvts.getParameter ("splitMidi"))
+            p->setValueNotifyingHost (1.0f);
+
+        // Master export in split mode -> Format 1 with 2 tracks
+        const juce::MidiFile masterFile = h.processor.createMidiFile (ChordSlotsProcessor::MidiExportMode::Master);
+        CHECK (masterFile.getNumTracks() == 2);
+        CHECK (masterFile.getTimeFormat() == 480);
+
+        const auto* chordsTrack = masterFile.getTrack (0);
+        const auto* bassTrack = masterFile.getTrack (1);
+        CHECK (chordsTrack != nullptr && bassTrack != nullptr);
+
+        int ch1Count = 0, ch2Count = 0;
+        for (int i = 0; i < chordsTrack->getNumEvents(); ++i)
+        {
+            const auto& m = chordsTrack->getEventPointer (i)->message;
+            if (m.isNoteOnOrOff())
+            {
+                CHECK (m.getChannel() == 1);
+                ch1Count++;
+            }
+        }
+        for (int i = 0; i < bassTrack->getNumEvents(); ++i)
+        {
+            const auto& m = bassTrack->getEventPointer (i)->message;
+            if (m.isNoteOnOrOff())
+            {
+                CHECK (m.getChannel() == 2);
+                ch2Count++;
+            }
+        }
+        CHECK (ch1Count > 0 && ch2Count > 0);
+
+        // Chords-only file -> 1 track, only channel 1
+        const juce::MidiFile chordsFile = h.processor.createMidiFile (ChordSlotsProcessor::MidiExportMode::ChordsOnly);
+        CHECK (chordsFile.getNumTracks() == 1);
+        for (int i = 0; i < chordsFile.getTrack (0)->getNumEvents(); ++i)
+        {
+            const auto& m = chordsFile.getTrack (0)->getEventPointer (i)->message;
+            if (m.isNoteOnOrOff())
+                CHECK (m.getChannel() == 1);
+        }
+
+        // Bass-only file -> 1 track, only channel 2
+        const juce::MidiFile bassFile = h.processor.createMidiFile (ChordSlotsProcessor::MidiExportMode::BassOnly);
+        CHECK (bassFile.getNumTracks() == 1);
+        for (int i = 0; i < bassFile.getTrack (0)->getNumEvents(); ++i)
+        {
+            const auto& m = bassFile.getTrack (0)->getEventPointer (i)->message;
+            if (m.isNoteOnOrOff())
+                CHECK (m.getChannel() == 2);
+        }
+
+        // Temp file generation for drag-and-drop
+        const juce::File fChords = h.processor.writeTempMidiFile (ChordSlotsProcessor::MidiExportMode::ChordsOnly);
+        CHECK (fChords.existsAsFile() && fChords.getFileName().contains ("Chords"));
+        fChords.deleteFile();
+
+        const juce::File fBass = h.processor.writeTempMidiFile (ChordSlotsProcessor::MidiExportMode::BassOnly);
+        CHECK (fBass.existsAsFile() && fBass.getFileName().contains ("Bass"));
+        fBass.deleteFile();
+    }
+}
+
 } // namespace
 
 int main (int argc, char** argv)
@@ -569,6 +800,7 @@ int main (int argc, char** argv)
     testMidiFile();
     testPerformanceAndStrum();
     testIncomingMidiTriggerIntegration();
+    testSplitMidiOutput();
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

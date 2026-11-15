@@ -604,7 +604,10 @@ void LanesView::mouseUp (const juce::MouseEvent&)
 }
 
 //==============================================================================
-MidiDragTile::MidiDragTile (ChordSlotsProcessor& p) : processor (p)
+MidiDragTile::MidiDragTile (ChordSlotsProcessor& p,
+                           ChordSlotsProcessor::MidiExportMode mode,
+                           const juce::String& label)
+    : processor (p), exportMode (mode), tileLabel (label)
 {
     setMouseCursor (juce::MouseCursor::DraggingHandCursor);
 }
@@ -613,32 +616,46 @@ void MidiDragTile::paint (juce::Graphics& g)
 {
     const auto r = getLocalBounds().toFloat().reduced (0.75f);
     g.setColour (isMouseOver() ? ui::panelHi.brighter (0.1f) : ui::panelHi);
-    g.fillRoundedRectangle (r, 6.0f);
+    g.fillRoundedRectangle (r, 5.0f);
     g.setColour (ui::outline);
     const float dashes[] = { 4.0f, 3.0f };
     juce::Path outlinePath, dashed;
-    outlinePath.addRoundedRectangle (r, 6.0f);
+    outlinePath.addRoundedRectangle (r, 5.0f);
     juce::PathStrokeType (1.2f).createDashedStroke (dashed, outlinePath, dashes, 2);
     g.setColour (ui::textDim);
     g.fillPath (dashed);
 
-    // Tiny piano-roll glyph
-    const auto icon = r.withSizeKeepingCentre (26.0f, 16.0f).translated (0.0f, -9.0f);
-    g.setColour (ui::accent.brighter (0.2f));
-    g.fillRoundedRectangle (icon.getX(), icon.getY(), 12.0f, 3.5f, 1.5f);
-    g.fillRoundedRectangle (icon.getX() + 7.0f, icon.getY() + 6.0f, 14.0f, 3.5f, 1.5f);
-    g.fillRoundedRectangle (icon.getX() + 14.0f, icon.getY() + 12.0f, 12.0f, 3.5f, 1.5f);
+    if (r.getHeight() >= 36.0f)
+    {
+        // Tiny piano-roll glyph
+        const auto icon = r.withSizeKeepingCentre (26.0f, 16.0f).translated (0.0f, -8.0f);
+        g.setColour (ui::accent.brighter (0.2f));
+        g.fillRoundedRectangle (icon.getX(), icon.getY(), 12.0f, 3.5f, 1.5f);
+        g.fillRoundedRectangle (icon.getX() + 7.0f, icon.getY() + 6.0f, 14.0f, 3.5f, 1.5f);
+        g.fillRoundedRectangle (icon.getX() + 14.0f, icon.getY() + 12.0f, 12.0f, 3.5f, 1.5f);
 
-    g.setColour (ui::text);
-    g.setFont (ui::font (12.5f, true));
-    g.drawText ("Drag MIDI", r.withTrimmedTop (r.getHeight() * 0.55f).toNearestInt(), juce::Justification::centred, false);
+        g.setColour (ui::text);
+        g.setFont (ui::font (12.0f, true));
+        g.drawText (tileLabel, r.withTrimmedTop (r.getHeight() * 0.52f).toNearestInt(), juce::Justification::centred, false);
+    }
+    else
+    {
+        // Compact height for dual stacked tiles (Chords / Bass)
+        g.setColour (exportMode == ChordSlotsProcessor::MidiExportMode::BassOnly ? ui::accent.brighter (0.35f) : ui::accent);
+        const float tagY = r.getCentreY() - 3.5f;
+        g.fillRoundedRectangle (r.getX() + 6.0f, tagY, 7.0f, 7.0f, 1.5f);
+
+        g.setColour (ui::text);
+        g.setFont (ui::font (11.0f, true));
+        g.drawText (tileLabel, r.withTrimmedLeft (16.0f).toNearestInt(), juce::Justification::centredLeft, false);
+    }
 }
 
 void MidiDragTile::mouseDrag (const juce::MouseEvent& e)
 {
     if (dragging || e.getDistanceFromDragStart() < 6)
         return;
-    const juce::File file = processor.writeTempMidiFile();
+    const juce::File file = processor.writeTempMidiFile (exportMode);
     if (file.existsAsFile())
     {
         dragging = true;
@@ -652,12 +669,15 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
       processor (p),
       timeline (p),
       lanes (p),
-      dragTile (p),
+      dragTile (p, ChordSlotsProcessor::MidiExportMode::Master, "Drag MIDI"),
+      dragChordsTile (p, ChordSlotsProcessor::MidiExportMode::ChordsOnly, "Drag Chords"),
+      dragBassTile (p, ChordSlotsProcessor::MidiExportMode::BassOnly, "Drag Bass"),
       gateAttachment (p.apvts, "gate", gate),
       volumeAttachment (p.apvts, "synthVol", volume),
       strumAttachment (p.apvts, "strum", strum),
       accentAttachment (p.apvts, "accent", accent),
-      humanizeAttachment (p.apvts, "humanize", humanize)
+      humanizeAttachment (p.apvts, "humanize", humanize),
+      splitMidiAttachment (p.apvts, "splitMidi", splitMidiButton)
 {
     setLookAndFeel (&lnf);
 
@@ -860,9 +880,13 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     undoButton.onClick = [this] { processor.undo(); };
     playButton.onClick = [this] { processor.setPreviewPlaying (! processor.isPreviewPlaying()); };
     saveButton.onClick = [this] { saveMidi(); };
-    for (auto* b : { &undoButton, &refeelButton, &rollButton, &playButton, &saveButton })
+    splitMidiButton.setTooltip ("Split MIDI output: Chords on Channel 1, Bass on Channel 2");
+    splitMidiButton.setClickingTogglesState (true);
+    for (auto* b : { &undoButton, &refeelButton, &rollButton, &playButton, &saveButton, &splitMidiButton })
         addAndMakeVisible (*b);
     addAndMakeVisible (dragTile);
+    addChildComponent (dragChordsTile);
+    addChildComponent (dragBassTile);
 
     hint.setText (juce::String::fromUTF8 ("Click a slot to hear it  \xc2\xb7  right-click for alternatives  \xc2\xb7  drag the edges to move cuts  \xc2\xb7  "
                                           "double-click to split or merge  \xc2\xb7  drag the bars to set targets (white marks = what the chord measures)"),
@@ -970,6 +994,14 @@ void ChordSlotsEditor::timerCallback()
     playButton.setToggleState (processor.isPreviewPlaying(), juce::dontSendNotification);
     if (processor.getTriggeredSlot() >= 0)
         timeline.repaint();
+
+    const bool isSplit = processor.isSplitMidi();
+    if (dragTile.isVisible() == isSplit)
+    {
+        dragTile.setVisible (! isSplit);
+        dragChordsTile.setVisible (isSplit);
+        dragBassTile.setVisible (isSplit);
+    }
 }
 
 void ChordSlotsEditor::saveMidi()
@@ -1127,12 +1159,24 @@ void ChordSlotsEditor::resized()
         auto oInner = outputPanelBounds.reduced (8, 4);
         oInner.removeFromTop (14);
 
-        dragTile.setBounds (oInner.removeFromRight (84).reduced (0, 2));
+        auto dragArea = oInner.removeFromRight (86).reduced (0, 2);
+        dragTile.setBounds (dragArea);
+        auto splitDragTop = dragArea.removeFromTop (dragArea.getHeight() / 2).withTrimmedBottom (1);
+        dragChordsTile.setBounds (splitDragTop);
+        dragBassTile.setBounds (dragArea.withTrimmedTop (1));
+
+        const bool isSplit = processor.isSplitMidi();
+        dragTile.setVisible (! isSplit);
+        dragChordsTile.setVisible (isSplit);
+        dragBassTile.setVisible (isSplit);
+
         oInner.removeFromRight (6);
 
-        auto small = oInner.removeFromRight (72).reduced (0, 2);
-        saveButton.setBounds (small.removeFromBottom (small.getHeight() / 2).withTrimmedTop (1));
-        playButton.setBounds (small.withTrimmedBottom (1));
+        auto btnArea = oInner.removeFromRight (80).reduced (0, 2);
+        auto topBtns = btnArea.removeFromTop (btnArea.getHeight() / 2).withTrimmedBottom (1);
+        playButton.setBounds (topBtns.removeFromLeft (topBtns.getWidth() / 2).withTrimmedRight (1));
+        saveButton.setBounds (topBtns.withTrimmedLeft (1));
+        splitMidiButton.setBounds (btnArea.withTrimmedTop (1));
         oInner.removeFromRight (6);
 
         auto outKnobs = oInner;

@@ -36,9 +36,16 @@ public:
     static constexpr int kMaxHeldKeys = 16;
     static constexpr int kMaxSounding = 16;
 
+    struct SoundingVoice
+    {
+        int note = 0;
+        int channel = 1;
+    };
+
     struct TriggerAction
     {
         int releaseNotes[kMaxSounding] = {};
+        int releaseChannels[kMaxSounding] = {};
         int releaseCount = 0;
         int startSlot = -1;       // >= 0 to trigger this slot
         int startVelocity = 0;    // incoming velocity for scaling
@@ -185,11 +192,18 @@ public:
     }
 
     /** Remembers the exact notes that were sounded for the active chord. */
-    void setSoundingNotes (const int* notes, int count) noexcept
+    void setSoundingNotes (const int* notes, int count, int defaultChannel = 1) noexcept
     {
         soundingCount = 0;
         for (int i = 0; i < count && i < kMaxSounding; ++i)
-            soundingNotes[soundingCount++] = notes[i];
+            soundingVoices[soundingCount++] = { notes[i], defaultChannel };
+    }
+
+    void setSoundingVoices (const SoundingVoice* voices, int count) noexcept
+    {
+        soundingCount = 0;
+        for (int i = 0; i < count && i < kMaxSounding; ++i)
+            soundingVoices[soundingCount++] = voices[i];
     }
 
     /** Full reset: releases everything and flushes stack. */
@@ -229,7 +243,10 @@ private:
     {
         act.releaseCount = soundingCount;
         for (int i = 0; i < soundingCount; ++i)
-            act.releaseNotes[i] = soundingNotes[i];
+        {
+            act.releaseNotes[i] = soundingVoices[i].note;
+            act.releaseChannels[i] = soundingVoices[i].channel;
+        }
         soundingCount = 0;
         activeSlot = -1;
     }
@@ -247,7 +264,7 @@ private:
     int heldVels[kMaxHeldKeys] = {};
     int numHeld = 0;
 
-    int soundingNotes[kMaxSounding] = {};
+    SoundingVoice soundingVoices[kMaxSounding] = {};
     int soundingCount = 0;
     int activeSlot = -1;
 

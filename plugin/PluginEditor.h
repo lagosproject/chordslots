@@ -100,7 +100,9 @@ private:
 class MidiDragTile final : public juce::Component
 {
 public:
-    explicit MidiDragTile (ChordSlotsProcessor&);
+    explicit MidiDragTile (ChordSlotsProcessor&,
+                           ChordSlotsProcessor::MidiExportMode mode = ChordSlotsProcessor::MidiExportMode::Master,
+                           const juce::String& label = "Drag MIDI");
     void paint (juce::Graphics&) override;
     void mouseEnter (const juce::MouseEvent&) override { repaint(); }
     void mouseExit (const juce::MouseEvent&) override { repaint(); }
@@ -109,6 +111,8 @@ public:
 
 private:
     ChordSlotsProcessor& processor;
+    ChordSlotsProcessor::MidiExportMode exportMode;
+    juce::String tileLabel;
     bool dragging = false;
 };
 
@@ -149,11 +153,15 @@ private:
     juce::Label adventureLabel, syncopationLabel, bassMotionLabel, strumLabel, accentLabel, humanizeLabel, gateLabel, volumeLabel;
     juce::TextButton refeelButton { "Re-Feel" };
     juce::TextButton undoButton { "Undo" }, rollButton { "ROLL" }, playButton { "Play" }, saveButton { "Save .mid" };
+    juce::TextButton splitMidiButton { "Split Ch 1/2" };
     MidiDragTile dragTile;
+    MidiDragTile dragChordsTile;
+    MidiDragTile dragBassTile;
     juce::Label hint;
 
     juce::AudioProcessorValueTreeState::SliderAttachment gateAttachment, volumeAttachment,
         strumAttachment, accentAttachment, humanizeAttachment;
+    juce::AudioProcessorValueTreeState::ButtonAttachment splitMidiAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
     int keyNamesScale = -1;
     bool refreshing = false;

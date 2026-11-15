@@ -62,10 +62,18 @@ public:
     double getPlayPosition() const noexcept { return uiStep.load(); }
 
     //==============================================================================
-    juce::MidiFile createMidiFile() const;
+    enum class MidiExportMode
+    {
+        Master = 0,
+        ChordsOnly = 1,
+        BassOnly = 2
+    };
+
+    juce::MidiFile createMidiFile (MidiExportMode mode = MidiExportMode::Master) const;
     /** Writes the progression to a temp .mid (for drag and drop). */
-    juce::File writeTempMidiFile() const;
+    juce::File writeTempMidiFile (MidiExportMode mode = MidiExportMode::Master) const;
     juce::String describeProgression() const;
+    bool isSplitMidi() const noexcept;
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -115,13 +123,25 @@ private:
     cs::PlayData play;
     PreviewSynth synth;
     double sampleRate = 44100.0;
-    int held[cs::kMaxNotes] = {};
+
+    struct HeldVoice
+    {
+        int note = 0;
+        int channel = 1;
+    };
+    HeldVoice held[cs::kMaxNotes] = {};
     int heldCount = 0;
     int heldSlot = -1;
     int currentSlot = -1;
     bool wasPlaying = false;
     double expectedStep = 0.0;
-    int auditionNotes[cs::kMaxNotes] = {};
+
+    struct AuditionVoice
+    {
+        int note = 0;
+        int channel = 1;
+    };
+    AuditionVoice auditionNotes[cs::kMaxNotes] = {};
     int auditionCount = 0;
     int auditionSamplesLeft = 0;
 
@@ -136,6 +156,7 @@ private:
     {
         int note = 0;
         int velocity = 0;
+        int channel = 1;
         int samplesUntilOn = 0;
         int slot = -1;
     };
@@ -152,6 +173,7 @@ private:
     std::atomic<float>* triggerModeParam = nullptr;
     std::atomic<float>* triggerRootParam = nullptr;
     std::atomic<float>* triggerLayoutParam = nullptr;
+    std::atomic<float>* splitMidiParam = nullptr;
     std::atomic<uint32_t> perfSeed { 1 };
 
     cs::TriggerEngine triggerEngine;

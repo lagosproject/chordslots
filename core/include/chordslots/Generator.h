@@ -25,6 +25,16 @@ struct Voicing
     int n = 0;
     std::array<int, kMaxNotes> notes {};
     int velocity = 96;
+    int bassCount = 0;
+
+    int computeBassCount (int upperFloor = 48) const noexcept
+    {
+        int c = 0;
+        for (int i = 0; i < n; ++i)
+            if (notes[(size_t) i] < upperFloor)
+                c++;
+        return c;
+    }
 };
 
 struct Slot
@@ -423,6 +433,7 @@ inline void revoiceBass (Voicing& v, Chord c, int refBassNote = -1, float energy
     v.n = std::min ((int) all.size(), kMaxNotes);
     for (int i = 0; i < v.n; ++i)
         v.notes[(size_t) i] = std::clamp (all[(size_t) i], 0, 127);
+    v.bassCount = v.computeBassCount (upperFloor);
 }
 
 inline float voiceLeadingDistance (const Voicing& a, const std::vector<int>& b)
@@ -529,6 +540,7 @@ inline Voicing makeVoicing (Chord c, const Voicing* ref, float centre, float ene
     v.n = std::min ((int) all.size(), kMaxNotes);
     for (int i = 0; i < v.n; ++i)
         v.notes[(size_t) i] = std::clamp (all[(size_t) i], 0, 127);
+    v.bassCount = v.computeBassCount (kUpperFloor);
     v.velocity = std::clamp ((int) std::lround (45.0f + 75.0f * energy), 1, 127);
     return v;
 }
@@ -1028,6 +1040,8 @@ struct PlaySlot
     int velocities[kMaxNotes] = {};
     float offsetMs[kMaxNotes] = {};
     int velocity = 96;
+    int bassCount = 0;
+    int primaryBass = -1;
 };
 
 struct PlayData
@@ -1060,15 +1074,21 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
         o.end = p.slotEnd (i);
         o.velocity = s.voicing.velocity;
 
+        const int bCount = s.voicing.bassCount > 0 ? s.voicing.bassCount : s.voicing.computeBassCount();
+        o.bassCount = bCount;
+
+        int pb = primaryBassNote (s.voicing);
+        if (pb < 0)
+            pb = pickBassRegister (s.chord.bassPc(), -1, kUpperFloor);
+        o.primaryBass = pb;
+
         PerfInput in;
         in.n = std::min (s.voicing.n, kPerfMaxNotes);
-        in.bassCount = 0;
+        in.bassCount = bCount;
         for (int j = 0; j < in.n; ++j)
         {
             in.pitch[(size_t) j] = s.voicing.notes[(size_t) j];
             in.velocity[(size_t) j] = s.voicing.velocity;
-            if (s.voicing.notes[(size_t) j] < kUpperFloor)
-                in.bassCount++;
         }
 
         const double slotLenMs = (double) (o.end - o.start) * msPerStep;

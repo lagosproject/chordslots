@@ -63,8 +63,8 @@
 - [x] **Section 1: Bass Inversions, Slash Chords & Bass Motion DP**
 - [x] **Section 2: Phase 2 Performance & Groove Engine (Strum, Accent, Humanize, Re-Feel)**
 - [x] **Section 3: Incoming MIDI Trigger Mode (Held-stack, Last-note priority, CC64, UI glow)**
-- [ ] **Section 4: Split-MIDI Output / Dual-Channel Voicing (Next Priority)**
-- [ ] **Section 5: A/B Comparison Snapshots & Session History**
+- [x] **Section 4: Split-MIDI Output / Dual-Channel Voicing (Channel 1 Chords, Channel 2 Monophonic Bass)**
+- [ ] **Section 5: A/B Comparison Snapshots & Session History (Next Priority)**
 - [ ] **Section 6: Triplet & Polyrhythmic Grid**
 - [ ] **Section 7: Modern Transition Prior / Billboard Corpus Integration**
 * **Goal**: Enable musicians to perform chord slots live using a MIDI keyboard or pad controller (e.g. Push, Launchpad, MPC, KeyStep).
@@ -83,16 +83,15 @@
 
 ---
 
-### Section 4: Split-MIDI Output / Dual-Channel Voicing
+### Section 4: Split-MIDI Output / Dual-Channel Voicing (Completed)
 * **Goal**: Enable dual-synth layering from a single instance of ChordSlots (e.g., sending the walking bassline to a Monosynth/Sub on MIDI Channel 2, and the chord pad to a Polyphonic Synth on MIDI Channel 1).
-* **Requirements**:
-  1. **APVTS Parameter**: `splitMidi` (Bool: Off = All on Ch 1; On = Upper structure on Ch 1, Bass on Ch 2).
-  2. **Channel Assignment**:
-     * Bass notes identified by `bassCount` from `makeVoicing()` / `PlaySlot` assigned to `kMidiChannelBass = 2`.
-     * Upper structure notes assigned to `kMidiChannelChords = 1`.
-  3. **MIDI Export & Preview**:
-     * Exported `.mid` file contains either dual tracks or dual-channel messages.
-     * Preview synth renders both channels cleanly.
+* **Architecture & Invariants**:
+  1. **Single Source of Truth (`bassCount`)**: `Voicing.bassCount` and `PlaySlot.bassCount` strictly define voice boundaries. Legacy states automatically migrate via `computeBassCount()`.
+  2. **Monophonic & 808 Safe**: Channel 2 emits only the primary bass note (`primaryBass`). Octave doublings are suppressed on Channel 2 in split mode to eliminate monosynth/sub bass retrigger glitches.
+  3. **Continuous Bass Track**: Low-energy slots automatically synthesize a continuous primary bass note ($pc + 12k \approx 40$) so Channel 2 never drops out or has silent holes. Non-split output remains untouched.
+  4. **Grid-Locked Bass with Strummed Chords**: Strumming offsets apply exclusively to upper voices on Channel 1; bass notes on Channel 2 remain locked to the sample grid.
+  5. **Channel-Aware Voice Tracking**: `held` and `pendingNotes` track `{note, channel}` pairs. Note-offs strictly match emitted channels. CC 123 (All Notes Off) backstop sent on both channels on transport stop, split toggles, and mode changes.
+  6. **DAW Drag-and-Drop**: Master drag exports a Format-1 two-track file (Track 0: "Chords" on Ch 1, Track 1: "Bass" on Ch 2) with matching end ticks. Dedicated single-track sub-tiles (**Drag Chords** and **Drag Bass**) work across any DAW.
 
 ---
 
