@@ -231,7 +231,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         moodBox.addItem (m[(size_t) i].name, i + 1);
 
     setupCombo (styleBox, styleLabel, "STYLE PRIOR");
-    styleBox.addItem ("Pop/Rock (Billboard)", 1);
+    styleBox.addItem ("Pop/Rock", 1);
     styleBox.addItem ("Minor Loops (EDM)", 2);
     styleBox.addItem ("Soul / Jazz", 3);
     styleBox.addItem ("Free Harmony", 4);

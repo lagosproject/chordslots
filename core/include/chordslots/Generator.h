@@ -86,7 +86,7 @@ struct Voicing
 
 struct Slot
 {
-    int start = 0; // sixteenth steps from the start of the loop
+    int start = 0; // steps (24 per quarter note) from the start of the loop
     Chord chord;
     Voicing voicing;
     bool locked = false; // freezes this slot's chord and voicing
@@ -334,11 +334,11 @@ inline float transitionCost (Chord a, Chord b, int tonic, float adventure, int s
     else if (a.root == b.root)
         c += (a.isSlash() != b.isSlash() || a.bassInt != b.bassInt) ? 0.2f : 0.6f;
 
-    // Modern Billboard / RS200 Corpus Transition Prior
+    // Hand-authored style prior (provisional)
     const float corpusCost = corpusTransitionCost (a, b, tonic, scaleIdx, style);
 
     // Adventure modulates prior strength:
-    // Low adventure strictly guides progressions toward proven songwriting transitions.
+    // Low adventure strictly guides progressions toward common songwriting transitions.
     // High adventure relaxes the prior to allow adventurous harmonic discoveries.
     const float priorWeight = (1.0f - adventure * 0.75f);
     c += priorWeight * 2.2f * corpusCost;

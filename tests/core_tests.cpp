@@ -511,7 +511,7 @@ static void testModernTransitionPrior()
     CHECK (qualityClassOf (19) == QualityClass::Dominant);   // "9"
     CHECK (qualityClassOf (20) == QualityClass::SusOrAug);   // "7sus4"
 
-    // 2. Empirical bigram rankings in Pop/Rock (C Major: tonic = 0, scale = 0)
+    // 2. Hand-authored bigram rankings in Pop/Rock (C Major: tonic = 0, scale = 0)
     const Chord cI   = ch (0, "");  // C
     const Chord cIV  = ch (5, "");  // F
     const Chord cV   = ch (7, "");  // G
@@ -593,7 +593,7 @@ static void testModernTransitionPrior()
             chordCountsTame[p.slots[(size_t) s].chord.root * 100 + p.slots[(size_t) s].chord.type]++;
     }
     const float avgFit = sumFit / 500.0f;
-    CHECK (avgFit >= 0.80f); // Fit score remains >= 80% with Billboard prior
+    CHECK (avgFit >= 0.80f); // Fit score remains >= 80% with hand-authored style prior
 
     // Compute Shannon entropy for tame (adventure = 0.0)
     double entropyTame = 0.0;
