@@ -118,6 +118,8 @@ struct Progression
     float adventure = 0.3f;   // 0 = diatonic triads, 1 = borrowed chords and extensions
     float syncopation = 0.3f; // how irregular randomised cuts are
     float bassMotion = 0.0f;  // 0 = keep root in bass, 1 = smooth walking bass / pedal inversions
+    float voiceLeading = 0.5f; // 0 = free voicings, 1 = smooth minimal displacement
+    bool phraseRepeat = false; // generates 4-slot phrase AA' with cadence variation
     int mood = -1;            // index into moods() the targets came from, -1 = custom
     Locks locks;
     std::array<Slot, kMaxSlots> slots {};
@@ -353,7 +355,7 @@ inline float transitionCost (Chord a, Chord b, int tonic, float adventure, int s
 }
 
 inline float slotCost (const Progression& p, int slot, const Candidate& cand,
-                       const Chord* prev, const Chord* next)
+                       const Chord* prev, const Chord* next, const Chord* prev2 = nullptr)
 {
     const Slot& s = p.slots[(size_t) slot];
     const float dB = cand.brightness - s.targetB;
@@ -367,6 +369,10 @@ inline float slotCost (const Progression& p, int slot, const Candidate& cand,
 
     if (slot == 0 && cand.chord.root == p.tonic)
         cost -= 0.012f; // a gentle pull towards starting at home
+
+    // A-B-A Anti-Oscillation Penalty: discourage ping-ponging back to the chord 2 slots ago
+    if (prev2 != nullptr && prev != nullptr && cand.chord == *prev2 && cand.chord != *prev)
+        cost += (1.0f - p.adventure) * 0.08f;
 
     const CorpusStyle style = styleForProgression (p);
     if (prev != nullptr)
@@ -453,21 +459,35 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
                 continue;
 
             const auto& pool = pools[(size_t) i];
-            const int pi = (i + n - 1) % n, ni = (i + 1) % n;
+            const int pi = (i + n - 1) % n, ni = (i + 1) % n, p2i = (i + n - 2) % n;
             // On the first sweep, slots to the right have not been chosen yet
             // (unless they are fixed), so they should not influence the pick.
             const bool usePrev = n > 1 && (sweep > 0 || pi < i || slotChordIsFixed (p, pi));
             const bool useNext = n > 1 && (sweep > 0 || slotChordIsFixed (p, ni));
+            const bool usePrev2 = n > 2 && (sweep > 0 || p2i < i || slotChordIsFixed (p, p2i));
             const Chord* prev = usePrev ? &p.slots[(size_t) pi].chord : nullptr;
             const Chord* next = useNext ? &p.slots[(size_t) ni].chord : nullptr;
+            const Chord* prev2 = usePrev2 ? &p.slots[(size_t) p2i].chord : nullptr;
 
             costs.resize (pool.size());
             for (size_t k = 0; k < pool.size(); ++k)
-                costs[k] = slotCost (p, i, pool[k], prev, next);
+                costs[k] = slotCost (p, i, pool[k], prev, next, prev2);
 
             const int pick = sampleSoftmin (costs, temperature, rng);
             if (pick >= 0)
                 p.slots[(size_t) i].chord = pool[(size_t) pick].chord;
+        }
+    }
+
+    // Phrase repeat structure (AA'): if enabled and slot count is even (>= 4),
+    // phrase A (first half) repeats in second half with variation on final cadence slot.
+    if (p.phraseRepeat && n >= 4 && (n % 2 == 0))
+    {
+        const int h = n / 2;
+        for (int i = h; i < n - 1; ++i)
+        {
+            if (! slotChordIsFixed (p, i))
+                p.slots[(size_t) i].chord = p.slots[(size_t) (i - h)].chord;
         }
     }
 }
@@ -895,6 +915,212 @@ inline void generateBassLine (Progression& p)
     }
 }
 
+/** How well one slot matches its targets, 0..1. */
+inline float slotFit (const Slot& s)
+{
+    const float dB = s.brightness - s.targetB;
+    const float dT = s.tension - s.targetT;
+    return clamp01 (1.0f - std::sqrt ((dB * dB + dT * dT) * 0.5f) * 2.0f);
+}
+
+/** The "mood score": how closely the progression follows the target curves. */
+inline float fitScore (const Progression& p)
+{
+    float sum = 0.0f;
+    for (int i = 0; i < p.numSlots; ++i)
+        sum += slotFit (p.slots[(size_t) i]);
+    return p.numSlots > 0 ? sum / (float) p.numSlots : 0.0f;
+}
+
+/** Generates candidate voicings for voice-leading DP optimization. */
+inline std::vector<Voicing> candidateVoicingsForSlot (const Progression& p, int slot)
+{
+    const Slot& s = p.slots[(size_t) slot];
+    std::vector<int> pcs;
+    for (int iv : chordTypes()[(size_t) s.chord.type].iv)
+    {
+        const int pc = mod12 (s.chord.root + iv);
+        if (std::find (pcs.begin(), pcs.end(), pc) == pcs.end())
+            pcs.push_back (pc);
+    }
+    std::sort (pcs.begin(), pcs.end());
+    const int k = (int) pcs.size();
+    if (k == 0)
+        return { s.voicing };
+
+    const float centre = centreForBrightness (s.targetB);
+    std::vector<Voicing> candidates;
+
+    for (int inv = 0; inv < k; ++inv)
+    {
+        for (int base : { 48, 60, 72 })
+        {
+            std::vector<int> notes;
+            int note = base + pcs[(size_t) inv];
+            notes.push_back (note);
+            for (int j = 1; j < k; ++j)
+            {
+                note += mod12 (pcs[(size_t) ((inv + j) % k)] - pcs[(size_t) ((inv + j - 1) % k)]);
+                notes.push_back (note);
+            }
+            if (notes.front() < kUpperFloor || notes.back() > 96)
+                continue;
+
+            float mean = 0.0f;
+            for (int x : notes) mean += (float) x;
+            mean /= (float) k;
+
+            if (std::abs (mean - centre) > 14.0f)
+                continue;
+
+            std::vector<int> all = notes;
+            const int bass = pickBassRegister (s.chord.bassPc(), -1, notes.front());
+            if (s.chord.isSlash() || s.targetE > 0.3f)
+                all.push_back (bass);
+            if (s.targetE > 0.85f && bass - 12 >= 24)
+                all.push_back (bass - 12);
+            if (s.targetE > 0.6f)
+            {
+                int top = 60 + s.chord.root;
+                while (top <= notes.back()) top += 12;
+                if (top <= 100) all.push_back (top);
+            }
+            std::sort (all.begin(), all.end());
+            all.erase (std::unique (all.begin(), all.end()), all.end());
+
+            Voicing v;
+            v.n = std::min ((int) all.size(), kMaxNotes);
+            for (int idx = 0; idx < v.n; ++idx)
+                v.notes[(size_t) idx] = std::clamp (all[(size_t) idx], 0, 127);
+            v.bassCount = v.computeBassCount (kUpperFloor);
+            v.velocity = std::clamp ((int) std::lround (45.0f + 75.0f * s.targetE), 1, 127);
+            candidates.push_back (v);
+        }
+    }
+    if (candidates.empty())
+        candidates.push_back (s.voicing);
+    return candidates;
+}
+
+/** Global circular Viterbi DP pass to minimize upper-voice displacement across slot boundaries. */
+inline void optimizeVoiceLeading (Progression& p)
+{
+    const int n = p.numSlots;
+    if (n <= 1 || p.locks.voicing || p.voiceLeading < 0.05f)
+        return;
+
+    const float initialFit = fitScore (p);
+    std::vector<std::vector<Voicing>> cands ((size_t) n);
+    for (int i = 0; i < n; ++i)
+    {
+        if (p.slots[(size_t) i].locked)
+            cands[(size_t) i] = { p.slots[(size_t) i].voicing };
+        else
+            cands[(size_t) i] = candidateVoicingsForSlot (p, i);
+    }
+
+    auto transitionCost = [&p] (const Voicing& a, const Voicing& b) -> float
+    {
+        std::vector<int> bUpper;
+        for (int j = 0; j < b.n; ++j)
+            if (b.notes[(size_t) j] >= kUpperFloor)
+                bUpper.push_back (b.notes[(size_t) j]);
+
+        float dist = voiceLeadingDistance (a, bUpper);
+        int aSop = a.n > 0 ? a.notes[(size_t) (a.n - 1)] : 60;
+        int bSop = b.n > 0 ? b.notes[(size_t) (b.n - 1)] : 60;
+        int sopLeap = std::abs (bSop - aSop);
+        float sopCost = (sopLeap > 2) ? 0.5f * (float) (sopLeap - 2) : 0.0f;
+
+        int common = 0;
+        for (int x : bUpper)
+        {
+            for (int i = 0; i < a.n; ++i)
+                if (a.notes[(size_t) i] == x)
+                {
+                    ++common;
+                    break;
+                }
+        }
+        float commonBonus = 0.7f * (float) common;
+        return p.voiceLeading * (dist + sopCost - commonBonus);
+    };
+
+    float bestTotalCost = 1.0e9f;
+    std::vector<Voicing> bestPath;
+
+    for (size_t startChoice = 0; startChoice < cands[0].size(); ++startChoice)
+    {
+        std::vector<std::vector<float>> dp ((size_t) n);
+        std::vector<std::vector<int>> parent ((size_t) n);
+        for (int i = 0; i < n; ++i)
+        {
+            dp[(size_t) i].assign (cands[(size_t) i].size(), 1.0e9f);
+            parent[(size_t) i].assign (cands[(size_t) i].size(), -1);
+        }
+
+        dp[0][startChoice] = 0.0f;
+
+        for (int i = 1; i < n; ++i)
+        {
+            for (size_t cur = 0; cur < cands[(size_t) i].size(); ++cur)
+            {
+                const auto& vCur = cands[(size_t) i][cur];
+                for (size_t prev = 0; prev < cands[(size_t) (i - 1)].size(); ++prev)
+                {
+                    if (dp[(size_t) (i - 1)][prev] >= 1.0e8f)
+                        continue;
+                    const auto& vPrev = cands[(size_t) (i - 1)][prev];
+                    const float cost = dp[(size_t) (i - 1)][prev] + transitionCost (vPrev, vCur);
+                    if (cost < dp[(size_t) i][cur])
+                    {
+                        dp[(size_t) i][cur] = cost;
+                        parent[(size_t) i][cur] = (int) prev;
+                    }
+                }
+            }
+        }
+
+        const auto& v0 = cands[0][startChoice];
+        for (size_t endChoice = 0; endChoice < cands[(size_t) (n - 1)].size(); ++endChoice)
+        {
+            if (dp[(size_t) (n - 1)][endChoice] >= 1.0e8f)
+                continue;
+            const auto& vEnd = cands[(size_t) (n - 1)][endChoice];
+            const float loopTotal = dp[(size_t) (n - 1)][endChoice] + transitionCost (vEnd, v0);
+            if (loopTotal < bestTotalCost)
+            {
+                bestTotalCost = loopTotal;
+                std::vector<Voicing> path ((size_t) n);
+                int curr = (int) endChoice;
+                for (int i = n - 1; i >= 1; --i)
+                {
+                    path[(size_t) i] = cands[(size_t) i][(size_t) curr];
+                    curr = parent[(size_t) i][(size_t) curr];
+                }
+                path[0] = v0;
+                bestPath = path;
+            }
+        }
+    }
+
+    if (! bestPath.empty())
+    {
+        const auto originalVoicings = p.slots;
+        for (int i = 0; i < n; ++i)
+            p.slots[(size_t) i].voicing = bestPath[(size_t) i];
+        updateActuals (p);
+
+        // Fit non-regression guarantee: if Fit score drops by more than 0.02, revert to initial
+        const float newFit = fitScore (p);
+        if (newFit < initialFit - 0.02f)
+        {
+            p.slots = originalVoicings;
+            updateActuals (p);
+        }
+    }
+}
+
 /** The main button: re-rolls every layer that is not locked. */
 inline void roll (Progression& p, Rng& rng)
 {
@@ -925,6 +1151,9 @@ inline void roll (Progression& p, Rng& rng)
         voiceAll (p, rng, changed);
     else
         voiceAll (p, rng, nullptr);
+
+    if (! p.locks.voicing && p.voiceLeading > 0.05f)
+        optimizeVoiceLeading (p);
 }
 
 /** Re-voices without touching chords or rhythm (after target edits). */
@@ -935,6 +1164,9 @@ inline void revoice (Progression& p, Rng& rng)
         voiceAll (p, rng, changed);
     else
         voiceAll (p, rng, nullptr);
+
+    if (! p.locks.voicing && p.voiceLeading > 0.05f)
+        optimizeVoiceLeading (p);
 }
 
 inline void setChord (Progression& p, int slot, Chord c, Rng& rng)
@@ -972,6 +1204,91 @@ inline void setBass (Progression& p, int slot, int bassInt)
     const int prevBass = n > 1 ? primaryBassNote (p.slots[(size_t) prevSlot].voicing) : -1;
     revoiceBass (s.voicing, s.chord, prevBass, s.targetE);
     updateActuals (p, slot);
+}
+
+/** Rerolls ONLY the root of a single slot, keeping chord quality/type if valid. */
+inline void rollSlotRoot (Progression& p, int slot, Rng& rng)
+{
+    if (slot < 0 || slot >= p.numSlots)
+        return;
+    Slot& s = p.slots[(size_t) slot];
+    const auto& sc = scales()[(size_t) p.scale];
+    std::vector<int> candidates;
+    for (int pc : sc.pcs)
+    {
+        const int absPc = mod12 (p.tonic + pc);
+        if (absPc != s.chord.root)
+            candidates.push_back (absPc);
+    }
+    if (candidates.empty())
+        return;
+    std::uniform_int_distribution<size_t> dist (0, candidates.size() - 1);
+    Chord next = s.chord;
+    next.root = candidates[dist (rng)];
+    sanitizeBass (next);
+    setChord (p, slot, next, rng);
+}
+
+/** Rerolls ONLY the chord type/color of a single slot, keeping root. */
+inline void rollSlotColor (Progression& p, int slot, Rng& rng)
+{
+    if (slot < 0 || slot >= p.numSlots)
+        return;
+    Slot& s = p.slots[(size_t) slot];
+    std::vector<int> types;
+    for (int t = 0; t < numChordTypes(); ++t)
+    {
+        if (t != s.chord.type)
+            types.push_back (t);
+    }
+    if (types.empty())
+        return;
+    std::uniform_int_distribution<size_t> dist (0, types.size() - 1);
+    Chord next = s.chord;
+    next.type = types[dist (rng)];
+    sanitizeBass (next);
+    setChord (p, slot, next, rng);
+}
+
+/** Cycles or rerolls the bass note / inversion for a single slot. */
+inline void rollSlotBass (Progression& p, int slot)
+{
+    if (slot < 0 || slot >= p.numSlots)
+        return;
+    const Slot& s = p.slots[(size_t) slot];
+    const auto& t = chordTypes()[(size_t) s.chord.type];
+    std::vector<int> validBass = { 0 }; // root position
+    for (int iv : t.iv)
+    {
+        int ivNorm = mod12 (iv);
+        if (ivNorm != 0 && std::find (validBass.begin(), validBass.end(), ivNorm) == validBass.end())
+            validBass.push_back (ivNorm);
+    }
+    auto it = std::find (validBass.begin(), validBass.end(), s.chord.bassInt);
+    int nextIdx = 0;
+    if (it != validBass.end())
+        nextIdx = (int) (((size_t) (it - validBass.begin()) + 1u) % validBass.size());
+    setBass (p, slot, validBass[(size_t) nextIdx]);
+}
+
+/** Safe melody notes for a chord in key context (chord tones + non-clashing scale degrees). */
+inline std::vector<int> safeMelodyNotes (Chord c, int tonic, int scaleIdx)
+{
+    std::vector<int> notes;
+    for (int iv : chordTypes()[(size_t) c.type].iv)
+    {
+        int pc = mod12 (c.root + iv);
+        if (std::find (notes.begin(), notes.end(), pc) == notes.end())
+            notes.push_back (pc);
+    }
+    for (int pcRel : scales()[(size_t) scaleIdx].pcs)
+    {
+        int pc = mod12 (tonic + pcRel);
+        if (std::find (notes.begin(), notes.end(), pc) == notes.end())
+            notes.push_back (pc);
+    }
+    std::sort (notes.begin(), notes.end());
+    return notes;
 }
 
 /** Changes the number of slots, keeping targets/chords by position. */
@@ -1099,23 +1416,6 @@ inline void setTonic (Progression& p, int newTonic)
             s.voicing.notes[(size_t) j] = std::clamp (s.voicing.notes[(size_t) j] + d, 0, 127);
     }
     updateActuals (p);
-}
-
-/** How well one slot matches its targets, 0..1. */
-inline float slotFit (const Slot& s)
-{
-    const float dB = s.brightness - s.targetB;
-    const float dT = s.tension - s.targetT;
-    return clamp01 (1.0f - std::sqrt ((dB * dB + dT * dT) * 0.5f) * 2.0f);
-}
-
-/** The "mood score": how closely the progression follows the target curves. */
-inline float fitScore (const Progression& p)
-{
-    float sum = 0.0f;
-    for (int i = 0; i < p.numSlots; ++i)
-        sum += slotFit (p.slots[(size_t) i]);
-    return p.numSlots > 0 ? sum / (float) p.numSlots : 0.0f;
 }
 
 //==============================================================================

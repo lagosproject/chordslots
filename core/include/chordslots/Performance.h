@@ -14,13 +14,102 @@
 #include <cmath>
 #include <cstdint>
 #include <numeric>
+#include <vector>
 
 namespace cs {
 
 constexpr int kPerfMaxNotes = 12;
 
+enum class CompStyle : int
+{
+    Sustain = 0,    // Default sustained chord
+    PulseQuarter,   // 1/4 note pulse (every 24 steps)
+    PulseEighth,    // 1/8 note pulse (every 12 steps)
+    OffbeatReggae,  // Upbeat 1/8 notes (offset 12, 36...)
+    BalladStabs,    // Dotted 1/4 + 1/8 syncopation (offsets 0, 36)
+    TrapStabs,      // 1/16th stabs on 1 and 2-and (offsets 0, 18)
+    TripletSwing    // 1/8T swing pulses (offsets 0, 16, 32)
+};
+
+struct CompHit
+{
+    int stepOffset;      // in 24-step timebase relative to slot start
+    int durationSteps;   // gate length in steps
+    float velScale;      // velocity multiplier
+};
+
+inline std::vector<CompHit> getCompHits (CompStyle style, int slotSteps, int /*meterNum*/ = 4, int /*meterDen*/ = 4)
+{
+    std::vector<CompHit> hits;
+    if (style == CompStyle::Sustain || slotSteps <= 0)
+    {
+        hits.push_back ({ 0, slotSteps, 1.0f });
+        return hits;
+    }
+
+    if (style == CompStyle::PulseQuarter)
+    {
+        for (int st = 0; st < slotSteps; st += 24)
+        {
+            int dur = std::min (18, slotSteps - st);
+            hits.push_back ({ st, dur, 1.0f });
+        }
+    }
+    else if (style == CompStyle::PulseEighth)
+    {
+        for (int st = 0; st < slotSteps; st += 12)
+        {
+            int dur = std::min (9, slotSteps - st);
+            float v = (st % 24 == 0) ? 1.0f : 0.85f;
+            hits.push_back ({ st, dur, v });
+        }
+    }
+    else if (style == CompStyle::OffbeatReggae)
+    {
+        for (int st = 12; st < slotSteps; st += 24)
+        {
+            int dur = std::min (8, slotSteps - st);
+            hits.push_back ({ st, dur, 1.0f });
+        }
+        if (hits.empty())
+            hits.push_back ({ 0, std::min (12, slotSteps), 1.0f });
+    }
+    else if (style == CompStyle::BalladStabs)
+    {
+        for (int st = 0; st < slotSteps; st += 48)
+        {
+            hits.push_back ({ st, std::min (24, slotSteps - st), 1.0f });
+            if (st + 36 < slotSteps)
+                hits.push_back ({ st + 36, std::min (10, slotSteps - (st + 36)), 0.9f });
+        }
+    }
+    else if (style == CompStyle::TrapStabs)
+    {
+        for (int st = 0; st < slotSteps; st += 24)
+        {
+            hits.push_back ({ st, std::min (5, slotSteps - st), 1.0f });
+            if (st + 18 < slotSteps)
+                hits.push_back ({ st + 18, std::min (5, slotSteps - (st + 18)), 0.85f });
+        }
+    }
+    else if (style == CompStyle::TripletSwing)
+    {
+        for (int st = 0; st < slotSteps; st += 16)
+        {
+            int dur = std::min (10, slotSteps - st);
+            float v = (st % 48 == 0) ? 1.0f : 0.88f;
+            hits.push_back ({ st, dur, v });
+        }
+    }
+
+    if (hits.empty())
+        hits.push_back ({ 0, slotSteps, 1.0f });
+    return hits;
+}
+
 struct PerformanceParams
 {
+    CompStyle compStyle      = CompStyle::Sustain;
     // --- Strum ---------------------------------------------------------
     float strum              = 0.0f;   // -1..1. sign = direction, |value| scales spread.
                                        //  >0 down-strum (bass -> treble), <0 up-strum.

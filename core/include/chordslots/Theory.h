@@ -225,13 +225,22 @@ inline std::string chordName (Chord c, int tonic, int scaleIdx)
     return s;
 }
 
-inline std::string romanNumeral (Chord c, int tonic)
+inline std::string romanNumeral (Chord c, int tonic, int scaleIdx = -1)
 {
     static const char* upper[12] = { "I", "bII", "II", "bIII", "III", "IV", "#IV", "V", "bVI", "VI", "bVII", "VII" };
     static const char* lower[12] = { "i", "bii", "ii", "biii", "iii", "iv", "#iv", "v", "bvi", "vi", "bvii", "vii" };
     const auto& t = chordTypes()[(size_t) c.type];
     const int d = mod12 (c.root - tonic);
-    const std::string base = std::string (t.minorish ? lower[d] : upper[d]);
+    bool isMinor = t.minorish;
+    if (c.type == 2 && scaleIdx >= 0) // "5" power chord: infer quality from scale's 3rd degree
+    {
+        const unsigned sm = scaleMask (scaleIdx);
+        const bool hasMinorThird = (sm & (1u << mod12 (c.root + 3 - tonic))) != 0;
+        const bool hasMajorThird = (sm & (1u << mod12 (c.root + 4 - tonic))) != 0;
+        if (hasMinorThird && ! hasMajorThird)
+            isMinor = true;
+    }
+    const std::string base = std::string (isMinor ? lower[d] : upper[d]);
 
     if (! c.isSlash())
         return base + t.romanSuffix;

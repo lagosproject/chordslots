@@ -628,6 +628,87 @@ static void testModernTransitionPrior()
     CHECK (chordCountsWild.size() > chordCountsTame.size());
 }
 
+static void testSection8Harmonics()
+{
+    Rng rng (99991);
+
+    // 1. Power chord roman numeral casing with scale context
+    // G# (pc 8) in B Major (tonic 11, scale 0) -> G# is 6th degree, minor 3rd (B) is in scale -> "vi5"
+    Chord gSharp5 { 8, 2, 0 };
+    CHECK (romanNumeral (gSharp5, 11, 0) == "vi5");
+    // C (pc 0) in C Major (tonic 0, scale 0) -> C is 1st degree, major 3rd (E) is in scale -> "I5"
+    Chord c5 { 0, 2, 0 };
+    CHECK (romanNumeral (c5, 0, 0) == "I5");
+
+    // 2. Phrase repeat structure (AA')
+    {
+        Progression p;
+        p.numSlots = 8;
+        p.phraseRepeat = true;
+        p.adventure = 0.3f;
+        roll (p, rng);
+
+        // First half 0..2 should match second half 4..6
+        for (int i = 0; i < 3; ++i)
+        {
+            CHECK (p.slots[(size_t) i].chord == p.slots[(size_t) (i + 4)].chord);
+        }
+    }
+
+    // 3. Anti-oscillation test: 200 rolls with low adventure should exhibit minimal 4-slot A-B-A-B alternating cycles
+    {
+        Progression p;
+        p.numSlots = 8;
+        p.adventure = 0.1f;
+        p.phraseRepeat = false;
+        int alternatingCycles = 0;
+        for (int r = 0; r < 200; ++r)
+        {
+            roll (p, rng);
+            for (int i = 0; i + 3 < p.numSlots; ++i)
+            {
+                if (p.slots[(size_t) i].chord == p.slots[(size_t) (i + 2)].chord &&
+                    p.slots[(size_t) (i + 1)].chord == p.slots[(size_t) (i + 3)].chord &&
+                    p.slots[(size_t) i].chord != p.slots[(size_t) (i + 1)].chord)
+                {
+                    alternatingCycles++;
+                }
+            }
+        }
+        // Across 200 8-slot rolls (1,000 4-chord windows), alternating cycles should be rare (< 2%)
+        CHECK (alternatingCycles < 25);
+    }
+
+    // 4. Fit-score non-regression test across 250 rolls (fast CI)
+    {
+        Progression p;
+        p.voiceLeading = 1.0f;
+        int fitRegressions = 0;
+        for (int r = 0; r < 250; ++r)
+        {
+            p.numSlots = 4 + (r % 5) * 2; // 4, 6, 8, 10, 12 slots
+            p.scale = r % numScales();
+            p.tonic = (r * 7) % 12;
+            p.adventure = 0.2f + 0.6f * ((float) (r % 10) / 10.0f);
+
+            // Store fit before voice leading optimization
+            p.voiceLeading = 0.0f;
+            roll (p, rng);
+            const float fitBefore = fitScore (p);
+
+            // Optimize voice leading
+            p.voiceLeading = 1.0f;
+            optimizeVoiceLeading (p);
+            const float fitAfter = fitScore (p);
+
+            // Must satisfy: fitAfter >= fitBefore - 0.02f
+            if (fitAfter < fitBefore - 0.021f)
+                fitRegressions++;
+        }
+        CHECK (fitRegressions == 0);
+    }
+}
+
 int main()
 {
     testSpelling();
@@ -639,6 +720,7 @@ int main()
     testEditing();
     testMeterAndRhythm();
     testModernTransitionPrior();
+    testSection8Harmonics();
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }
