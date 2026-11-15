@@ -130,18 +130,61 @@
 
 ---
 
-### Section 8: Interactive Targeted Randomization & Relative Chord Metric Substitutions (Future Task)
-* **Goal**: Provide surgical, single-parameter randomization and intuitive perceptual feedback when substituting chords.
-* **Requirements**:
-  1. **Targeted Single-Parameter Randomization on Selection**:
-     - Selecting a specific layer or parameter for a slot (e.g. left-selecting a slot's bass note / inversion, root pitch class, voicing extension, or cut position) enables rolling/randomizing *only that isolated parameter* without regenerating or altering any other part of the slot or progression.
-     - For example: if a user likes a chord's harmony but wants to explore basslines, selecting the bass note allows re-rolling only the bass motion/inversion for that slot.
-  2. **Contextual Chord Substitution with $\Delta$-Metrics Comparison**:
-     - When clicking a slot to explore substitute chords (alternatives popup or browser), each candidate chord displays the direct relative delta comparing its measured properties against the currently loaded chord:
-       - $\Delta \text{Energy}$: e.g. `+14% Energy` or `-10% Energy`
-       - $\Delta \text{Brightness}$: e.g. `+8% Brightness` or `-15% Brightness`
-       - $\Delta \text{Tension}$: e.g. `+20% Tension` (more dissonance/friction) or `-12% Tension` (more consonant)
-     - Empowers musicians to immediately predict how a substitution changes the emotional arc of the progression before auditioning.
+### Section 8: Interactive Targeted Randomization, Advanced Substitutions & Producer Workflow (Future Task - Proposals)
+* **Goal**: Provide surgical, controlled single-parameter randomization, contextual chord substitutions with audition-in-context, voice-leading optimization, and high-impact producer workflow tools.
+* **Proposals & Roadmap Items (To be discussed in detail)**:
+
+#### 1. Targeted Parameter Randomization (Refined)
+- **Hover Dice & Function-Preserving Mode**:
+  - Selecting/hovering a specific parameter (bass note/inversion, root pitch class, voicing extension, or cut position) reveals a dedicated dice icon to roll *only that single isolated element*.
+  - **Alt-Click (Preserve Function)**: Randomizes within the same harmonic function (e.g. tonic remains tonic function, dominant stays dominant).
+  - **Candidate Carousel**: Clicking cycles through the top 3–5 next-best candidates with single-step undo history rather than pure slot-machine randomness.
+  - Fully respects active locks (Rhythm, Roots, Colors, Voicing).
+
+#### 2. Contextual Chord Substitutions with $\Delta$-Metrics & Audition-in-Context
+- **Comprehensive $\Delta$-Metrics + Absolute & Fit**:
+  - Displays relative deltas alongside absolute values: $\Delta \text{Energy}$, $\Delta \text{Brightness}$, $\Delta \text{Tension}$, and critical $\Delta \text{Fit Score}$ (indicates whether substitution moves closer to or further from drawn curve).
+- **Multi-Angle Sorting**:
+  - Sort toggles: *Target Curve Fit* (default), *Smallest Metric Delta*, and *Most Similar Voice Leading*.
+- **Audition-on-Hover in Context**:
+  - Hovering a substitution candidate plays the transition in musical context ($C_{\text{prev}} \to C_{\text{candidate}} \to C_{\text{next}}$) so musicians hear the motion rather than an isolated chord.
+- **Functional Substitution Labels**:
+  - Labels candidate chords by theoretical function: *Relative*, *Tritone Substitution*, *Secondary Dominant*, *Modal Interchange (Borrowed)*, *Passing Diminished*.
+
+#### 3. Upper-Voice Voice-Leading Optimization Engine
+- **Voice Leading Knob (Smooth $\leftrightarrow$ Free)**:
+  - Minimizes upper-voice (soprano/alto/tenor) displacement across slot boundaries, prioritizing common-tone pivots and stepwise motion to eliminate unnatural register jumps.
+
+#### 4. Song Mode & Labeled Sections
+- **Arrangement Sequencing**:
+  - Labeled variations (`Verse`, `Chorus`, `Bridge`, `Outro`).
+  - Song Mode timeline sequencing (e.g. Verse $\to$ Verse $\to$ Chorus $\to$ Verse $\to$ Chorus $\to$ Bridge $\to$ Chorus).
+  - Full-song or per-section MIDI drag export.
+
+#### 5. Comping Rhythm & Performance Feel Library
+- **Expanded 24-Step Grid Grooves**:
+  - Performance comping patterns beyond uniform strum (e.g. Piano Ballad, 80s Synth Pulse, Guitar Strum, Trap Stabs) integrated into the Groove panel.
+
+#### 6. "Analyze This" MIDI-to-Curve & Shape Stamps
+- **Curve Extraction from MIDI**:
+  - Drag an external MIDI clip onto ChordSlots to compute and display its Brightness, Tension, and Energy curves as target curves.
+- **Shape Stamps**:
+  - Pre-drawn curve templates (Rise, Drop, Arch, Verse $\to$ Build $\to$ Drop).
+
+#### 7. Melody-Safe-Notes Strip
+- Visual strip below timeline highlighting scale degrees and safe melody notes for the active slot chord.
+
+#### 8. Harmonic Modulation & Pivot Passing
+- Relative major/minor pivots and whole-tone lifts on final loop pass.
+
+#### 9. Preview Sound Models
+- Lightweight, sample-free Rhodes / Electric Piano and Felt Piano models.
+
+#### 10. Workflow & Quality of Life
+- Keyboard shortcuts (`Space` = Play/Stop, `Cmd+Z` / `Ctrl+Z` = Undo, `1`–`4` = Variations).
+- Single-slot freeze / lock toggle.
+
+*(Deferred for future evaluation: MPE output, MIDI 2.0, and lasso multi-select).*
 
 ---
 
