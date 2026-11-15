@@ -121,6 +121,7 @@ struct Progression
     float voiceLeading = 0.5f; // 0 = free voicings, 1 = smooth minimal displacement
     bool phraseRepeat = false; // generates 4-slot phrase AA' with cadence variation
     int mood = -1;            // index into moods() the targets came from, -1 = custom
+    int style = -1;           // -1 = Auto; otherwise a CorpusStyle value including Free
     Locks locks;
     std::array<Slot, kMaxSlots> slots {};
 
@@ -292,34 +293,35 @@ struct Mood
     float adventure;
     float syncopation;
     std::vector<float> b, t, e; // control points spread across the loop
+    CorpusStyle defaultStyle = CorpusStyle::PopRock;
 };
 
 inline const std::vector<Mood>& moods()
 {
     static const std::vector<Mood> m = {
-        { "Euphoric",    0, 0.30f, 0.25f, { 0.70f, 0.78f, 0.85f, 0.80f }, { 0.22f, 0.45f, 0.60f, 0.40f }, { 0.70f, 0.80f, 0.90f, 1.00f } },
-        { "Uplifting",   1, 0.30f, 0.30f, { 0.35f, 0.60f, 0.70f, 0.62f }, { 0.25f, 0.38f, 0.45f, 0.62f }, { 0.75f, 0.80f, 0.90f, 0.95f } },
-        { "Epic",        1, 0.35f, 0.20f, { 0.30f, 0.58f, 0.66f, 0.40f }, { 0.22f, 0.40f, 0.62f, 0.68f }, { 0.70f, 0.80f, 0.90f, 1.00f } },
-        { "Melancholic", 1, 0.40f, 0.20f, { 0.30f, 0.25f, 0.55f, 0.28f }, { 0.25f, 0.50f, 0.42f, 0.60f }, { 0.40f, 0.45f, 0.50f, 0.40f } },
-        { "Dark",        3, 0.50f, 0.35f, { 0.25f, 0.15f, 0.30f, 0.10f }, { 0.25f, 0.60f, 0.55f, 0.75f }, { 0.65f, 0.70f, 0.70f, 0.80f } },
-        { "Tense",       7, 0.65f, 0.45f, { 0.30f, 0.35f, 0.20f, 0.40f }, { 0.45f, 0.65f, 0.80f, 0.90f }, { 0.50f, 0.60f, 0.70f, 0.85f } },
-        { "Dreamy",      4, 0.60f, 0.15f, { 0.85f, 0.70f, 0.90f, 0.75f }, { 0.40f, 0.55f, 0.48f, 0.55f }, { 0.30f, 0.30f, 0.35f, 0.30f } },
-        { "Hard",        1, 0.15f, 0.50f, { 0.28f, 0.35f, 0.22f, 0.45f }, { 0.22f, 0.50f, 0.55f, 0.65f }, { 1.00f, 1.00f, 1.00f, 1.00f } },
+        { "Euphoric",    0, 0.30f, 0.25f, { 0.70f, 0.78f, 0.85f, 0.80f }, { 0.22f, 0.45f, 0.60f, 0.40f }, { 0.70f, 0.80f, 0.90f, 1.00f }, CorpusStyle::PopRock },
+        { "Uplifting",   1, 0.30f, 0.30f, { 0.35f, 0.60f, 0.70f, 0.62f }, { 0.25f, 0.38f, 0.45f, 0.62f }, { 0.75f, 0.80f, 0.90f, 0.95f }, CorpusStyle::MinorLoops },
+        { "Epic",        1, 0.35f, 0.20f, { 0.30f, 0.58f, 0.66f, 0.40f }, { 0.22f, 0.40f, 0.62f, 0.68f }, { 0.70f, 0.80f, 0.90f, 1.00f }, CorpusStyle::MinorLoops },
+        { "Melancholic", 1, 0.40f, 0.20f, { 0.30f, 0.25f, 0.55f, 0.28f }, { 0.25f, 0.50f, 0.42f, 0.60f }, { 0.40f, 0.45f, 0.50f, 0.40f }, CorpusStyle::MinorLoops },
+        { "Dark",        3, 0.50f, 0.35f, { 0.25f, 0.15f, 0.30f, 0.10f }, { 0.25f, 0.60f, 0.55f, 0.75f }, { 0.65f, 0.70f, 0.70f, 0.80f }, CorpusStyle::MinorLoops },
+        { "Tense",       7, 0.65f, 0.45f, { 0.30f, 0.35f, 0.20f, 0.40f }, { 0.45f, 0.65f, 0.80f, 0.90f }, { 0.50f, 0.60f, 0.70f, 0.85f }, CorpusStyle::MinorLoops },
+        { "Dreamy",      4, 0.60f, 0.15f, { 0.85f, 0.70f, 0.90f, 0.75f }, { 0.40f, 0.55f, 0.48f, 0.55f }, { 0.30f, 0.30f, 0.35f, 0.30f }, CorpusStyle::SoulRnb },
+        { "Hard",        1, 0.15f, 0.50f, { 0.28f, 0.35f, 0.22f, 0.45f }, { 0.22f, 0.50f, 0.55f, 0.65f }, { 1.00f, 1.00f, 1.00f, 1.00f }, CorpusStyle::MinorLoops },
     };
     return m;
 }
 
 inline CorpusStyle styleForProgression (const Progression& p) noexcept
 {
+    if (p.style >= 0)
+        return (CorpusStyle) p.style;
+
     if (p.mood >= 0 && p.mood < (int) moods().size())
     {
-        const auto& m = moods()[(size_t) p.mood];
-        if (std::strcmp (m.name, "Dreamy") == 0)
+        if (moods()[(size_t) p.mood].defaultStyle == CorpusStyle::SoulRnb)
             return CorpusStyle::SoulRnb;
-        if (std::strcmp (m.name, "Dark") == 0 || std::strcmp (m.name, "Melancholic") == 0 || std::strcmp (m.name, "Tense") == 0)
-            return CorpusStyle::MinorLoops;
-        return CorpusStyle::PopRock;
     }
+
     return scaleHasMinorThird (p.scale) ? CorpusStyle::MinorLoops : CorpusStyle::PopRock;
 }
 

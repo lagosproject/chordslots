@@ -154,6 +154,17 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         });
     };
 
+    styleBox.onChange = [this]
+    {
+        if (refreshing || styleBox.getSelectedId() == 0) return;
+        const int id = styleBox.getSelectedId();
+        const int style = (id == 1 ? -1 : id - 2);
+        processor.edit ([style] (cs::Progression& pr, cs::Rng&)
+        {
+            pr.style = style;
+        });
+    };
+
     // Fit score badge
     fitCaption.setText ("FIT", juce::dontSendNotification);
     fitCaption.setFont (ui::font (10.0f, true));
@@ -231,10 +242,11 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         moodBox.addItem (m[(size_t) i].name, i + 1);
 
     setupCombo (styleBox, styleLabel, "STYLE PRIOR");
-    styleBox.addItem ("Pop/Rock", 1);
-    styleBox.addItem ("Minor Loops (EDM)", 2);
-    styleBox.addItem ("Soul / Jazz", 3);
-    styleBox.addItem ("Free Harmony", 4);
+    styleBox.addItem ("Auto (from scale)", 1);
+    styleBox.addItem ("Pop/Rock", 2);
+    styleBox.addItem ("Minor Loops", 3);
+    styleBox.addItem ("Soul / Jazz", 4);
+    styleBox.addItem ("Free", 5);
     styleBox.setSelectedId (1, juce::dontSendNotification);
 
     setupCombo (shapeBox, shapeLabel, "SHAPES");
@@ -607,6 +619,7 @@ void ChordSlotsEditor::refresh()
     slotsBox.setSelectedId (p.numSlots, juce::dontSendNotification);
     snapBox.setSelectedId (p.snap, juce::dontSendNotification);
     moodBox.setSelectedId (p.mood + 1, juce::dontSendNotification);
+    styleBox.setSelectedId (p.style == -1 ? 1 : p.style + 2, juce::dontSendNotification);
 
     lockRhythm.setToggleState (p.locks.rhythm, juce::dontSendNotification);
     lockRoots.setToggleState (p.locks.roots, juce::dontSendNotification);

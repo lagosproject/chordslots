@@ -762,6 +762,43 @@ static void testModernTransitionPrior()
     const float costRepeat = transitionCost (cI, cI, 0, 0.3f);
     CHECK (costRepeat > costOverload4 * 2.0f);
 
+    // P1.2: Style selection by tonality and explicit style override
+    {
+        Progression pMinor;
+        pMinor.tonic = 9; // A
+        pMinor.scale = 1; // Minor
+        pMinor.style = -1; // Auto
+        CHECK (styleForProgression (pMinor) == CorpusStyle::MinorLoops);
+
+        Progression pMajor;
+        pMajor.tonic = 0; // C
+        pMajor.scale = 0; // Major
+        pMajor.style = -1; // Auto
+        CHECK (styleForProgression (pMajor) == CorpusStyle::PopRock);
+
+        // Explicit style overrides Auto
+        pMinor.style = (int) CorpusStyle::PopRock;
+        CHECK (styleForProgression (pMinor) == CorpusStyle::PopRock);
+
+        pMajor.style = (int) CorpusStyle::Free;
+        CHECK (styleForProgression (pMajor) == CorpusStyle::Free);
+
+        // Uplifting, Epic, Hard moods in Minor scale get MinorLoops by default
+        for (const char* mName : { "Uplifting", "Epic", "Hard" })
+        {
+            for (size_t mi = 0; mi < moods().size(); ++mi)
+            {
+                if (std::strcmp (moods()[mi].name, mName) == 0)
+                {
+                    Progression pMood;
+                    applyMood (pMood, (int) mi);
+                    CHECK (pMood.scale == 1);
+                    CHECK (styleForProgression (pMood) == CorpusStyle::MinorLoops);
+                }
+            }
+        }
+    }
+
     // 5. 1,000 rolls distribution and entropy test
     Rng rng (42);
     Progression p;

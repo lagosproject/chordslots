@@ -319,6 +319,7 @@ void testStateRoundTrip()
         p.bars = 2;
         cs::setNumSlots (p, 5);
         cs::applyMood (p, 5);
+        p.style = (int) cs::CorpusStyle::SoulRnb;
         p.locks.colors = true;
         cs::roll (p, rng);
         p.slots[2].locked = true;
@@ -333,6 +334,7 @@ void testStateRoundTrip()
 
     CHECK (pa.tonic == pb.tonic && pa.scale == pb.scale && pa.bars == pb.bars && pa.numSlots == pb.numSlots);
     CHECK (pa.mood == pb.mood && pa.locks.colors == pb.locks.colors && pa.snap == pb.snap);
+    CHECK (pa.style == pb.style && pb.style == (int) cs::CorpusStyle::SoulRnb);
     CHECK (std::abs (pa.adventure - pb.adventure) < 1.0e-4f);
     for (int i = 0; i < pa.numSlots; ++i)
     {
@@ -343,6 +345,25 @@ void testStateRoundTrip()
         CHECK (std::abs (x.targetB - y.targetB) < 1.0e-4f && std::abs (x.brightness - y.brightness) < 1.0e-4f);
     }
     CHECK (a.processor.describeProgression() == b.processor.describeProgression());
+
+    // v3 state without the "style" attribute loads as Auto (-1)
+    {
+        Host hV3;
+        juce::ValueTree v3Root ("ChordSlotsState");
+        v3Root.setProperty ("version", 3, nullptr);
+        juce::ValueTree v3Container ("ProgressionA");
+        juce::ValueTree v3Prog ("Progression");
+        v3Prog.setProperty ("bars", 2, nullptr);
+        // Note: NO "style" property set here
+        juce::ValueTree slot0 ("Slot"); slot0.setProperty ("start", 0, nullptr); slot0.setProperty ("root", 0, nullptr); slot0.setProperty ("type", "", nullptr); v3Prog.appendChild (slot0, nullptr);
+        v3Container.appendChild (v3Prog, nullptr);
+        v3Root.appendChild (v3Container, nullptr);
+
+        juce::MemoryBlock v3Block;
+        juce::AudioProcessor::copyXmlToBinary (*v3Root.createXml(), v3Block);
+        hV3.processor.setStateInformation (v3Block.getData(), (int) v3Block.getSize());
+        CHECK (hV3.processor.getProgression().style == -1);
+    }
 
     // Junk and hostile state must be ignored or clamped, never crash.
     const char junk[] = "this is not a ChordSlots state";
