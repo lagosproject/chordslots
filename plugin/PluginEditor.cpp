@@ -888,6 +888,54 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     addChildComponent (dragChordsTile);
     addChildComponent (dragBassTile);
 
+    variationLabel.setText ("VARIATION", juce::dontSendNotification);
+    variationLabel.setFont (ui::font (10.0f, true));
+    variationLabel.setColour (juce::Label::textColourId, ui::textDim);
+    variationLabel.setJustificationType (juce::Justification::centredLeft);
+    addAndMakeVisible (variationLabel);
+
+    followButton.setButtonText ("Follow");
+    followButton.setColour (juce::ToggleButton::textColourId, ui::textDim);
+    followButton.setColour (juce::ToggleButton::tickColourId, ui::accent);
+    followButton.setToggleState (processor.isFollowingPlayback(), juce::dontSendNotification);
+    followButton.onClick = [this] { processor.setFollowPlayback (followButton.getToggleState()); };
+    addAndMakeVisible (followButton);
+
+    const char* const varNames[] = { "A", "B", "C", "D" };
+    for (int i = 0; i < cs::kNumVariations; ++i)
+    {
+        varButtons[i].setButtonText (varNames[i]);
+        varButtons[i].setClickingTogglesState (false);
+        varButtons[i].onClick = [this, i]
+        {
+            processor.setEditVariation (i);
+            if (processor.isFollowingPlayback())
+                processor.setPlayingVariation (i);
+            refresh();
+        };
+        addAndMakeVisible (varButtons[i]);
+    }
+
+    copyVarButton.setTooltip ("Copy current variation to another slot");
+    copyVarButton.onClick = [this]
+    {
+        const int cur = processor.getEditVariation();
+        const char names[] = { 'A', 'B', 'C', 'D' };
+        juce::PopupMenu menu;
+        for (int i = 0; i < cs::kNumVariations; ++i)
+        {
+            if (i != cur)
+                menu.addItem (i + 1, juce::String ("Copy ") + names[cur] + " to " + names[i]);
+        }
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&copyVarButton),
+                            [this, cur] (int result)
+        {
+            if (result > 0)
+                processor.copyVariation (cur, result - 1);
+        });
+    };
+    addAndMakeVisible (copyVarButton);
+
     hint.setText (juce::String::fromUTF8 ("Click a slot to hear it  \xc2\xb7  right-click for alternatives  \xc2\xb7  drag the edges to move cuts  \xc2\xb7  "
                                           "double-click to split or merge  \xc2\xb7  drag the bars to set targets (white marks = what the chord measures)"),
                   juce::dontSendNotification);
@@ -978,6 +1026,9 @@ void ChordSlotsEditor::refresh()
     fitLabel.setColour (juce::Label::textColourId, fit >= 85 ? ui::energy : (fit >= 70 ? ui::brightness : ui::tension));
 
     undoButton.setEnabled (processor.canUndo());
+    const char varLetters[] = { 'A', 'B', 'C', 'D' };
+    const int edVar = processor.getEditVariation();
+    undoButton.setTooltip (juce::String ("Undo (Variation ") + varLetters[edVar] + ")");
     timeline.setProgression (p);
     lanes.setProgression (p);
 }
@@ -986,6 +1037,21 @@ void ChordSlotsEditor::changeListenerCallback (juce::ChangeBroadcaster*) { refre
 
 void ChordSlotsEditor::timerCallback()
 {
+    if (processor.isFollowingPlayback())
+    {
+        const int playingVar = processor.getPlayingVariation();
+        if (processor.getEditVariation() != playingVar)
+        {
+            processor.setEditVariation (playingVar);
+            refresh();
+        }
+    }
+
+    const int edVar = processor.getEditVariation();
+    for (int i = 0; i < cs::kNumVariations; ++i)
+        varButtons[i].setToggleState (i == edVar, juce::dontSendNotification);
+    followButton.setToggleState (processor.isFollowingPlayback(), juce::dontSendNotification);
+
     const double pos = processor.getPlayPosition();
     timeline.setPlayhead (pos);
     const juce::String text = processor.isPreviewPlaying() ? "Stop" : "Play";
@@ -1059,10 +1125,27 @@ void ChordSlotsEditor::resized()
 
     // Header
     auto header = area.removeFromTop (52);
-    header.removeFromLeft (160);
-    auto fitArea = header.removeFromRight (86);
+    header.removeFromLeft (145);
+    auto fitArea = header.removeFromRight (70);
     fitCaption.setBounds (fitArea.removeFromTop (14));
     fitLabel.setBounds (fitArea);
+
+    header.removeFromRight (10);
+    auto varArea = header.removeFromRight (144);
+    auto varTop = varArea.removeFromTop (16);
+    variationLabel.setBounds (varTop.removeFromLeft (64));
+    followButton.setBounds (varTop);
+    auto varBottom = varArea.removeFromTop (28);
+    const int btnW = 20;
+    for (int i = 0; i < cs::kNumVariations; ++i)
+    {
+        varButtons[i].setBounds (varBottom.removeFromLeft (btnW));
+        varBottom.removeFromLeft (2);
+    }
+    varBottom.removeFromLeft (4);
+    copyVarButton.setBounds (varBottom);
+
+    header.removeFromRight (10);
 
     auto place = [&header] (juce::ComboBox& box, juce::Label& label, int width)
     {
@@ -1071,14 +1154,14 @@ void ChordSlotsEditor::resized()
         label.setBounds (cell.removeFromTop (16));
         box.setBounds (cell.removeFromTop (28));
     };
-    place (keyBox, keyLabel, 58);
-    place (scaleBox, scaleLabel, 114);
-    place (barsBox, barsLabel, 50);
-    place (slotsBox, slotsLabel, 50);
-    place (snapBox, snapLabel, 64);
-    place (moodBox, moodLabel, 110);
-    place (triggerModeBox, triggerModeLabel, 85);
-    place (triggerMapBox, triggerMapLabel, juce::jmax (100, header.getWidth() - 10));
+    place (keyBox, keyLabel, 50);
+    place (scaleBox, scaleLabel, 98);
+    place (barsBox, barsLabel, 44);
+    place (slotsBox, slotsLabel, 44);
+    place (snapBox, snapLabel, 58);
+    place (moodBox, moodLabel, 95);
+    place (triggerModeBox, triggerModeLabel, 75);
+    place (triggerMapBox, triggerMapLabel, juce::jmax (70, header.getWidth() - 10));
 
     area.removeFromTop (12);
 

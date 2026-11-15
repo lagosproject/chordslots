@@ -762,6 +762,139 @@ void testSplitMidiOutput()
     }
 }
 
+void testVariationBankAndHistory()
+{
+    Host h (48000.0, 256);
+    // 1. Initially all 4 variations exist
+    CHECK (h.processor.getEditVariation() == 0);
+    CHECK (h.processor.getPlayingVariation() == 0);
+    CHECK (! h.processor.isFollowingPlayback());
+
+    // Edit variation 0 (A)
+    h.processor.edit ([] (cs::Progression& p, cs::Rng& rng)
+    {
+        p.tonic = 2; // D
+        p.bars = 4;
+        cs::setNumSlots (p, 6);
+        cs::applyMood (p, 3);
+        cs::roll (p, rng);
+    });
+
+    // Edit variation 1 (B)
+    h.processor.setEditVariation (1);
+    CHECK (h.processor.getEditVariation() == 1);
+    h.processor.edit ([] (cs::Progression& p, cs::Rng& rng)
+    {
+        p.tonic = 7; // G
+        p.bars = 2;
+        cs::setNumSlots (p, 4);
+        cs::applyMood (p, 7);
+        cs::roll (p, rng);
+    });
+
+    // Check that variation 0 and variation 1 are distinct and independent
+    const cs::Progression pA = h.processor.getProgression (0);
+    const cs::Progression pB = h.processor.getProgression (1);
+    CHECK (pA.tonic == 2 && pA.bars == 4 && pA.numSlots == 6);
+    CHECK (pB.tonic == 7 && pB.bars == 2 && pB.numSlots == 4);
+    CHECK (h.processor.getProgression().tonic == 7); // currently editing B
+
+    // 2. Decoupled edit target vs playing variation
+    CHECK (h.processor.getPlayingVariation() == 0);
+    h.processor.setPlayingVariation (2);
+    CHECK (h.processor.getPlayingVariation() == 2);
+    CHECK (h.processor.getEditVariation() == 1); // still editing B
+
+    // 3. Follow playback mode
+    h.processor.setFollowPlayback (true);
+    CHECK (h.processor.isFollowingPlayback());
+    h.processor.setPlayingVariation (3);
+    CHECK (h.processor.getPlayingVariation() == 3);
+    // When followPlayback is true, setPlayingVariation updates edit target:
+    CHECK (h.processor.getEditVariation() == 3);
+
+    h.processor.setFollowPlayback (false);
+
+    // 4. Undo isolation per variation stack
+    h.processor.setEditVariation (2);
+    const int tonicBefore = h.processor.getProgression().tonic;
+    CHECK (! h.processor.canUndo());
+    h.processor.edit ([] (cs::Progression& p, cs::Rng&) { p.tonic = (p.tonic + 1) % 12; });
+    CHECK (h.processor.canUndo());
+    CHECK (h.processor.getProgression().tonic != tonicBefore);
+
+    // Switch to variation 3 (no edits made yet)
+    h.processor.setEditVariation (3);
+    CHECK (! h.processor.canUndo());
+
+    // Switch back to 2, undo restores state
+    h.processor.setEditVariation (2);
+    CHECK (h.processor.canUndo());
+    h.processor.undo();
+    CHECK (h.processor.getProgression().tonic == tonicBefore);
+    CHECK (! h.processor.canUndo());
+
+    // 5. Copy variation with reversible undo
+    h.processor.setEditVariation (1);
+    const cs::Progression bBeforeCopy = h.processor.getProgression (1);
+    h.processor.copyVariation (0, 1);
+    const cs::Progression bAfterCopy = h.processor.getProgression (1);
+    CHECK (bAfterCopy.tonic == pA.tonic && bAfterCopy.bars == pA.bars && bAfterCopy.numSlots == pA.numSlots);
+    // Since copyVariation pushed history on dest, undo on Variation 1 restores previous progression!
+    CHECK (h.processor.canUndo());
+    h.processor.undo();
+    const cs::Progression bAfterUndo = h.processor.getProgression (1);
+    CHECK (bAfterUndo.tonic == bBeforeCopy.tonic && bAfterUndo.bars == bBeforeCopy.bars);
+
+    // 6. Audio thread quantized switching test
+    h.playHead.playing = true;
+    h.playHead.bpm = 120.0;
+    h.run (100);
+
+    // Switch variation mid-playback
+    if (auto* param = h.processor.apvts.getParameter ("quantizeSwitch"))
+        param->setValueNotifyingHost (param->convertTo0to1 (0.0f)); // Immediate
+    h.processor.setPlayingVariation (1);
+    h.run (10);
+    // Check no stuck notes
+    h.playHead.playing = false;
+    h.run (10);
+    CHECK (h.heldAfterReplay() == 0);
+
+    // 7. State persistence round-trip (v2)
+    juce::MemoryBlock state;
+    h.processor.getStateInformation (state);
+
+    Host h2 (48000.0, 256);
+    h2.processor.setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (h2.processor.getProgression (0).tonic == h.processor.getProgression (0).tonic);
+    CHECK (h2.processor.getProgression (1).tonic == h.processor.getProgression (1).tonic);
+
+    // 8. State persistence legacy migration (v1 format: single <ChordSlotsState><Progression .../></ChordSlotsState>)
+    juce::ValueTree v1Root ("ChordSlotsState");
+    juce::ValueTree v1Prog ("Progression");
+    v1Prog.setProperty ("tonic", 5, nullptr);
+    v1Prog.setProperty ("scale", 1, nullptr);
+    v1Prog.setProperty ("bars", 2, nullptr);
+    v1Prog.setProperty ("snap", 1, nullptr);
+    juce::ValueTree slot0 ("Slot");
+    slot0.setProperty ("start", 0, nullptr);
+    slot0.setProperty ("root", 5, nullptr);
+    slot0.setProperty ("type", "Maj", nullptr);
+    slot0.setProperty ("notes", "53 60 65 69", nullptr);
+    slot0.setProperty ("velocity", 90, nullptr);
+    v1Prog.appendChild (slot0, nullptr);
+    v1Root.appendChild (v1Prog, nullptr);
+
+    juce::MemoryBlock v1Block;
+    juce::AudioProcessor::copyXmlToBinary (*v1Root.createXml(), v1Block);
+    h2.processor.setStateInformation (v1Block.getData(), (int) v1Block.getSize());
+
+    CHECK (h2.processor.getProgression (0).tonic == 5);
+    CHECK (h2.processor.getProgression (1).tonic == 5);
+    CHECK (h2.processor.getProgression (0).slots[0].chord.root == 5);
+}
+
 } // namespace
 
 int main (int argc, char** argv)
@@ -801,6 +934,7 @@ int main (int argc, char** argv)
     testPerformanceAndStrum();
     testIncomingMidiTriggerIntegration();
     testSplitMidiOutput();
+    testVariationBankAndHistory();
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

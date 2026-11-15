@@ -144,6 +144,11 @@ private:
     juce::Label keyLabel, scaleLabel, barsLabel, slotsLabel, snapLabel, moodLabel, triggerModeLabel, triggerMapLabel;
     juce::Label fitLabel, fitCaption;
 
+    juce::Label variationLabel;
+    juce::TextButton varButtons[cs::kNumVariations];
+    juce::ToggleButton followButton { "Follow" };
+    juce::TextButton copyVarButton { "Copy..." };
+
     TimelineView timeline;
     LanesView lanes;
 

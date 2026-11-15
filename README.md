@@ -29,6 +29,15 @@ finds chords whose *measured* properties follow those curves.
   (Locks, Adventure, Syncopation, Bass Motion, Roll), `2. GROOVE & FEEL` (Strum,
   Accent, Humanize, Re-Feel), and `OUTPUT & EXPORT` (Gate, Synth Vol, Play, Save,
   Drag MIDI).
+- **4-Variation Bank (A/B/C/D)** – switch between 4 independent musical progressions
+  (verse, chorus, bridge, outro) with quantized switching (`Next Bar`, `Next Slot`, `Immediate`).
+  Automatable in DAW playback, decoupled edit target with `Follow Playback`, independent
+  64-step undo history per variation, and reversible copy between variations.
+- **Split MIDI Output (Ch 1/2)** – route upper voicings to Channel 1 and monophonic bass
+  to Channel 2 in real-time, plus dedicated drag tiles (`Drag Chords` and `Drag Bass`).
+- **Incoming MIDI Trigger Modes** – perform slots live from a MIDI keyboard or pads
+  with Auto priority, Trigger Only, or Loop Only, White Keys / Chromatic mapping,
+  held-note priority stack, sustain pedal (CC64) support, and timeline glow.
 - **Gets out of the way** – built-in preview synth, live MIDI output, and
   drag-and-drop MIDI clips with baked strum and humanization into any DAW.
 

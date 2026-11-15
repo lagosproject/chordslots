@@ -4,6 +4,7 @@
 
 #include "PreviewSynth.h"
 
+#include <chordslots/Bank.h>
 #include <chordslots/Generator.h>
 #include <chordslots/Performance.h>
 #include <chordslots/Trigger.h>
@@ -30,6 +31,18 @@ public:
     // every edit and after a state restore.
 
     cs::Progression getProgression() const;
+    cs::Progression getProgression (int variationIndex) const;
+
+    int getEditVariation() const noexcept { return editVariation.load(); }
+    void setEditVariation (int index);
+
+    int getPlayingVariation() const noexcept;
+    void setPlayingVariation (int index);
+
+    bool isFollowingPlayback() const noexcept { return followPlayback.load(); }
+    void setFollowPlayback (bool follow) noexcept;
+
+    void copyVariation (int src, int dst);
 
     /** Runs fn (Progression&, Rng&) under the model lock, then publishes the
         result to the audio thread. */
@@ -38,10 +51,11 @@ public:
     {
         {
             const juce::ScopedLock sl (modelLock);
+            const int idx = editVariation.load();
             if (undoable)
-                pushHistory();
-            fn (model, rng);
-            cs::sanitizeRhythm (model);
+                pushHistory (idx);
+            fn (variations[(size_t) idx], rng);
+            cs::sanitizeRhythm (variations[(size_t) idx]);
             publish();
         }
         sendChangeMessage();
@@ -104,23 +118,26 @@ public:
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
-    void pushHistory();
+    void pushHistory (int variationIndex);
     void publish();
 
     //==============================================================================
     // Model (guarded by modelLock)
     juce::CriticalSection modelLock;
-    cs::Progression model;
+    std::array<cs::Progression, cs::kNumVariations> variations;
     cs::Rng rng;
-    std::vector<cs::Progression> history;
+    std::array<std::vector<cs::Progression>, cs::kNumVariations> histories;
+    std::atomic<int> editVariation { 0 };
+    std::atomic<bool> followPlayback { false };
 
     // Hand-over to the audio thread
     juce::SpinLock playLock;
-    cs::PlayData pendingPlay;
+    cs::PlayBank pendingPlayBank;
     std::atomic<bool> playDirty { false };
 
     // Audio-thread state
-    cs::PlayData play;
+    cs::PlayBank playBank;
+    int activePlayingVariation = 0;
     PreviewSynth synth;
     double sampleRate = 44100.0;
 
@@ -174,6 +191,8 @@ private:
     std::atomic<float>* triggerRootParam = nullptr;
     std::atomic<float>* triggerLayoutParam = nullptr;
     std::atomic<float>* splitMidiParam = nullptr;
+    std::atomic<float>* variationParam = nullptr;
+    std::atomic<float>* quantizeSwitchParam = nullptr;
     std::atomic<uint32_t> perfSeed { 1 };
 
     cs::TriggerEngine triggerEngine;

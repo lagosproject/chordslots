@@ -141,6 +141,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout ChordSlotsProcessor::createL
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "triggerLayout", 1 }, "Trigger Layout",
                                                              juce::StringArray { "White Keys", "Chromatic" }, 0));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "splitMidi", 1 }, "Split MIDI", false));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "variation", 1 }, "Variation",
+                                                             juce::StringArray { "A", "B", "C", "D" }, 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "quantizeSwitch", 1 }, "Switch Quantize",
+                                                             juce::StringArray { "Next Bar", "Next Slot", "Immediate" }, 0));
     return layout;
 }
 
@@ -159,6 +163,8 @@ ChordSlotsProcessor::ChordSlotsProcessor()
     triggerRootParam = apvts.getRawParameterValue ("triggerRoot");
     triggerLayoutParam = apvts.getRawParameterValue ("triggerLayout");
     splitMidiParam = apvts.getRawParameterValue ("splitMidi");
+    variationParam = apvts.getRawParameterValue ("variation");
+    quantizeSwitchParam = apvts.getRawParameterValue ("quantizeSwitch");
 
     apvts.addParameterListener ("strum", this);
     apvts.addParameterListener ("accent", this);
@@ -166,9 +172,12 @@ ChordSlotsProcessor::ChordSlotsProcessor()
     apvts.addParameterListener ("triggerMode", this);
     apvts.addParameterListener ("splitMidi", this);
 
-    model = cs::makeDefaultProgression (rng);
+    variations[0] = cs::makeDefaultProgression (rng);
+    for (int i = 1; i < cs::kNumVariations; ++i)
+        variations[(size_t) i] = variations[0];
+
     publish();
-    play = pendingPlay;
+    playBank = pendingPlayBank;
 }
 
 ChordSlotsProcessor::~ChordSlotsProcessor()
@@ -202,7 +211,7 @@ cs::TriggerConfig ChordSlotsProcessor::getTriggerConfig() const noexcept
         cfg.rootNote = juce::jlimit (0, 127, juce::roundToInt (triggerRootParam->load()));
     if (triggerLayoutParam != nullptr)
         cfg.layout = (cs::TriggerLayout) juce::jlimit (0, 1, juce::roundToInt (triggerLayoutParam->load()));
-    cfg.numSlots = play.numSlots;
+    cfg.numSlots = playBank.variations[activePlayingVariation].numSlots;
     return cfg;
 }
 
@@ -230,51 +239,110 @@ void ChordSlotsProcessor::refeel() noexcept
 }
 
 //==============================================================================
-cs::Progression ChordSlotsProcessor::getProgression() const
+int ChordSlotsProcessor::getPlayingVariation() const noexcept
 {
-    const juce::ScopedLock sl (modelLock);
-    return model;
+    if (variationParam != nullptr)
+        return juce::jlimit (0, cs::kNumVariations - 1, juce::roundToInt (variationParam->load()));
+    return 0;
 }
 
-void ChordSlotsProcessor::pushHistory()
+void ChordSlotsProcessor::setPlayingVariation (int index)
 {
-    history.push_back (model);
-    if (history.size() > 64)
-        history.erase (history.begin());
+    index = juce::jlimit (0, cs::kNumVariations - 1, index);
+    if (followPlayback.load())
+        setEditVariation (index);
+    if (auto* param = apvts.getParameter ("variation"))
+        param->setValueNotifyingHost (param->convertTo0to1 ((float) index));
+}
+
+void ChordSlotsProcessor::setFollowPlayback (bool follow) noexcept
+{
+    followPlayback.store (follow);
+    if (follow)
+        setEditVariation (getPlayingVariation());
+}
+
+void ChordSlotsProcessor::setEditVariation (int index)
+{
+    index = juce::jlimit (0, cs::kNumVariations - 1, index);
+    if (editVariation.exchange (index) != index)
+    {
+        sendChangeMessage();
+    }
+}
+
+cs::Progression ChordSlotsProcessor::getProgression() const
+{
+    return getProgression (editVariation.load());
+}
+
+cs::Progression ChordSlotsProcessor::getProgression (int variationIndex) const
+{
+    const juce::ScopedLock sl (modelLock);
+    const int idx = juce::jlimit (0, cs::kNumVariations - 1, variationIndex >= 0 ? variationIndex : editVariation.load());
+    return variations[(size_t) idx];
+}
+
+void ChordSlotsProcessor::pushHistory (int variationIndex)
+{
+    const int idx = juce::jlimit (0, cs::kNumVariations - 1, variationIndex);
+    histories[(size_t) idx].push_back (variations[(size_t) idx]);
+    if (histories[(size_t) idx].size() > 64)
+        histories[(size_t) idx].erase (histories[(size_t) idx].begin());
 }
 
 void ChordSlotsProcessor::beginGesture()
 {
     const juce::ScopedLock sl (modelLock);
-    pushHistory();
+    pushHistory (editVariation.load());
 }
 
 bool ChordSlotsProcessor::canUndo() const
 {
     const juce::ScopedLock sl (modelLock);
-    return ! history.empty();
+    const int idx = editVariation.load();
+    return ! histories[(size_t) idx].empty();
 }
 
 bool ChordSlotsProcessor::undo()
 {
     {
         const juce::ScopedLock sl (modelLock);
-        if (history.empty())
+        const int idx = editVariation.load();
+        if (histories[(size_t) idx].empty())
             return false;
-        model = history.back();
-        history.pop_back();
+        variations[(size_t) idx] = histories[(size_t) idx].back();
+        histories[(size_t) idx].pop_back();
         publish();
     }
     sendChangeMessage();
     return true;
 }
 
+void ChordSlotsProcessor::copyVariation (int src, int dst)
+{
+    if (src < 0 || src >= cs::kNumVariations || dst < 0 || dst >= cs::kNumVariations || src == dst)
+        return;
+
+    {
+        const juce::ScopedLock sl (modelLock);
+        pushHistory (dst);
+        variations[(size_t) dst] = variations[(size_t) src];
+        publish();
+    }
+    sendChangeMessage();
+}
+
 void ChordSlotsProcessor::publish()
 {
     const cs::PerformanceParams perf = getPerformanceParams();
-    const cs::PlayData d = cs::toPlayData (model, perf, lastBpm.load());
+    const double bpm = lastBpm.load();
+    cs::PlayBank pb;
+    for (int i = 0; i < cs::kNumVariations; ++i)
+        pb.variations[i] = cs::toPlayData (variations[(size_t) i], perf, bpm);
+
     const juce::SpinLock::ScopedLockType sl (playLock);
-    pendingPlay = d;
+    pendingPlayBank = pb;
     playDirty.store (true);
 }
 
@@ -320,10 +388,17 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         const juce::SpinLock::ScopedTryLockType tl (playLock);
         if (tl.isLocked())
         {
-            play = pendingPlay;
+            playBank = pendingPlayBank;
             playDirty.store (false);
         }
     }
+
+    const int targetVar = variationParam != nullptr
+        ? juce::jlimit (0, cs::kNumVariations - 1, juce::roundToInt (variationParam->load()))
+        : 0;
+    const auto quantize = quantizeSwitchParam != nullptr
+        ? (cs::SwitchQuantize) juce::jlimit (0, 2, juce::roundToInt (quantizeSwitchParam->load()))
+        : cs::SwitchQuantize::NextBar;
 
     double bpm = 120.0;
     bool hostPlaying = false;
@@ -345,10 +420,14 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         bpm = 120.0;
     lastBpm.store (bpm);
 
+    const bool playing = (hostPlaying || previewOn.load()) && numSamples > 0;
+    if (! playing && activePlayingVariation != targetVar)
+        activePlayingVariation = targetVar;
+
+    const cs::PlayData& play = playBank.variations[activePlayingVariation];
     const double len = (double) juce::jmax (1, play.lengthSteps);
     const double stepsPerSample = bpm / 60.0 * 4.0 / sampleRate;
     const float gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
-    const bool playing = (hostPlaying || previewOn.load()) && play.numSlots > 0 && numSamples > 0;
     const cs::TriggerConfig trigCfg = getTriggerConfig();
     const bool split = isSplitMidi();
 
@@ -669,6 +748,49 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         }
 
         startStep = std::fmod (startStep, len);
+
+        // Handle quantized variation switching during playback
+        if (activePlayingVariation != targetVar)
+        {
+            bool shouldSwitch = false;
+            int switchSample = 0;
+            if (quantize == cs::SwitchQuantize::Immediate)
+            {
+                shouldSwitch = true;
+                switchSample = 0;
+            }
+            else if (quantize == cs::SwitchQuantize::NextBar)
+            {
+                const int curBar = (int) (startStep / (double) cs::kStepsPerBar);
+                const int nextBar = (int) ((startStep + numSamples * stepsPerSample) / (double) cs::kStepsPerBar);
+                if (curBar != nextBar || startStep + numSamples * stepsPerSample >= len)
+                {
+                    shouldSwitch = true;
+                    const double barStep = (double) (curBar + 1) * (double) cs::kStepsPerBar;
+                    switchSample = juce::jlimit (0, numSamples - 1, (int) std::lround ((barStep - startStep) / stepsPerSample));
+                }
+            }
+            else if (quantize == cs::SwitchQuantize::NextSlot)
+            {
+                const int sNow = play.slotAt (startStep);
+                const int sEnd = sNow >= 0 ? play.slots[sNow].end : (int) len;
+                if (startStep + numSamples * stepsPerSample >= (double) sEnd)
+                {
+                    shouldSwitch = true;
+                    switchSample = juce::jlimit (0, numSamples - 1, (int) std::lround (((double) sEnd - startStep) / stepsPerSample));
+                }
+            }
+
+            if (shouldSwitch)
+            {
+                releaseHeld (switchSample);
+                clearPending();
+                activePlayingVariation = targetVar;
+                currentSlot = -1;
+                jumped = true;
+            }
+        }
+
         if (jumped)
         {
             releaseHeld (0);
@@ -979,9 +1101,19 @@ juce::File ChordSlotsProcessor::writeTempMidiFile (MidiExportMode mode) const
 void ChordSlotsProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::ValueTree root ("ChordSlotsState");
-    root.setProperty ("version", 1, nullptr);
+    root.setProperty ("version", 2, nullptr);
+    root.setProperty ("editVariation", editVariation.load(), nullptr);
+    root.setProperty ("followPlayback", followPlayback.load(), nullptr);
     root.appendChild (apvts.copyState(), nullptr);
-    root.appendChild (progressionToTree (getProgression()), nullptr);
+
+    const char* varNames[cs::kNumVariations] = { "ProgressionA", "ProgressionB", "ProgressionC", "ProgressionD" };
+    for (int i = 0; i < cs::kNumVariations; ++i)
+    {
+        auto vt = progressionToTree (getProgression (i));
+        juce::ValueTree container (varNames[i]);
+        container.appendChild (vt, nullptr);
+        root.appendChild (container, nullptr);
+    }
 
     if (const auto xml = root.createXml())
         copyXmlToBinary (*xml, dest);
@@ -997,21 +1129,50 @@ void ChordSlotsProcessor::setStateInformation (const void* data, int size)
     if (! root.hasType ("ChordSlotsState"))
         return;
 
+    const int ver = (int) root.getProperty ("version", 1);
+    const char* varNames[cs::kNumVariations] = { "ProgressionA", "ProgressionB", "ProgressionC", "ProgressionD" };
+
+    {
+        const juce::ScopedLock sl (modelLock);
+        for (int i = 0; i < cs::kNumVariations; ++i)
+            histories[(size_t) i].clear();
+
+        if (ver >= 2)
+        {
+            for (int i = 0; i < cs::kNumVariations; ++i)
+            {
+                const auto container = root.getChildWithName (varNames[i]);
+                if (container.isValid())
+                {
+                    const auto pt = container.getChildWithName ("Progression");
+                    if (pt.isValid())
+                        progressionFromTree (pt, variations[(size_t) i]);
+                }
+            }
+            editVariation.store (juce::jlimit (0, cs::kNumVariations - 1, (int) root.getProperty ("editVariation", 0)));
+            followPlayback.store ((bool) root.getProperty ("followPlayback", false));
+        }
+        else
+        {
+            // Legacy v1 preset migration: single <Progression> child
+            cs::Progression legacy;
+            if (progressionFromTree (root.getChildWithName ("Progression"), legacy))
+            {
+                for (int i = 0; i < cs::kNumVariations; ++i)
+                    variations[(size_t) i] = legacy;
+            }
+            editVariation.store (0);
+            followPlayback.store (false);
+        }
+        publish();
+    }
+
+    // Restore parameter tree AFTER models are restored!
     const auto params = root.getChildWithName (apvts.state.getType());
     if (params.isValid())
         apvts.replaceState (params.createCopy());
 
-    cs::Progression loaded;
-    if (progressionFromTree (root.getChildWithName ("Progression"), loaded))
-    {
-        {
-            const juce::ScopedLock sl (modelLock);
-            model = loaded;
-            history.clear();
-            publish();
-        }
-        sendChangeMessage();
-    }
+    sendChangeMessage();
 }
 
 juce::AudioProcessorEditor* ChordSlotsProcessor::createEditor()

@@ -64,8 +64,8 @@
 - [x] **Section 2: Phase 2 Performance & Groove Engine (Strum, Accent, Humanize, Re-Feel)**
 - [x] **Section 3: Incoming MIDI Trigger Mode (Held-stack, Last-note priority, CC64, UI glow)**
 - [x] **Section 4: Split-MIDI Output / Dual-Channel Voicing (Channel 1 Chords, Channel 2 Monophonic Bass)**
-- [ ] **Section 5: A/B Comparison Snapshots & Session History (Next Priority)**
-- [ ] **Section 6: Triplet & Polyrhythmic Grid**
+- [x] **Section 5: 4-Variation Bank (A/B/C/D), Follow Playback, and Independent Undo History**
+- [ ] **Section 6: Triplet & Polyrhythmic Grid (Next Priority)**
 - [ ] **Section 7: Modern Transition Prior / Billboard Corpus Integration**
 * **Goal**: Enable musicians to perform chord slots live using a MIDI keyboard or pad controller (e.g. Push, Launchpad, MPC, KeyStep).
 * **Requirements & Invariants**:
@@ -95,12 +95,19 @@
 
 ---
 
-### Section 5: A/B Comparison Snapshots & Session History
-* **Goal**: Allow producers to quickly compare two harmonic variations of a progression without losing either.
-* **Requirements**:
-  1. **State Snapshots**: Two full `cs::Progression` instances stored in `ChordSlotsProcessor` (`progressionA`, `progressionB`), toggled by an `A/B` button in the header.
-  2. **Copy A $\to$ B**: Quick duplicate button to branch an idea.
-  3. **Non-destructive Switching**: Audio engine smoothly transitions without audio pops or stuck notes when switching A/B during live playback.
+### Section 5: 4-Variation Bank (A/B/C/D), Follow Playback & Independent Undo (Completed)
+* **Goal**: Provide 4 song sections (Verse, Chorus, Bridge, Outro) with DAW automation stability, decoupled editing, and isolated undo history.
+* **Architecture & Invariants**:
+  1. **4-Choice Bank from Day One**: `Bank.h` defines `kNumVariations = 4`, `SwitchQuantize` (`Immediate`, `NextBar`, `NextSlot`), and `PlayBank` (`PlayData variations[4]`). This keeps normalized DAW automation values stable.
+  2. **Decoupled Playback vs. Edit Target**:
+     - `variation` (APVTS parameter: "A", "B", "C", "D") controls what **plays**.
+     - `editVariation` (processor state: 0..3) controls what the editor displays and modifies.
+     - `followPlayback` toggle: when ON, edit target automatically tracks playback variation; when OFF, user can edit Variation B while Variation A plays in loop.
+  3. **Audio Thread Safety**: Zero mutex locks, zero memory allocations on the audio thread. All 4 variations are baked into `PlayBank` at publish time on the message thread; the audio thread reads the atomic variation index lock-free.
+  4. **Quantized Variation Switching**: `quantizeSwitch` parameter supports `Immediate`, `NextBar` (default for automation), and `NextSlot`. Releases held voices cleanly on both MIDI channels and clears pending strum notes on variation flip.
+  5. **Independent Undo Stack per Variation**: Each variation owns its own 64-step history stack (`histories[4]`). Edits, rolls, and cuts in Variation A do not affect Variation B's undo history.
+  6. **Reversible Copy**: `copyVariation(src, dst)` pushes `dst`'s prior progression to `dst`'s history stack before copying, allowing immediate undo if accidental.
+  7. **V2 XML State Persistence & V1 Fallback**: Version 2 state file stores `<ProgressionA>`, `<ProgressionB>`, `<ProgressionC>`, `<ProgressionD>`, `editVariation`, and `followPlayback`. Legacy v1 states seamlessly populate all 4 variations without crashing.
 
 ---
 
