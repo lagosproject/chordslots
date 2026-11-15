@@ -93,6 +93,10 @@ public:
     /** Writes the progression to a temp .mid (for drag and drop). */
     juce::File writeTempMidiFile (MidiExportMode mode = MidiExportMode::Master) const;
     juce::String describeProgression() const;
+
+    /** Extracts Brightness, Tension, and Energy curves from a dropped MIDI file. */
+    bool loadMidiToCurves (const juce::File& file);
+    void setSynthModel (PreviewSoundModel model);
     bool isSplitMidi() const noexcept;
 
     juce::AudioProcessorValueTreeState apvts;
@@ -183,7 +187,7 @@ private:
         int samplesUntilOn = 0;
         int slot = -1;
     };
-    static constexpr int kMaxPendingNotes = 32;
+    static constexpr int kMaxPendingNotes = 128;
     PendingNote pendingNotes[kMaxPendingNotes] = {};
     int pendingCount = 0;
 
@@ -199,6 +203,8 @@ private:
     std::atomic<float>* splitMidiParam = nullptr;
     std::atomic<float>* variationParam = nullptr;
     std::atomic<float>* quantizeSwitchParam = nullptr;
+    std::atomic<float>* compStyleParam = nullptr;
+    std::atomic<float>* synthModelParam = nullptr;
 
     std::atomic<int> hostTimeSigNum { 4 };
     std::atomic<int> hostTimeSigDen { 4 };

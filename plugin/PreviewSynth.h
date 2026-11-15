@@ -4,8 +4,15 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
-/** Two detuned band-limited saws and a sub sine through a gentle low-pass.
-    Deliberately plain: it is there to audition harmony, not to be the sound. */
+enum class PreviewSoundModel : int
+{
+    CleanSaw = 0,
+    RhodesEP,
+    FeltPiano
+};
+
+/** Built-in synth with Clean Saw, 2-op FM Rhodes EP, and warm Felt Piano models.
+    Deliberately plain and instant: it is there to audition harmony, not to be the sound. */
 class PreviewSynth
 {
 public:
@@ -14,8 +21,10 @@ public:
     void prepare (double sampleRate);
     void render (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, float gain);
     void allNotesOff();
+    void setSoundModel (PreviewSoundModel model);
 
 private:
     juce::Synthesiser synth;
     juce::SmoothedValue<float> smoothedGain;
+    PreviewSoundModel currentModel { PreviewSoundModel::CleanSaw };
 };
