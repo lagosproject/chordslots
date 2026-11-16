@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "chordslots/Generator.h"
+#include "p2_golden_fixture.h"
 
 #include <cmath>
 #include <cstdio>
@@ -1145,8 +1146,24 @@ static void testSection8Harmonics()
     }
 }
 
+static void testGoldenTheory()
+{
+    size_t count = 0;
+    const auto* entries = getGoldenEntries (count);
+    for (size_t i = 0; i < count; ++i)
+    {
+        const auto& e = entries[i];
+        Chord c { e.root, e.type, e.bassInt };
+        CHECK (chordName (c, e.tonic, e.scaleIdx) == e.chordName);
+        CHECK (romanNumeral (c, e.tonic, e.scaleIdx) == e.romanWithScale);
+        CHECK (romanNumeral (c, e.tonic) == e.romanNoScale);
+        CHECK ((uint8_t) qualityClassOf (e.type) == e.quality);
+    }
+}
+
 int main()
 {
+    testGoldenTheory();
     testSpelling();
     testBassModel();
     testMetricOrdering();

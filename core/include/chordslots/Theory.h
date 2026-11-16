@@ -53,6 +53,138 @@ inline unsigned scaleMask (int scaleIdx)
 inline bool scaleHasMinorThird (int scaleIdx) { return (scaleMask (scaleIdx) & (1u << 3)) != 0; }
 
 //==============================================================================
+enum class QualityClass : uint8_t
+{
+    Major = 0,
+    Minor = 1,
+    Dominant = 2,
+    Diminished = 3,
+    SusOrAug = 4
+};
+
+constexpr int kNumQualityClasses = 5;
+
+enum class SeventhKind : uint8_t
+{
+    None = 0,
+    Minor7 = 1,       // 10
+    Major7 = 2,       // 11
+    Diminished7 = 3   // 9 with a dim fifth
+};
+
+//==============================================================================
+// Pure interval-derived properties
+inline bool hasMajorThird (const std::vector<int>& iv) noexcept
+{
+    return std::find (iv.begin(), iv.end(), 4) != iv.end();
+}
+
+inline bool hasMinorThird (const std::vector<int>& iv) noexcept
+{
+    return std::find (iv.begin(), iv.end(), 3) != iv.end()
+        && std::find (iv.begin(), iv.end(), 4) == iv.end();
+}
+
+inline bool hasPerfectFifth (const std::vector<int>& iv) noexcept
+{
+    return std::find (iv.begin(), iv.end(), 7) != iv.end();
+}
+
+inline bool hasDimFifth (const std::vector<int>& iv) noexcept
+{
+    return std::find (iv.begin(), iv.end(), 6) != iv.end();
+}
+
+inline bool hasAugFifth (const std::vector<int>& iv) noexcept
+{
+    return std::find (iv.begin(), iv.end(), 8) != iv.end()
+        && hasMajorThird (iv)
+        && ! hasPerfectFifth (iv);
+}
+
+inline SeventhKind seventhKind (const std::vector<int>& iv) noexcept
+{
+    if (std::find (iv.begin(), iv.end(), 9) != iv.end() && hasDimFifth (iv))
+        return SeventhKind::Diminished7;
+    if (std::find (iv.begin(), iv.end(), 10) != iv.end())
+        return SeventhKind::Minor7;
+    if (std::find (iv.begin(), iv.end(), 11) != iv.end())
+        return SeventhKind::Major7;
+    return SeventhKind::None;
+}
+
+inline bool seventhIsMajor (const std::vector<int>& iv) noexcept
+{
+    return seventhKind (iv) == SeventhKind::Major7;
+}
+
+inline bool isSus (const std::vector<int>& iv) noexcept
+{
+    const bool has2or5 = (std::find (iv.begin(), iv.end(), 2) != iv.end())
+                      || (std::find (iv.begin(), iv.end(), 5) != iv.end());
+    const bool hasThird = hasMajorThird (iv) || hasMinorThird (iv);
+    return has2or5 && ! hasThird;
+}
+
+inline bool isPower (const std::vector<int>& iv) noexcept
+{
+    return iv.size() == 2 && iv[0] == 0 && iv[1] == 7;
+}
+
+inline unsigned pitchClassMask (const std::vector<int>& iv) noexcept
+{
+    unsigned m = 0;
+    for (int x : iv)
+        m |= (1u << mod12 (x));
+    return m;
+}
+
+inline int numDistinctPitchClasses (const std::vector<int>& iv) noexcept
+{
+    unsigned m = pitchClassMask (iv);
+    int count = 0;
+    while (m > 0)
+    {
+        count += (m & 1u);
+        m >>= 1;
+    }
+    return count;
+}
+
+inline bool isTriadType (const std::vector<int>& iv) noexcept
+{
+    const int pcs = numDistinctPitchClasses (iv);
+    if (pcs != 3)
+        return false;
+    const unsigned m = pitchClassMask (iv);
+    return hasMajorThird (iv) || hasMinorThird (iv)
+        || m == ((1u << 0) | (1u << 3) | (1u << 6))
+        || m == ((1u << 0) | (1u << 4) | (1u << 8));
+}
+
+inline bool isSeventhType (const std::vector<int>& iv) noexcept
+{
+    return numDistinctPitchClasses (iv) == 4 && seventhKind (iv) != SeventhKind::None;
+}
+
+inline QualityClass qualityClassFromIntervals (const std::vector<int>& iv) noexcept
+{
+    if (hasDimFifth (iv) && hasMinorThird (iv))
+        return QualityClass::Diminished;
+    if (hasAugFifth (iv) || isSus (iv))
+        return QualityClass::SusOrAug;
+    if (hasMajorThird (iv) && seventhKind (iv) == SeventhKind::Minor7)
+        return QualityClass::Dominant;
+    if (hasMinorThird (iv))
+        return QualityClass::Minor;
+    if (hasMajorThird (iv))
+        return QualityClass::Major;
+    if (isPower (iv))
+        return QualityClass::Major;
+    return QualityClass::SusOrAug;
+}
+
+//==============================================================================
 struct ChordTypeDef
 {
     const char* suffix;      // "m7", "sus4"...
@@ -91,6 +223,71 @@ inline const std::vector<ChordTypeDef>& chordTypes()
 }
 
 inline int numChordTypes() { return (int) chordTypes().size(); }
+
+//==============================================================================
+// Cached chord properties derived from intervals
+struct ChordTypeProperties
+{
+    bool hasMajorThird = false;
+    bool hasMinorThird = false;
+    bool hasPerfectFifth = false;
+    bool hasDimFifth = false;
+    bool hasAugFifth = false;
+    SeventhKind seventhKind = SeventhKind::None;
+    bool isSus = false;
+    bool isPower = false;
+    bool isTriadType = false;
+    bool isSeventhType = false;
+    bool seventhIsMajor = false;
+    QualityClass qualityClass = QualityClass::SusOrAug;
+};
+
+inline const std::vector<ChordTypeProperties>& chordTypePropertiesTable()
+{
+    static const std::vector<ChordTypeProperties> table = []
+    {
+        const auto& types = chordTypes();
+        std::vector<ChordTypeProperties> v;
+        v.reserve (types.size());
+        for (const auto& t : types)
+        {
+            ChordTypeProperties p;
+            p.hasMajorThird = hasMajorThird (t.iv);
+            p.hasMinorThird = hasMinorThird (t.iv);
+            p.hasPerfectFifth = hasPerfectFifth (t.iv);
+            p.hasDimFifth = hasDimFifth (t.iv);
+            p.hasAugFifth = hasAugFifth (t.iv);
+            p.seventhKind = seventhKind (t.iv);
+            p.isSus = isSus (t.iv);
+            p.isPower = isPower (t.iv);
+            p.isTriadType = isTriadType (t.iv);
+            p.isSeventhType = isSeventhType (t.iv);
+            p.seventhIsMajor = (p.seventhKind == SeventhKind::Major7);
+            p.qualityClass = qualityClassFromIntervals (t.iv);
+            v.push_back (p);
+        }
+        return v;
+    }();
+    return table;
+}
+
+inline const ChordTypeProperties& chordProperties (int type) noexcept
+{
+    return chordTypePropertiesTable()[(size_t) type];
+}
+
+inline bool hasMajorThird (int type) noexcept { return chordProperties (type).hasMajorThird; }
+inline bool hasMinorThird (int type) noexcept { return chordProperties (type).hasMinorThird; }
+inline bool hasPerfectFifth (int type) noexcept { return chordProperties (type).hasPerfectFifth; }
+inline bool hasDimFifth (int type) noexcept { return chordProperties (type).hasDimFifth; }
+inline bool hasAugFifth (int type) noexcept { return chordProperties (type).hasAugFifth; }
+inline SeventhKind seventhKind (int type) noexcept { return chordProperties (type).seventhKind; }
+inline bool seventhIsMajor (int type) noexcept { return chordProperties (type).seventhIsMajor; }
+inline bool isSus (int type) noexcept { return chordProperties (type).isSus; }
+inline bool isPower (int type) noexcept { return chordProperties (type).isPower; }
+inline bool isTriadType (int type) noexcept { return chordProperties (type).isTriadType; }
+inline bool isSeventhType (int type) noexcept { return chordProperties (type).isSeventhType; }
+
 
 struct Chord
 {
@@ -231,13 +428,13 @@ inline std::string romanNumeral (Chord c, int tonic, int scaleIdx = -1)
     static const char* lower[12] = { "i", "bii", "ii", "biii", "iii", "iv", "#iv", "v", "bvi", "vi", "bvii", "vii" };
     const auto& t = chordTypes()[(size_t) c.type];
     const int d = mod12 (c.root - tonic);
-    bool isMinor = t.minorish;
-    if (c.type == 2 && scaleIdx >= 0) // "5" power chord: infer quality from scale's 3rd degree
+    bool isMinor = hasMinorThird (c.type);
+    if (isPower (c.type) && scaleIdx >= 0) // "5" power chord: infer quality from scale's 3rd degree
     {
         const unsigned sm = scaleMask (scaleIdx);
-        const bool hasMinorThird = (sm & (1u << mod12 (c.root + 3 - tonic))) != 0;
-        const bool hasMajorThird = (sm & (1u << mod12 (c.root + 4 - tonic))) != 0;
-        if (hasMinorThird && ! hasMajorThird)
+        const bool scaleHasMin3 = (sm & (1u << mod12 (c.root + 3 - tonic))) != 0;
+        const bool scaleHasMaj3 = (sm & (1u << mod12 (c.root + 4 - tonic))) != 0;
+        if (scaleHasMin3 && ! scaleHasMaj3)
             isMinor = true;
     }
     const std::string base = std::string (isMinor ? lower[d] : upper[d]);
@@ -247,8 +444,8 @@ inline std::string romanNumeral (Chord c, int tonic, int scaleIdx = -1)
 
     // Figured bass for standard triads and 7ths
     const int bi = mod12 (c.bassInt);
-    const bool isTriad = (c.type == 0 || c.type == 1 || c.type == 3 || c.type == 4);
-    const bool is7th = (c.type >= 7 && c.type <= 12) || c.type == 20;
+    const bool isTriad = isTriadType (c.type);
+    const bool is7th = isSeventhType (c.type);
 
     if (isTriad)
     {
@@ -259,7 +456,7 @@ inline std::string romanNumeral (Chord c, int tonic, int scaleIdx = -1)
     }
     else if (is7th)
     {
-        const std::string sfx = (c.type == 7 || c.type == 12) ? "maj" : "";
+        const std::string sfx = seventhIsMajor (c.type) ? "maj" : "";
         if (bi == 3 || bi == 4)
             return base + sfx + "65";
         if (bi == 6 || bi == 7 || bi == 8)
