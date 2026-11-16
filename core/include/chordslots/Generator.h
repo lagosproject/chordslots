@@ -442,6 +442,39 @@ inline Candidate currentCandidate (const Progression& p, int slot)
              chordTypes()[(size_t) chord.type].complexity };
 }
 
+inline std::vector<int> bassOptions (const Progression& p, int slot, Chord chord)
+{
+    const auto& stored = p.slots[(size_t) slot];
+    if (stored.locked)
+        return { stored.chord.bassInt };
+    if (p.locks.voicing)
+        return { isBassIntValid (chord.type, stored.chord.bassInt) ? stored.chord.bassInt : 0 };
+
+    std::vector<int> options { 0 };
+    if (p.bassMotion >= 0.05f)
+        for (int interval : chordTypes()[(size_t) chord.type].iv)
+        {
+            const int pitchClass = mod12 (interval);
+            if (std::find (options.begin(), options.end(), pitchClass) == options.end())
+                options.push_back (pitchClass);
+        }
+    return options;
+}
+
+inline float bassLeapCost (int first, int second) noexcept
+{
+    const int leap = std::abs (first - second);
+    return (float) leap + (leap > 7 ? 4.0f : 0.0f);
+}
+
+// Convert semitone costs from the bass-only DP into the harmonic cost scale.
+constexpr float kBassCostScale = 0.03f;
+
+inline float inversionCost (const Progression& p, int slot, int bassInt)
+{
+    return bassInt == 0 ? 0.0f : kBassCostScale * (1.0f - p.bassMotion) * (slot == 0 ? 9.0f : 7.0f);
+}
+
 struct ChordVariable
 {
     std::vector<Chord> states;
@@ -455,10 +488,20 @@ inline ChordVariable makeChordVariable (const Progression& p, int first, int sec
     std::vector<std::pair<float, Chord>> options;
     for (const auto& candidate : pool)
     {
-        float cost = slotUnaryCost (p, first, candidate);
-        if (second >= 0)
-            cost += slotUnaryCost (p, second, candidate);
-        options.emplace_back (cost, candidate.chord);
+        const auto firstOptions = bassOptions (p, first, candidate.chord);
+        const auto secondOptions = second < 0 ? std::vector<int> {} : bassOptions (p, second, candidate.chord);
+        for (int bassInt : firstOptions)
+        {
+            if (second >= 0 && std::find (secondOptions.begin(), secondOptions.end(), bassInt) == secondOptions.end())
+                continue;
+
+            Chord chord = candidate.chord;
+            chord.bassInt = bassInt;
+            float cost = slotUnaryCost (p, first, candidate) + inversionCost (p, first, bassInt);
+            if (second >= 0)
+                cost += slotUnaryCost (p, second, candidate) + inversionCost (p, second, bassInt);
+            options.emplace_back (cost, chord);
+        }
     }
 
     constexpr size_t beamSize = 64;
@@ -469,7 +512,9 @@ inline ChordVariable makeChordVariable (const Progression& p, int first, int sec
             return a.first < b.first;
         if (a.second.root != b.second.root)
             return a.second.root < b.second.root;
-        return a.second.type < b.second.type;
+        if (a.second.type != b.second.type)
+            return a.second.type < b.second.type;
+        return a.second.bassInt < b.second.bassInt;
     });
     for (size_t i = 0; i < n; ++i)
     {
@@ -582,9 +627,13 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
                     common.push_back (candidate);
             if (! common.empty())
             {
-                nodeOf[(size_t) partner] = node;
-                variables.push_back (detail::makeChordVariable (p, slot, partner, common));
-                continue;
+                auto combined = detail::makeChordVariable (p, slot, partner, common);
+                if (! combined.states.empty())
+                {
+                    nodeOf[(size_t) partner] = node;
+                    variables.push_back (std::move (combined));
+                    continue;
+                }
             }
         }
         variables.push_back (detail::makeChordVariable (p, slot, -1, pools[(size_t) slot]));
@@ -600,17 +649,25 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
     std::vector<float> transitionCache (chordCount * chordCount, -1.0f);
     const auto transition = [&] (Chord a, Chord b)
     {
-        if (a.bassInt != 0 || b.bassInt != 0)
-            return transitionCost (a, b, p.tonic, p.adventure, p.scale, style);
         const size_t src = (size_t) a.root * numTypes + (size_t) a.type;
         const size_t dst = (size_t) b.root * numTypes + (size_t) b.type;
         float& cost = transitionCache[src * chordCount + dst];
         if (cost < 0.0f)
-            cost = transitionCost (a, b, p.tonic, p.adventure, p.scale, style);
+        {
+            const Chord harmonicA { a.root, a.type, 0 }, harmonicB { b.root, b.type, 0 };
+            cost = transitionCost (harmonicA, harmonicB, p.tonic, p.adventure, p.scale, style);
+        }
         return cost;
     };
     if (n > 1)
     {
+        const auto bassCost = [&] (Chord a, Chord b)
+        {
+            if (p.bassMotion < 0.05f)
+                return 0.0f;
+            return detail::kBassCostScale * detail::bassLeapCost (pickBassRegister (a.bassPc(), 40),
+                                                                 pickBassRegister (b.bassPc(), 40));
+        };
         for (int slot = 0; slot < n; ++slot)
         {
             const int from = nodeOf[(size_t) slot], to = nodeOf[(size_t) ((slot + 1) % n)];
@@ -620,7 +677,7 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
             costs.reserve (first.size() * second.size());
             for (Chord a : first)
                 for (Chord b : second)
-                    costs.push_back (transition (a, b));
+                    costs.push_back (transition (a, b) + bassCost (a, b));
             ring.addEdge (from, to, detail::boltzmannWeights (costs, temperature));
         }
     }
@@ -735,28 +792,7 @@ inline void generateBassLine (Progression& p)
 
     std::vector<std::vector<int>> slotOpts ((size_t) n);
     for (int i = 0; i < n; ++i)
-    {
-        const Slot& s = p.slots[(size_t) i];
-        if (s.locked || p.locks.voicing)
-        {
-            slotOpts[(size_t) i] = { s.chord.bassInt };
-        }
-        else if (p.bassMotion < 0.05f)
-        {
-            slotOpts[(size_t) i] = { 0 };
-        }
-        else
-        {
-            std::vector<int> opts = { 0 };
-            for (int iv : chordTypes()[(size_t) s.chord.type].iv)
-            {
-                const int ivNorm = mod12 (iv);
-                if (ivNorm != 0 && std::find (opts.begin(), opts.end(), ivNorm) == opts.end())
-                    opts.push_back (ivNorm);
-            }
-            slotOpts[(size_t) i] = opts;
-        }
-    }
+        slotOpts[(size_t) i] = detail::bassOptions (p, i, p.slots[(size_t) i].chord);
 
     if (n == 1)
     {
@@ -813,8 +849,7 @@ inline void generateBassLine (Progression& p)
                         continue;
 
                     const auto& cPrev = cands[(size_t) (i - 1)][prev];
-                    const int leap = std::abs (cCur.pitch - cPrev.pitch);
-                    const float leapCost = (float) leap + (leap > 7 ? 4.0f : 0.0f);
+                    const float leapCost = detail::bassLeapCost (cCur.pitch, cPrev.pitch);
                     const float total = dp[(size_t) (i - 1)][prev] + leapCost + invPen;
 
                     if (total < dp[(size_t) i][cur])
@@ -833,8 +868,7 @@ inline void generateBassLine (Progression& p)
                 continue;
 
             const auto& cEnd = cands[(size_t) (n - 1)][endChoice];
-            const int wrapLeap = std::abs (c0.pitch - cEnd.pitch);
-            const float wrapCost = (float) wrapLeap + (wrapLeap > 7 ? 4.0f : 0.0f);
+            const float wrapCost = detail::bassLeapCost (c0.pitch, cEnd.pitch);
             const float loopTotal = dp[(size_t) (n - 1)][endChoice] + wrapCost;
 
             if (loopTotal < bestTotalCost)
@@ -1076,14 +1110,6 @@ inline void roll (Progression& p, Rng& rng)
         before[i] = p.slots[(size_t) i].chord;
 
     generateChords (p, rng);
-
-    if (! p.locks.voicing)
-        generateBassLine (p);
-    else
-    {
-        for (int i = 0; i < p.numSlots; ++i)
-            sanitizeBass (p.slots[(size_t) i].chord);
-    }
 
     for (int i = 0; i < p.numSlots; ++i)
         changed[i] = before[i] != p.slots[(size_t) i].chord;
@@ -1358,13 +1384,7 @@ inline void rerollSlots (Progression& p, unsigned mask, Rng& rng, float temperat
     {
         p.slots[(size_t) i].locked = wasLocked[i];
         if (before[i] != p.slots[(size_t) i].chord)
-        {
-            if (! p.locks.voicing && ! wasLocked[i])
-                p.slots[(size_t) i].chord.bassInt = 0;
-            else
-                sanitizeBass (p.slots[(size_t) i].chord);
             setChord (p, i, p.slots[(size_t) i].chord, rng);
-        }
     }
     updateActuals (p);
 }

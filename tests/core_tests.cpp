@@ -534,7 +534,7 @@ static void testBassModel()
     const float costSlash = transitionCost (cTriad, cSlashE, 0, 0.3f);
     CHECK (costIdentical > costSlash);
 
-    // DP bass pass: at bassMotion = 0, all slots remain root position
+    // Joint roll at bassMotion = 0 uses root position.
     Progression p;
     layoutEven (p);
     p.bassMotion = 0.0f;
@@ -542,15 +542,45 @@ static void testBassModel()
     for (int i = 0; i < p.numSlots; ++i)
         CHECK (p.slots[(size_t) i].chord.bassInt == 0);
 
-    // At bassMotion = 0.8, bass pass explores inversions
-    p.bassMotion = 0.8f;
-    roll (p, rng);
-    bool foundInversion = false;
-    for (int i = 0; i < p.numSlots; ++i)
-        if (p.slots[(size_t) i].chord.isSlash())
-            foundInversion = true;
-    // With high bassMotion across 4 slots, inversions are discovered
-    CHECK (foundInversion || p.numSlots > 0);
+    // Fix the chord identities while leaving the inversion layer open.
+    Progression smooth;
+    smooth.locks.roots = smooth.locks.colors = true;
+    smooth.bassMotion = 1.0f;
+    smooth.slots[0].chord = ch (0, "");
+    smooth.slots[1].chord = ch (7, "");
+    smooth.slots[2].chord = ch (9, "m");
+    smooth.slots[3].chord = ch (5, "");
+    auto reference = smooth;
+    generateBassLine (reference);
+    const auto circularLeap = [] (const Progression& loop)
+    {
+        int total = 0;
+        for (int i = 0; i < loop.numSlots; ++i)
+        {
+            const auto a = loop.slots[(size_t) i].chord;
+            const auto b = loop.slots[(size_t) ((i + 1) % loop.numSlots)].chord;
+            total += std::abs (pickBassRegister (a.bassPc(), 40) - pickBassRegister (b.bassPc(), 40));
+        }
+        return total;
+    };
+
+    int sum = 0;
+    constexpr int samples = 40;
+    for (int seed = 0; seed < samples; ++seed)
+    {
+        Progression sampled = smooth;
+        Rng seeded ((unsigned) seed);
+        generateChords (sampled, seeded, 0.004f);
+        for (int i = 0; i < sampled.numSlots; ++i)
+        {
+            const Chord chord = sampled.slots[(size_t) i].chord;
+            CHECK (chord.root == smooth.slots[(size_t) i].chord.root);
+            CHECK (chord.type == smooth.slots[(size_t) i].chord.type);
+            CHECK (isBassIntValid (chord.type, chord.bassInt));
+        }
+        sum += circularLeap (sampled);
+    }
+    CHECK (sum <= samples * circularLeap (reference));
 }
 
 static void testMeterAndRhythm()
