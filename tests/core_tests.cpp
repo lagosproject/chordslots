@@ -1356,14 +1356,19 @@ static void testVoicingStylesAndEssentialTones()
                         }
                     }
 
-                    // 7. No semitone clusters in upper structure for every style except Close,
-                    // unless unavoidable
+                    // 7. No semitone clusters in upper structure for every style except Close.
+                    // For Rootless, Stacked, and Piano, the count of upper semitones must be strictly 0.
                     if (style != VoicingStyle::Close)
                     {
                         bool hasSemi = false;
                         for (int i = 0; i + 1 < upperCount; ++i)
                             if (upperNotes[i + 1] - upperNotes[i] == 1) { hasSemi = true; break; }
-                        if (hasSemi)
+
+                        if (style == VoicingStyle::Rootless || style == VoicingStyle::Stacked || style == VoicingStyle::Piano)
+                        {
+                            CHECK (! hasSemi);
+                        }
+                        else if (hasSemi)
                         {
                             auto uppers = generateUpperCandidates (c, style);
                             bool cleanExisted = false;
@@ -1430,6 +1435,42 @@ static void testVoicingStylesAndEssentialTones()
 
         std::vector<int> expectedUpper = { 55, 60, 64, 71 };
         CHECK (upper == expectedUpper);
+    }
+
+    // Assert textbook shapes (pitch classes and order, not exact octaves) for Cm9 rootless and C7#9 rootless
+    {
+        int cm9Type = -1, c7s9Type = -1;
+        for (int t = 0; t < numChordTypes(); ++t)
+        {
+            if (std::strcmp (chordTypes()[(size_t) t].suffix, "m9") == 0) cm9Type = t;
+            if (std::strcmp (chordTypes()[(size_t) t].suffix, "7#9") == 0) c7s9Type = t;
+        }
+        CHECK (cm9Type >= 0);
+        CHECK (c7s9Type >= 0);
+
+        // Cm9 rootless: Eb G Bb D (b3 - 5 - b7 - 9), pitch classes { 3, 7, 10, 2 }
+        {
+            Chord cm9 { 0, cm9Type, 0 };
+            Voicing v = makeVoicing (cm9, nullptr, 56.0f, 0.0f, rng, 0.0f, 0.0f, VoicingStyle::Rootless);
+            std::vector<int> pcs;
+            for (int i = 0; i < v.n; ++i)
+                if (v.notes[(size_t) i] >= kUpperFloor)
+                    pcs.push_back (mod12 (v.notes[(size_t) i]));
+            std::vector<int> expectedPcs = { 3, 7, 10, 2 }; // Eb, G, Bb, D
+            CHECK (pcs == expectedPcs);
+        }
+
+        // C7#9 rootless: E Bb D# (3 - b7 - #9), pitch classes { 4, 10, 3 }
+        {
+            Chord c7s9 { 0, c7s9Type, 0 };
+            Voicing v = makeVoicing (c7s9, nullptr, 56.0f, 0.0f, rng, 0.0f, 0.0f, VoicingStyle::Rootless);
+            std::vector<int> pcs;
+            for (int i = 0; i < v.n; ++i)
+                if (v.notes[(size_t) i] >= kUpperFloor)
+                    pcs.push_back (mod12 (v.notes[(size_t) i]));
+            std::vector<int> expectedPcs = { 4, 10, 3 }; // E, Bb, D#
+            CHECK (pcs == expectedPcs);
+        }
     }
 }
 

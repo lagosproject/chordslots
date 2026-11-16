@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <random>
 #include <vector>
 
@@ -434,13 +435,29 @@ inline std::vector<int> getPitchClassesAfterOmissions (Chord c, bool allowRoot =
     const auto a = analyzeChordTones (c);
     std::vector<int> pcs = a.allPcs;
 
+    if (! allowRoot)
+    {
+        auto it = std::find (pcs.begin(), pcs.end(), a.root);
+        if (it != pcs.end())
+            pcs.erase (it);
+
+        // For altered dominant (7#9, 7b9), drop the perfect 5th if present
+        const auto& t = chordTypes()[(size_t) c.type];
+        if ((std::strcmp (t.suffix, "7#9") == 0 || std::strcmp (t.suffix, "7b9") == 0) && a.isP5 && a.fifth >= 0)
+        {
+            auto fit = std::find (pcs.begin(), pcs.end(), a.fifth);
+            if (fit != pcs.end())
+                pcs.erase (fit);
+        }
+    }
+
     if (pcs.size() > 4 && a.isP5 && a.fifth >= 0)
     {
         auto it = std::find (pcs.begin(), pcs.end(), a.fifth);
         if (it != pcs.end())
             pcs.erase (it);
     }
-    if (pcs.size() > 4)
+    if (pcs.size() > 4 && allowRoot)
     {
         auto it = std::find (pcs.begin(), pcs.end(), a.root);
         if (it != pcs.end())
@@ -450,12 +467,6 @@ inline std::vector<int> getPitchClassesAfterOmissions (Chord c, bool allowRoot =
     {
         int nat11 = mod12 (c.root + 5);
         auto it = std::find (pcs.begin(), pcs.end(), nat11);
-        if (it != pcs.end())
-            pcs.erase (it);
-    }
-    if (! allowRoot)
-    {
-        auto it = std::find (pcs.begin(), pcs.end(), a.root);
         if (it != pcs.end())
             pcs.erase (it);
     }
@@ -489,6 +500,107 @@ inline bool hasAdjacentSemitoneCluster (const std::vector<int>& upper) noexcept
             return true;
     }
     return false;
+}
+
+//==============================================================================
+// Candidate Voice Displacement Helper
+inline std::vector<std::vector<int>> expandCandidateDisplacements (
+    const std::vector<std::vector<int>>& baseCands,
+    VoicingStyle style,
+    int minPitch = kUpperFloor,
+    int maxPitch = 96,
+    size_t maxCands = 64)
+{
+    std::vector<std::vector<int>> result;
+    result.reserve (maxCands);
+
+    auto addCandidate = [&] (const std::vector<int>& notes) -> bool
+    {
+        if (notes.empty()) return false;
+        if (notes.front() < minPitch || notes.back() > maxPitch) return false;
+        for (size_t k = 0; k + 1 < notes.size(); ++k)
+            if (notes[k] == notes[k + 1]) return false;
+        if (hasAdjacentGapViolation (notes, style)) return false;
+        if (style != VoicingStyle::Close && violatesLowIntervalLimit (notes)) return false;
+
+        for (const auto& existing : result)
+            if (existing == notes) return false;
+
+        result.push_back (notes);
+        return result.size() >= maxCands;
+    };
+
+    // 1. Base candidates without semitones first
+    for (const auto& base : baseCands)
+    {
+        if (! hasAdjacentSemitoneCluster (base))
+            if (addCandidate (base)) return result;
+    }
+
+    // 2. Single-voice displacements without semitones
+    for (const auto& base : baseCands)
+    {
+        const int m = (int) base.size();
+        for (int i = 0; i < m; ++i)
+        {
+            for (int delta : { -12, 12 })
+            {
+                std::vector<int> cand = base;
+                cand[(size_t) i] += delta;
+                std::sort (cand.begin(), cand.end());
+                if (! hasAdjacentSemitoneCluster (cand))
+                    if (addCandidate (cand)) return result;
+            }
+        }
+    }
+
+    // 3. Pair-of-voices displacements without semitones
+    for (const auto& base : baseCands)
+    {
+        const int m = (int) base.size();
+        for (int i = 0; i < m; ++i)
+        {
+            for (int j = i + 1; j < m; ++j)
+            {
+                for (int d1 : { -12, 12 })
+                {
+                    for (int d2 : { -12, 12 })
+                    {
+                        std::vector<int> cand = base;
+                        cand[(size_t) i] += d1;
+                        cand[(size_t) j] += d2;
+                        std::sort (cand.begin(), cand.end());
+                        if (! hasAdjacentSemitoneCluster (cand))
+                            if (addCandidate (cand)) return result;
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Remaining base candidates
+    for (const auto& base : baseCands)
+    {
+        if (addCandidate (base)) return result;
+    }
+
+    // 5. Remaining single-voice displacements
+    for (const auto& base : baseCands)
+    {
+        const int m = (int) base.size();
+        for (int i = 0; i < m; ++i)
+        {
+            for (int delta : { -12, 12 })
+            {
+                std::vector<int> cand = base;
+                cand[(size_t) i] += delta;
+                std::sort (cand.begin(), cand.end());
+                if (addCandidate (cand)) return result;
+            }
+        }
+    }
+
+    return result;
 }
 
 //==============================================================================
@@ -540,10 +652,6 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
             auto p7s = findInOctave (a.seventhOrSixth, 48, 60);
             auto p3s = findInOctave (a.thirdOrSus, 48, 60);
             for (int n7 : p7s)
-                lhShells.push_back ({ n7 });
-            for (int n3 : p3s)
-                lhShells.push_back ({ n3 });
-            for (int n7 : p7s)
             {
                 for (int n3 : p3s)
                 {
@@ -560,15 +668,15 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                             lhShells.push_back ({ n7, n10 });
                 }
             }
+            for (int n7 : p7s)
+                lhShells.push_back ({ n7 });
+            for (int n3 : p3s)
+                lhShells.push_back ({ n3 });
         }
         else
         {
             auto p3s = findInOctave (a.thirdOrSus, 48, 60);
             auto p5s = findInOctave (a.fifth, 48, 60);
-            for (int n3 : p3s)
-                lhShells.push_back ({ n3 });
-            for (int n5 : p5s)
-                lhShells.push_back ({ n5 });
             for (int n3 : p3s)
                 for (int n5 : p5s)
                 {
@@ -577,6 +685,10 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                     if (hi - lo >= 3 && ! breaksLowIntervalLimit (lo, hi - lo))
                         lhShells.push_back ({ lo, hi });
                 }
+            for (int n3 : p3s)
+                lhShells.push_back ({ n3 });
+            for (int n5 : p5s)
+                lhShells.push_back ({ n5 });
             if (lhShells.empty())
             {
                 for (int pc : a.allPcs)
@@ -587,6 +699,8 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
         }
         if (lhShells.empty())
             lhShells.push_back ({ 48 + mod12 (a.fifth >= 0 ? a.fifth : a.thirdOrSus) });
+
+        const bool isMaj7Sharp11 = (std::strcmp (chordTypes()[(size_t) c.type].suffix, "maj7#11") == 0);
 
         for (const auto& lh : lhShells)
         {
@@ -602,85 +716,143 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
 
             // Piano must not double 3rd or 7th across hands.
             // RH also never contains the root.
-            std::vector<int> rhPcs;
-            for (int pc : a.allPcs)
+            auto buildRhPcs = [&] (bool dropP5) -> std::vector<int>
             {
-                if (pc == a.root)
-                    continue;
-                if (lhHas3 && pc == a.thirdOrSus)
-                    continue;
-                if (lhHas7 && pc == a.seventhOrSixth)
-                    continue;
-                rhPcs.push_back (pc);
-            }
-
-            if (rhPcs.empty())
-            {
-                if (a.fifth >= 0 && mod12 (a.fifth) != a.root)
-                    rhPcs.push_back (a.fifth);
-                else
-                    continue;
-            }
-
-            std::sort (rhPcs.begin(), rhPcs.end());
-            const int K = (int) rhPcs.size();
-
-            std::vector<std::vector<int>> rhCands;
-            for (int inv = 0; inv < K; ++inv)
-            {
-                for (int base : { 60, 72 })
+                std::vector<int> rhPcs;
+                for (int pc : a.allPcs)
                 {
-                    for (int targetSize : { 3, 4 })
+                    if (pc == a.root)
+                        continue;
+                    if (lhHas3 && pc == a.thirdOrSus)
+                        continue;
+                    if (lhHas7 && pc == a.seventhOrSixth)
+                        continue;
+                    if (dropP5 && a.isP5 && pc == a.fifth)
+                        continue;
+                    rhPcs.push_back (pc);
+                }
+                return rhPcs;
+            };
+
+            for (bool dropP5 : (isMaj7Sharp11 ? std::vector<bool>{ false, true } : std::vector<bool>{ false }))
+            {
+                std::vector<int> rhPcs = buildRhPcs (dropP5);
+                if (rhPcs.empty())
+                {
+                    if (a.fifth >= 0 && mod12 (a.fifth) != a.root && ! dropP5)
+                        rhPcs.push_back (a.fifth);
+                    else
+                        continue;
+                }
+
+                std::sort (rhPcs.begin(), rhPcs.end());
+                const int K = (int) rhPcs.size();
+
+                std::vector<std::vector<int>> baseRhCands;
+                for (int inv = 0; inv < K; ++inv)
+                {
+                    for (int base : { 60, 72 })
                     {
-                        std::vector<int> rh;
-                        int note = base + rhPcs[(size_t) inv];
-                        rh.push_back (note);
-                        for (int j = 1; j < targetSize; ++j)
+                        for (int targetSize : { 3, 4 })
                         {
-                            int step = mod12 (rhPcs[(size_t) ((inv + j) % K)] - rhPcs[(size_t) ((inv + j - 1) % K)]);
-                            if (step == 0) step = 12;
-                            note += step;
+                            std::vector<int> rh;
+                            int note = base + rhPcs[(size_t) inv];
                             rh.push_back (note);
-                        }
-                        if (rh.front() >= 60 && rh.back() <= 96)
-                        {
-                            bool ok = true;
-                            for (size_t g = 0; g + 1 < rh.size(); ++g)
-                                if (rh[g + 1] - rh[g] > 12) { ok = false; break; }
-                            if (ok)
-                                rhCands.push_back (rh);
+                            for (int j = 1; j < targetSize; ++j)
+                            {
+                                int step = mod12 (rhPcs[(size_t) ((inv + j) % K)] - rhPcs[(size_t) ((inv + j - 1) % K)]);
+                                if (step == 0) step = 12;
+                                note += step;
+                                rh.push_back (note);
+                            }
+                            if (rh.front() >= 60 && rh.back() <= 96)
+                            {
+                                bool ok = true;
+                                for (size_t g = 0; g + 1 < rh.size(); ++g)
+                                    if (rh[g + 1] - rh[g] > 12) { ok = false; break; }
+                                if (ok)
+                                    baseRhCands.push_back (rh);
+                            }
                         }
                     }
                 }
-            }
 
-            for (const auto& rh : rhCands)
-            {
-                std::vector<int> u = lh;
-                u.insert (u.end(), rh.begin(), rh.end());
-                std::sort (u.begin(), u.end());
-                u.erase (std::unique (u.begin(), u.end()), u.end());
-
-                if (u.front() < 48 || u.back() > 96 || u.size() > 6)
-                    continue;
-
-                // Gap rule: no two adjacent upper notes > 12 apart
-                if (hasAdjacentGapViolation (u, style))
-                    continue;
-
-                // Ensure all essential tones are present in u
-                bool hasAllEssentials = true;
-                for (int epc : a.essentialPcs)
+                // Displace single voices of RH by +-12
+                std::vector<std::vector<int>> rhCands = baseRhCands;
+                for (const auto& baseRh : baseRhCands)
                 {
-                    bool found = false;
-                    for (int note : u)
-                        if (mod12 (note) == epc) { found = true; break; }
-                    if (! found) { hasAllEssentials = false; break; }
+                    for (size_t i = 0; i < baseRh.size(); ++i)
+                    {
+                        for (int delta : { -12, 12 })
+                        {
+                            std::vector<int> disp = baseRh;
+                            disp[i] += delta;
+                            std::sort (disp.begin(), disp.end());
+                            if (disp.front() >= 60 && disp.back() <= 96)
+                            {
+                                bool ok = true;
+                                for (size_t g = 0; g + 1 < disp.size(); ++g)
+                                    if (disp[g] == disp[g + 1] || disp[g + 1] - disp[g] > 12) { ok = false; break; }
+                                if (ok && std::find (rhCands.begin(), rhCands.end(), disp) == rhCands.end())
+                                    rhCands.push_back (disp);
+                            }
+                        }
+                    }
                 }
-                if (hasAllEssentials)
-                    cands.push_back (u);
+
+                for (const auto& rh : rhCands)
+                {
+                    std::vector<int> u = lh;
+                    u.insert (u.end(), rh.begin(), rh.end());
+                    std::sort (u.begin(), u.end());
+                    u.erase (std::unique (u.begin(), u.end()), u.end());
+
+                    if (u.front() < 48 || u.back() > 96 || u.size() < 4 || u.size() > 6)
+                        continue;
+
+                    // Gap rule: no two adjacent upper notes > 12 apart
+                    if (hasAdjacentGapViolation (u, style))
+                        continue;
+
+                    // Ensure all essential tones are present in u
+                    bool hasAllEssentials = true;
+                    for (int epc : a.essentialPcs)
+                    {
+                        bool found = false;
+                        for (int note : u)
+                            if (mod12 (note) == epc) { found = true; break; }
+                        if (! found) { hasAllEssentials = false; break; }
+                    }
+                    if (hasAllEssentials)
+                        cands.push_back (u);
+                }
             }
         }
+
+        std::vector<std::vector<int>> deduped;
+        for (const auto& u : cands)
+        {
+            if (! hasAdjacentSemitoneCluster (u))
+            {
+                if (std::find (deduped.begin(), deduped.end(), u) == deduped.end())
+                {
+                    deduped.push_back (u);
+                    if (deduped.size() >= 64) break;
+                }
+            }
+        }
+        if (deduped.empty())
+        {
+            for (const auto& u : cands)
+            {
+                if (std::find (deduped.begin(), deduped.end(), u) == deduped.end())
+                {
+                    deduped.push_back (u);
+                    if (deduped.size() >= 64) break;
+                }
+            }
+        }
+        return deduped;
     }
     else if (style == VoicingStyle::Spread)
     {
@@ -806,6 +978,8 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
             if (pcs.empty()) pcs.push_back (mod12 (a.root + 7));
         }
 
+        std::vector<std::vector<int>> baseCands;
+
         // Form A: lowest note is 3rd/sus in 48-62
         int startA = a.thirdOrSus >= 0 ? a.thirdOrSus : pcs[0];
         auto itA = std::find (pcs.begin(), pcs.end(), startA);
@@ -819,7 +993,7 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                 std::vector<int> u = { n0 };
                 int curr = n0;
                 bool gapOk = true;
-                for (size_t step = 1; step < pcs.size() || u.size() < 4; ++step)
+                for (size_t step = 1; step < pcs.size(); ++step)
                 {
                     int targetPc = pcs[(idxA + step) % pcs.size()];
                     int n = curr + mod12 (targetPc - curr);
@@ -829,7 +1003,7 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                     curr = n;
                 }
                 if (gapOk && u.back() <= 96 && ! hasAdjacentGapViolation (u, style))
-                    cands.push_back (u);
+                    baseCands.push_back (u);
             }
         }
 
@@ -846,7 +1020,7 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                 std::vector<int> u = { n0 };
                 int curr = n0;
                 bool gapOk = true;
-                for (size_t step = 1; step < pcs.size() || u.size() < 4; ++step)
+                for (size_t step = 1; step < pcs.size(); ++step)
                 {
                     int targetPc = pcs[(idxB + step) % pcs.size()];
                     int n = curr + mod12 (targetPc - curr);
@@ -856,15 +1030,19 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                     curr = n;
                 }
                 if (gapOk && u.back() <= 96 && ! hasAdjacentGapViolation (u, style))
-                    cands.push_back (u);
+                    baseCands.push_back (u);
             }
         }
+
+        return expandCandidateDisplacements (baseCands, style, 48, 96, 64);
     }
     else if (style == VoicingStyle::Stacked)
     {
         auto pcs = getPitchClassesAfterOmissions (c, true);
         std::sort (pcs.begin(), pcs.end());
         const int k = std::min ((int) pcs.size(), 4);
+
+        std::vector<std::vector<int>> baseCands;
 
         for (int inv = 0; inv < k; ++inv)
         {
@@ -878,15 +1056,23 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                     note += mod12 (pcs[(size_t) ((inv + j) % k)] - pcs[(size_t) ((inv + j - 1) % k)]);
                     notes.push_back (note);
                 }
+                if (notes.front() >= 48 && notes.back() <= 96)
+                {
+                    if (! hasAdjacentGapViolation (notes, style))
+                        baseCands.push_back (notes);
+                }
                 int topDoubled = notes.back() + 12;
                 if (notes.front() >= 48 && topDoubled <= 96)
                 {
-                    notes.push_back (topDoubled);
-                    if (! hasAdjacentGapViolation (notes, style))
-                        cands.push_back (notes);
+                    std::vector<int> withTop = notes;
+                    withTop.push_back (topDoubled);
+                    if (! hasAdjacentGapViolation (withTop, style))
+                        baseCands.push_back (withTop);
                 }
             }
         }
+
+        return expandCandidateDisplacements (baseCands, style, 48, 96, 64);
     }
 
     return cands;
