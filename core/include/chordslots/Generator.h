@@ -62,10 +62,6 @@ inline Meter getMeter (int num = 4, int den = 4) noexcept
     return m;
 }
 
-using Rng = std::mt19937;
-
-inline float rand01 (Rng& rng) { return std::uniform_real_distribution<float> (0.0f, 1.0f) (rng); }
-
 //==============================================================================
 struct Slot
 {
@@ -105,6 +101,7 @@ struct Progression
     bool phraseRepeat = false; // generates 4-slot phrase AA' with cadence variation
     int mood = -1;            // index into moods() the targets came from, -1 = custom
     int style = -1;           // -1 = Auto; otherwise a CorpusStyle value including Free
+    int voicingStyle = (int) VoicingStyle::Close;
     Locks locks;
     std::array<Slot, kMaxSlots> slots {};
 
@@ -544,201 +541,6 @@ inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxC
 }
 
 //==============================================================================
-// Voicing
-
-/** Primary bass note of a voicing (highest note below kUpperFloor, or -1 if none). */
-inline int primaryBassNote (const Voicing& v, int upperFloor = kUpperFloor) noexcept
-{
-    int best = -1;
-    for (int i = 0; i < v.n; ++i)
-        if (v.notes[(size_t) i] < upperFloor)
-            if (best < 0 || v.notes[(size_t) i] > best)
-                best = v.notes[(size_t) i];
-    return best;
-}
-
-/** Finds a bass octave in ~28..47 closest to refBassNote (or ~40 if none),
-    guaranteeing it stays below upperFloorCeiling and below kUpperFloor. */
-inline int pickBassRegister (int bassPc, int refBassNote = -1, int upperFloorCeiling = kUpperFloor) noexcept
-{
-    constexpr int kMinBass = 28; // E1
-    constexpr int kMaxBass = 47; // B2 (< kUpperFloor = 48)
-    const int target = refBassNote >= 0 ? refBassNote : 40; // Default ~E2
-    const int ceiling = std::min (upperFloorCeiling - 2, kUpperFloor - 1);
-
-    int bestNote = -1;
-    int bestDist = 1000;
-
-    for (int oct = 1; oct <= 4; ++oct)
-    {
-        const int note = oct * 12 + bassPc;
-        if (note >= kMinBass && note <= kMaxBass && note <= ceiling)
-        {
-            const int d = std::abs (note - target);
-            if (d < bestDist)
-            {
-                bestDist = d;
-                bestNote = note;
-            }
-        }
-    }
-
-    if (bestNote < 0)
-    {
-        for (int oct = 1; oct <= 4; ++oct)
-        {
-            const int note = oct * 12 + bassPc;
-            if (note >= 24 && note <= ceiling)
-            {
-                const int d = std::abs (note - target);
-                if (d < bestDist)
-                {
-                    bestDist = d;
-                    bestNote = note;
-                }
-            }
-        }
-    }
-
-    return bestNote >= 0 ? bestNote : (36 + bassPc <= kUpperFloor - 1 ? 36 + bassPc : 24 + bassPc);
-}
-
-/** Re-voices ONLY the bass note(s) of an existing voicing, leaving upper structure untouched. */
-inline void revoiceBass (Voicing& v, Chord c, int refBassNote = -1, float energy = 0.5f, int upperFloor = kUpperFloor)
-{
-    std::vector<int> upper;
-    for (int i = 0; i < v.n; ++i)
-        if (v.notes[(size_t) i] >= upperFloor)
-            upper.push_back (v.notes[(size_t) i]);
-
-    if (upper.empty())
-        return;
-
-    const int bass = pickBassRegister (c.bassPc(), refBassNote, upper.front());
-    std::vector<int> all = upper;
-    all.push_back (bass);
-    if (energy > 0.85f && bass - 12 >= 24)
-        all.push_back (bass - 12);
-
-    std::sort (all.begin(), all.end());
-    all.erase (std::unique (all.begin(), all.end()), all.end());
-
-    v.n = std::min ((int) all.size(), kMaxNotes);
-    for (int i = 0; i < v.n; ++i)
-        v.notes[(size_t) i] = std::clamp (all[(size_t) i], 0, 127);
-    v.bassCount = v.computeBassCount (upperFloor);
-}
-
-/** Builds a playable voicing.
-    @param ref        voicing to stay close to (previous chord), or nullptr
-    @param centre     desired mean pitch of the upper structure (MIDI)
-    @param energy     0..1: adds bass and doublings, raises velocity
-    @param refWeight  how strongly to stick to ref
-    @param jitter     amount of randomness in the choice (0 = deterministic) */
-inline Voicing makeVoicing (Chord c, const Voicing* ref, float centre, float energy,
-                            Rng& rng, float refWeight = 1.0f, float jitter = 0.7f)
-{
-    std::vector<int> pcs;
-    for (int iv : chordTypes()[(size_t) c.type].iv)
-    {
-        const int pc = mod12 (c.root + iv);
-        if (std::find (pcs.begin(), pcs.end(), pc) == pcs.end())
-            pcs.push_back (pc);
-    }
-    std::sort (pcs.begin(), pcs.end());
-    const int k = (int) pcs.size();
-
-    std::vector<int> best;
-    float bestCost = 1.0e9f;
-
-    for (int inv = 0; inv < k; ++inv)
-        for (int base : { 36, 48, 60, 72 })
-        {
-            std::vector<int> notes;
-            int note = base + pcs[(size_t) inv];
-            notes.push_back (note);
-            for (int j = 1; j < k; ++j)
-            {
-                note += mod12 (pcs[(size_t) ((inv + j) % k)] - pcs[(size_t) ((inv + j - 1) % k)]);
-                notes.push_back (note);
-            }
-            if (notes.front() < kUpperFloor || notes.back() > 96)
-                continue;
-
-            float mean = 0.0f;
-            for (int x : notes)
-                mean += (float) x;
-            mean /= (float) k;
-
-            float cost = 0.5f * std::abs (mean - centre);
-            if (ref != nullptr && ref->n > 0)
-                cost += refWeight * voiceLeadingDistance (*ref, notes);
-            cost += jitter * rand01 (rng);
-
-            if (cost < bestCost)
-            {
-                bestCost = cost;
-                best = notes;
-            }
-        }
-
-    if (best.empty()) // cannot happen with the ranges above, but never return silence
-        for (int j = 0; j < k; ++j)
-            best.push_back (60 + mod12 (pcs[(size_t) j] - pcs[0]) + pcs[0] % 12);
-
-    std::vector<int> all = best;
-    const int refBass = ref != nullptr ? primaryBassNote (*ref) : -1;
-    const int bass = pickBassRegister (c.bassPc(), refBass, best.front());
-    all.push_back (bass);
-
-    int subBass = -1;
-    if (energy > 0.85f && bass - 12 >= 24)
-        subBass = bass - 12;
-
-    int top = -1;
-    if (energy > 0.6f)
-    {
-        int candTop = 60 + c.root;
-        while (candTop <= best.back())
-            candTop += 12;
-        if (candTop <= 100)
-            top = candTop;
-    }
-
-    if (top >= 0)
-        all.push_back (top);
-    if (subBass >= 0)
-        all.push_back (subBass);
-
-    std::sort (all.begin(), all.end());
-    all.erase (std::unique (all.begin(), all.end()), all.end());
-
-    // If total notes exceed kMaxNotes, drop doublings before any chord tone:
-    // Drop sub-octave bass first, then top doubling.
-    if ((int) all.size() > kMaxNotes && subBass >= 0)
-    {
-        auto it = std::find (all.begin(), all.end(), subBass);
-        if (it != all.end())
-            all.erase (it);
-    }
-    if ((int) all.size() > kMaxNotes && top >= 0)
-    {
-        auto it = std::find (all.begin(), all.end(), top);
-        if (it != all.end())
-            all.erase (it);
-    }
-
-    Voicing v;
-    v.n = std::min ((int) all.size(), kMaxNotes);
-    for (int i = 0; i < v.n; ++i)
-        v.notes[(size_t) i] = std::clamp (all[(size_t) i], 0, 127);
-    v.bassCount = v.computeBassCount (kUpperFloor);
-    v.velocity = std::clamp ((int) std::lround (45.0f + 75.0f * energy), 1, 127);
-    return v;
-}
-
-inline float centreForBrightness (float targetB) { return 57.0f + 14.0f * targetB; }
-
 /** Recomputes the measured metrics of one slot from its chord and voicing. */
 inline void updateActuals (Progression& p, int i)
 {
@@ -784,7 +586,7 @@ inline void voiceAll (Progression& p, Rng& rng, const bool* changed = nullptr)
             if (chordChanged) // keep the shape: stay as close as possible to the old voicing
             {
                 const Voicing old = s.voicing;
-                s.voicing = makeVoicing (s.chord, &old, centreForBrightness (s.targetB), s.targetE, rng, 3.0f, 0.0f);
+                s.voicing = makeVoicing (s.chord, &old, centreForBrightness (s.targetB), s.targetE, rng, 3.0f, 0.0f, (VoicingStyle) p.voicingStyle);
             }
             else
             {
@@ -799,7 +601,7 @@ inline void voiceAll (Progression& p, Rng& rng, const bool* changed = nullptr)
         else if (n > 1 && p.slots[(size_t) (n - 1)].voicing.n > 0)
             ref = &p.slots[(size_t) (n - 1)].voicing;
 
-        s.voicing = makeVoicing (s.chord, ref, centreForBrightness (s.targetB), s.targetE, rng);
+        s.voicing = makeVoicing (s.chord, ref, centreForBrightness (s.targetB), s.targetE, rng, 1.0f, 0.7f, (VoicingStyle) p.voicingStyle);
     }
     updateActuals (p);
 }
@@ -1211,7 +1013,7 @@ inline void setChord (Progression& p, int slot, Chord c, Rng& rng)
     else if (old.n > 0)
         ref = &old;
 
-    s.voicing = makeVoicing (c, ref, centreForBrightness (s.targetB), s.targetE, rng, 2.0f, 0.0f);
+    s.voicing = makeVoicing (c, ref, centreForBrightness (s.targetB), s.targetE, rng, 2.0f, 0.0f, (VoicingStyle) p.voicingStyle);
     updateActuals (p, slot);
 }
 
@@ -1463,7 +1265,7 @@ inline void applyEnergy (Progression& p, Rng& rng)
         if (s.locked || s.voicing.n == 0)
             continue;
         const Voicing old = s.voicing;
-        s.voicing = makeVoicing (s.chord, &old, centreForBrightness (s.targetB), s.targetE, rng, 3.0f, 0.0f);
+        s.voicing = makeVoicing (s.chord, &old, centreForBrightness (s.targetB), s.targetE, rng, 3.0f, 0.0f, (VoicingStyle) p.voicingStyle);
     }
     updateActuals (p);
 }

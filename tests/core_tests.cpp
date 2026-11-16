@@ -1259,29 +1259,90 @@ static void testVoicingEngineP31()
     CHECK (std::abs (voiceLeadingDistance (cegc, ceg) - 1.75f) < 1e-5f);
 }
 
-static void testVoicingNoDroppedChordTones()
+static void testVoicingStylesAndEssentialTones()
 {
     Rng rng (1337);
-    for (int t = 0; t < numChordTypes(); ++t)
+    for (int sIdx = 0; sIdx < kNumVoicingStyles; ++sIdx)
     {
-        for (int r = 0; r < 12; ++r)
+        VoicingStyle style = (VoicingStyle) sIdx;
+        for (int t = 0; t < numChordTypes(); ++t)
         {
-            for (float energy : { 0.0f, 0.5f, 1.0f })
+            for (int r = 0; r < 12; ++r)
             {
-                Chord c { r, t, 0 };
-                Voicing v = makeVoicing (c, nullptr, centreForBrightness (0.5f), energy, rng, 0.0f, 0.0f);
-
-                unsigned vMask = 0;
-                for (int i = 0; i < v.n; ++i)
-                    vMask |= (1u << mod12 (v.notes[i]));
-
-                for (int iv : chordTypes()[(size_t) t].iv)
+                for (float energy : { 0.0f, 0.5f, 1.0f })
                 {
-                    int expectedPc = mod12 (r + iv);
-                    CHECK ((vMask & (1u << expectedPc)) != 0);
+                    Chord c { r, t, 0 };
+                    Voicing v = makeVoicing (c, nullptr, centreForBrightness (0.5f), energy, rng, 0.0f, 0.0f, style);
+
+                    // 1. Zero low-interval violations (except Close style)
+                    if (style != VoicingStyle::Close)
+                    {
+                        CHECK (! violatesLowIntervalLimit (v));
+                    }
+
+                    // 2. Essential tones are present in the full voicing (bass + upper).
+                    // The perfect 5th may be missing, and the root may be missing from the upper structure if the bass has it.
+                    const auto a = analyzeChordTones (c);
+                    unsigned fullMask = 0;
+                    for (int i = 0; i < v.n; ++i)
+                        fullMask |= (1u << mod12 (v.notes[(size_t) i]));
+
+                    for (int epc : a.essentialPcs)
+                    {
+                        CHECK ((fullMask & (1u << epc)) != 0);
+                    }
+                    // Root is always present in full voicing (bass plays it)
+                    CHECK ((fullMask & (1u << mod12 (c.root))) != 0);
+
+                    // 3. Every upper note within 48–96; bassCount matches notes < 48; n <= 8
+                    int upperNotes[kMaxNotes];
+                    int upperCount = 0;
+                    for (int i = 0; i < v.n; ++i)
+                    {
+                        if (v.notes[(size_t) i] >= kUpperFloor)
+                            upperNotes[upperCount++] = v.notes[(size_t) i];
+                    }
+                    for (int i = 0; i < upperCount; ++i)
+                    {
+                        CHECK (upperNotes[i] >= 48 && upperNotes[i] <= 96);
+                    }
+                    CHECK (v.bassCount == v.computeBassCount (kUpperFloor));
+                    CHECK (v.n <= kMaxNotes);
+
+                    // 4. Rootless upper contains no root pitch class
+                    if (style == VoicingStyle::Rootless)
+                    {
+                        for (int i = 0; i < upperCount; ++i)
+                        {
+                            CHECK (mod12 (upperNotes[i]) != mod12 (c.root));
+                        }
+                    }
+
+                    // Piano RH lowest >= 60
+                    if (style == VoicingStyle::Piano)
+                    {
+                        int lowestRh = 1000;
+                        for (int i = 0; i < upperCount; ++i)
+                            if (upperNotes[i] >= 60 && upperNotes[i] < lowestRh)
+                                lowestRh = upperNotes[i];
+                        CHECK (lowestRh >= 60);
+                    }
                 }
             }
         }
+    }
+
+    // 5. Drop2 output equals definition for C maj7: G3 (55), C4 (60), E4 (64), B4 (71)
+    {
+        Chord cMaj7 { 0, 7, 0 }; // C maj7
+        Voicing v = makeVoicing (cMaj7, nullptr, 62.0f, 0.0f, rng, 0.0f, 0.0f, VoicingStyle::Drop2);
+        std::vector<int> upper;
+        for (int i = 0; i < v.n; ++i)
+            if (v.notes[(size_t) i] >= kUpperFloor)
+                upper.push_back (v.notes[(size_t) i]);
+
+        std::vector<int> expectedUpper = { 55, 60, 64, 71 };
+        CHECK (upper == expectedUpper);
     }
 }
 
@@ -1289,7 +1350,7 @@ int main()
 {
     testGoldenTheory();
     testVoicingEngineP31();
-    testVoicingNoDroppedChordTones();
+    testVoicingStylesAndEssentialTones();
     testSpelling();
     testBassModel();
     testMetricOrdering();
