@@ -165,6 +165,17 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         });
     };
 
+    voicingBox.onChange = [this]
+    {
+        if (refreshing || voicingBox.getSelectedId() == 0) return;
+        const int style = voicingBox.getSelectedId() - 1;
+        processor.edit ([style] (cs::Progression& pr, cs::Rng& rng)
+        {
+            pr.voicingStyle = style;
+            cs::revoice (pr, rng);
+        });
+    };
+
     // Fit score badge
     fitCaption.setText ("FIT", juce::dontSendNotification);
     fitCaption.setFont (ui::font (10.0f, true));
@@ -248,6 +259,11 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     styleBox.addItem ("Soul / Jazz", 4);
     styleBox.addItem ("Free", 5);
     styleBox.setSelectedId (1, juce::dontSendNotification);
+
+    setupCombo (voicingBox, voicingLabel, "VOICING");
+    for (int i = 0; i < cs::kNumVoicingStyles; ++i)
+        voicingBox.addItem (cs::voicingStyleName ((cs::VoicingStyle) i), i + 1);
+    voicingBox.setSelectedId ((int) cs::VoicingStyle::Piano + 1, juce::dontSendNotification);
 
     setupCombo (shapeBox, shapeLabel, "SHAPES");
     shapeBox.addItem (juce::String::fromUTF8 ("Shape Stamps ▾"), 1);
@@ -620,6 +636,7 @@ void ChordSlotsEditor::refresh()
     snapBox.setSelectedId (p.snap, juce::dontSendNotification);
     moodBox.setSelectedId (p.mood + 1, juce::dontSendNotification);
     styleBox.setSelectedId (p.style == -1 ? 1 : p.style + 2, juce::dontSendNotification);
+    voicingBox.setSelectedId (p.voicingStyle + 1, juce::dontSendNotification);
 
     lockRhythm.setToggleState (p.locks.rhythm, juce::dontSendNotification);
     lockRoots.setToggleState (p.locks.roots, juce::dontSendNotification);
@@ -1147,6 +1164,7 @@ void ChordSlotsEditor::resized()
 
     placeLaneBarCombo (moodBox, moodLabel, 120);
     placeLaneBarCombo (styleBox, styleLabel, 130);
+    placeLaneBarCombo (voicingBox, voicingLabel, 110);
     placeLaneBarCombo (shapeBox, shapeLabel, 120);
 
     resetCurvesBtn.setBounds (laneBar.removeFromRight (58).withSizeKeepingCentre (56, 24));

@@ -329,6 +329,7 @@ void testStateRoundTrip()
         cs::setNumSlots (p, 5);
         cs::applyMood (p, 5);
         p.style = (int) cs::CorpusStyle::SoulRnb;
+        p.voicingStyle = (int) cs::VoicingStyle::Spread;
         p.locks.colors = true;
         cs::roll (p, rng);
         p.slots[2].locked = true;
@@ -344,6 +345,7 @@ void testStateRoundTrip()
     CHECK (pa.tonic == pb.tonic && pa.scale == pb.scale && pa.bars == pb.bars && pa.numSlots == pb.numSlots);
     CHECK (pa.mood == pb.mood && pa.locks.colors == pb.locks.colors && pa.snap == pb.snap);
     CHECK (pa.style == pb.style && pb.style == (int) cs::CorpusStyle::SoulRnb);
+    CHECK (pa.voicingStyle == pb.voicingStyle && pb.voicingStyle == (int) cs::VoicingStyle::Spread);
     CHECK (std::abs (pa.adventure - pb.adventure) < 1.0e-4f);
     for (int i = 0; i < pa.numSlots; ++i)
     {
@@ -372,6 +374,13 @@ void testStateRoundTrip()
         juce::AudioProcessor::copyXmlToBinary (*v3Root.createXml(), v3Block);
         hV3.processor.setStateInformation (v3Block.getData(), (int) v3Block.getSize());
         CHECK (hV3.processor.getProgression().style == -1);
+        CHECK (hV3.processor.getProgression().voicingStyle == (int) cs::VoicingStyle::Close);
+    }
+
+    // Default voicing style for new progression is Piano
+    {
+        Host fresh;
+        CHECK (fresh.processor.getProgression().voicingStyle == (int) cs::VoicingStyle::Piano);
     }
 
     // Junk and hostile state must be ignored or clamped, never crash.

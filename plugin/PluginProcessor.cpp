@@ -25,6 +25,7 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
     t.setProperty ("bassMotion", p.bassMotion, nullptr);
     t.setProperty ("mood", p.mood, nullptr);
     t.setProperty ("style", p.style, nullptr);
+    t.setProperty ("voicingStyle", p.voicingStyle, nullptr);
     t.setProperty ("lockRhythm", p.locks.rhythm, nullptr);
     t.setProperty ("lockRoots", p.locks.roots, nullptr);
     t.setProperty ("lockColors", p.locks.colors, nullptr);
@@ -89,6 +90,7 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p, int stat
     p.bassMotion = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("bassMotion", 0.0f));
     p.mood = juce::jlimit (-1, (int) cs::moods().size() - 1, (int) t.getProperty ("mood", -1));
     p.style = juce::jlimit (-1, (int) cs::CorpusStyle::Free, (int) t.getProperty ("style", -1));
+    p.voicingStyle = juce::jlimit (0, cs::kNumVoicingStyles - 1, (int) t.getProperty ("voicingStyle", (int) cs::VoicingStyle::Close));
     p.locks.rhythm = (bool) t.getProperty ("lockRhythm", false);
     p.locks.roots = (bool) t.getProperty ("lockRoots", false);
     p.locks.colors = (bool) t.getProperty ("lockColors", false);

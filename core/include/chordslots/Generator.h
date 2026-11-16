@@ -101,7 +101,7 @@ struct Progression
     bool phraseRepeat = false; // generates 4-slot phrase AA' with cadence variation
     int mood = -1;            // index into moods() the targets came from, -1 = custom
     int style = -1;           // -1 = Auto; otherwise a CorpusStyle value including Free
-    int voicingStyle = (int) VoicingStyle::Close;
+    int voicingStyle = (int) VoicingStyle::Piano;
     Locks locks;
     std::array<Slot, kMaxSlots> slots {};
 

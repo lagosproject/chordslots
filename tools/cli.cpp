@@ -53,6 +53,114 @@ static void printDetail (const Progression& p)
 // Evaluation Harness & Baseline
 //==============================================================================
 
+static int parseVoicingStyle (const char* str)
+{
+    if (str == nullptr) return (int) VoicingStyle::Piano;
+    std::string s = str;
+    for (char& c : s) c = (char) std::tolower ((unsigned char) c);
+    s.erase (std::remove (s.begin(), s.end(), ' '), s.end());
+    s.erase (std::remove (s.begin(), s.end(), '-'), s.end());
+
+    if (s == "close" || s == "0") return (int) VoicingStyle::Close;
+    if (s == "piano" || s == "1") return (int) VoicingStyle::Piano;
+    if (s == "spread" || s == "2") return (int) VoicingStyle::Spread;
+    if (s == "drop2" || s == "3") return (int) VoicingStyle::Drop2;
+    if (s == "drop3" || s == "4") return (int) VoicingStyle::Drop3;
+    if (s == "rootless" || s == "5") return (int) VoicingStyle::Rootless;
+    if (s == "stacked" || s == "6") return (int) VoicingStyle::Stacked;
+
+    return (int) VoicingStyle::Piano;
+}
+
+static void printVoicingSlot (const Slot& s, int tonic, int scale)
+{
+    std::string name = chordName (s.chord, tonic, scale);
+    std::printf ("    %-8s [", name.c_str());
+    for (int j = 0; j < s.voicing.n; ++j)
+    {
+        if (j > 0) std::printf (" ");
+        std::printf ("%d", s.voicing.notes[(size_t) j]);
+    }
+    std::printf ("] (");
+    for (int j = 0; j < s.voicing.n; ++j)
+    {
+        if (j > 0) std::printf (" ");
+        int n = s.voicing.notes[(size_t) j];
+        std::printf ("%s%d", pitchClassName (mod12 (n), tonic, scale).c_str(), n / 12 - 1);
+    }
+    std::printf (")\n");
+}
+
+static int runVoicings()
+{
+    const std::vector<Chord> cMajorChords = {
+        { 2, 8, 0 }, // Dm7
+        { 7, 9, 0 }, // G7
+        { 0, 7, 0 }, // Cmaj7
+        { 9, 8, 0 }  // Am7
+    };
+
+    const std::vector<Chord> aMinorChords = {
+        { 9, 1, 0 }, // Am
+        { 5, 0, 0 }, // F
+        { 0, 0, 0 }, // C
+        { 7, 0, 0 }  // G
+    };
+
+    for (int sIdx = 0; sIdx < kNumVoicingStyles; ++sIdx)
+    {
+        VoicingStyle style = (VoicingStyle) sIdx;
+        std::printf ("=== Style %d: %s ===\n", sIdx, voicingStyleName (style));
+
+        // Progression 1: C Major
+        Progression p1;
+        p1.tonic = 0; // C
+        p1.scale = 0; // Major
+        p1.numSlots = 4;
+        p1.voicingStyle = sIdx;
+        p1.voiceLeading = 0.5f;
+        layoutEven (p1);
+        for (int i = 0; i < 4; ++i)
+        {
+            p1.slots[(size_t) i].chord = cMajorChords[(size_t) i];
+            p1.slots[(size_t) i].targetB = 0.5f;
+            p1.slots[(size_t) i].targetE = 0.5f;
+            p1.slots[(size_t) i].targetT = 0.5f;
+        }
+        Rng rng1 (42);
+        voiceAll (p1, rng1);
+
+        std::printf ("  C Major (Dm7 - G7 - Cmaj7 - Am7):\n");
+        for (int i = 0; i < p1.numSlots; ++i)
+            printVoicingSlot (p1.slots[(size_t) i], p1.tonic, p1.scale);
+
+        // Progression 2: A Minor
+        Progression p2;
+        p2.tonic = 9; // A
+        p2.scale = 1; // Minor
+        p2.numSlots = 4;
+        p2.voicingStyle = sIdx;
+        p2.voiceLeading = 0.5f;
+        layoutEven (p2);
+        for (int i = 0; i < 4; ++i)
+        {
+            p2.slots[(size_t) i].chord = aMinorChords[(size_t) i];
+            p2.slots[(size_t) i].targetB = 0.5f;
+            p2.slots[(size_t) i].targetE = 0.5f;
+            p2.slots[(size_t) i].targetT = 0.5f;
+        }
+        Rng rng2 (42);
+        voiceAll (p2, rng2);
+
+        std::printf ("  A Minor (Am - F - C - G):\n");
+        for (int i = 0; i < p2.numSlots; ++i)
+            printVoicingSlot (p2.slots[(size_t) i], p2.tonic, p2.scale);
+
+        std::printf ("\n");
+    }
+    return 0;
+}
+
 static bool voicingHasLowIntervalViolation (const Voicing& v)
 {
     return violatesLowIntervalLimit (v);
@@ -151,10 +259,15 @@ static int runEval (int argc, char** argv)
     std::string outPath;
     std::string bigramsPath;
     std::string comparePath;
+    int voicingStyle = (int) VoicingStyle::Piano;
 
     for (int i = 2; i < argc; ++i)
     {
-        if (std::strcmp (argv[i], "--out") == 0 && i + 1 < argc)
+        if (std::strcmp (argv[i], "--voicing") == 0 && i + 1 < argc)
+        {
+            voicingStyle = parseVoicingStyle (argv[++i]);
+        }
+        else if (std::strcmp (argv[i], "--out") == 0 && i + 1 < argc)
         {
             outPath = argv[++i];
         }
@@ -206,8 +319,10 @@ static int runEval (int argc, char** argv)
                 p.timeSigNum = 4;
                 p.timeSigDen = 4;
                 p.numSlots = cfg.slots;
+                p.voicingStyle = voicingStyle;
                 layoutEven (p);
                 applyMood (p, (int) m);
+                p.voicingStyle = voicingStyle;
                 p.numSlots = cfg.slots;
                 roll (p, rng);
 
@@ -477,16 +592,24 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    if (std::strcmp (cmd, "voicings") == 0)
+    {
+        return runVoicings();
+    }
+
     if (std::strcmp (cmd, "roll") == 0)
     {
         const int count = argc > 3 && argv[3][0] != '-' ? std::atoi (argv[3]) : 5;
         Rng rng ((unsigned) (argc > 4 && argv[4][0] != '-' ? std::atoi (argv[4]) : 1));
 
         float bassMotion = 0.0f;
+        int voicingStyle = (int) VoicingStyle::Piano;
         for (int a = 2; a < argc; ++a)
         {
             if (std::strcmp (argv[a], "--bass-motion") == 0 && a + 1 < argc)
                 bassMotion = (float) std::atof (argv[++a]);
+            else if (std::strcmp (argv[a], "--voicing") == 0 && a + 1 < argc)
+                voicingStyle = parseVoicingStyle (argv[++a]);
         }
 
         for (int m = 0; m < (int) moods().size(); ++m)
@@ -496,8 +619,10 @@ int main (int argc, char** argv)
 
             Progression p;
             p.bassMotion = bassMotion;
+            p.voicingStyle = voicingStyle;
             layoutEven (p);
             applyMood (p, m);
+            p.voicingStyle = voicingStyle;
             std::printf ("%s  (%s %s, adventure %.2f)\n", moods()[(size_t) m].name,
                          pitchClassName (p.tonic, p.tonic, p.scale).c_str(), scales()[(size_t) p.scale].name, p.adventure);
             for (int i = 0; i < count; ++i)
@@ -510,6 +635,6 @@ int main (int argc, char** argv)
         return 0;
     }
 
-    std::fprintf (stderr, "usage: chordslots-cli table [scaleIndex] | roll [mood|all] [count] [seed] | eval [N] [--out file] [--bigrams file] [--compare baseline]\n");
+    std::fprintf (stderr, "usage: chordslots-cli table [scaleIndex] | roll [mood|all] [count] [seed] [--voicing style] | eval [N] [--voicing style] [--out file] [--bigrams file] [--compare baseline] | voicings\n");
     return 1;
 }
