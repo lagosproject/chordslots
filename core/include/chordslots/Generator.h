@@ -787,7 +787,7 @@ inline void updateActuals (Progression& p, int i)
     s.brightness = combineBrightness (qualityBrightness (s.chord.type),
                                       modalBrightness (s.chord, p.tonic, p.scale),
                                       registerBrightness (upper, n));
-    s.tension = tensionOf (s.chord, p.tonic, p.scale);
+    s.tension = voicedTension (s.chord, p.tonic, p.scale, s.voicing.notes.data(), s.voicing.n);
 
     // Energy is a performance property (loudness and density), not a harmonic one.
     const float vel = clamp01 (((float) s.voicing.velocity - 45.0f) / 75.0f);

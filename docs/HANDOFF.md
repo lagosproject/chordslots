@@ -113,10 +113,10 @@ re-check it.
 
 ## 7. Known small issues (backlog, folded into P7.5 unless noted)
 
-- **Tense tonic presence (revisit after P5).** P4's 1,000-loop evaluation dropped from
+- **Tense tonic presence (revisit during final validation).** P4's 1,000-loop evaluation dropped from
   62.3% to 54.7% at 4 slots and from 73.9% to 65.9% at 8 slots versus P3.
   P5's 1,000-loop rerun measured 54.8% and 64.5%. The listening check at both
-  lengths is pending. Use it to decide whether Tense needs a tonal adjustment.
+  lengths is deferred to final validation. Use it to decide whether Tense needs a tonal adjustment.
 
 - `voiceLeadingDistance` DP table is sized for ≤ 8 voices; add a guard/clamp.
 - GCC 15 false-positive `-Warray-bounds` around `std::sort` in `violatesLowIntervalLimit`.

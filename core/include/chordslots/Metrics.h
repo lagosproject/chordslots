@@ -210,6 +210,7 @@ inline float chordDistance (Chord a, Chord b)
 struct Calibration
 {
     static constexpr float roughLo = 0.05f, roughHi = 0.55f;
+    static constexpr float voicedRoughLo = 0.13f, voicedRoughHi = 0.63f;
     static constexpr float consLo = 9.0f, consHi = 20.0f; // TIV norm: low = dissonant
     static constexpr float tonalLo = 5.0f, tonalHi = 23.0f;
     static constexpr float brightLo = 0.24f, brightHi = 0.74f;
@@ -230,27 +231,45 @@ inline float combineBrightness (float quality, float modal, float reg)
 
 inline float norm01 (float x, float lo, float hi) { return clamp01 ((x - lo) / (hi - lo)); }
 
-/** Dissonance of the chord type by itself: sensory roughness + lack of
-    harmonic consonance (tritones, clusters). 0..1 */
+/** Harmonic consonance is computed from the chord's pitch-class set. */
+inline float harmonicDissonance (int type)
+{
+    const float consonance = norm01 ((float) tivNorm (tivOf (chordMask ({ 0, type }))),
+                                     Calibration::consLo, Calibration::consHi);
+    return 1.0f - consonance;
+}
+
 inline float typeDissonance (int type)
 {
     const float rough = norm01 (typeRoughness (type), Calibration::roughLo, Calibration::roughHi);
-    const float cons = norm01 ((float) tivNorm (tivOf (chordMask ({ 0, type }))), Calibration::consLo, Calibration::consHi);
-    return 0.5f * rough + 0.5f * (1.0f - cons);
+    return 0.5f * rough + 0.5f * harmonicDissonance (type);
 }
 
-/** Tension = how dissonant the chord is + how far it sits from home + a small
-    functional term (dominants want to resolve). The last one is a plain
-    music-theory heuristic, not a measured quantity. */
+inline float tensionFromDissonance (Chord c, int tonic, int scaleIdx, float dissonance)
+{
+    const float dist = norm01 ((float) tonalDistanceRaw (c, tonic, scaleIdx), Calibration::tonalLo, Calibration::tonalHi);
+    const auto function = functionOf (c, tonic);
+    const int degree = mod12 (c.root - tonic);
+    const float pull = degree == 10 ? (scaleHasMinorThird (scaleIdx) ? 0.7f : 0.4f)
+                                   : (function == Function::tonic ? 0.0f : (function == Function::subdominant ? 0.4f : 1.0f));
+    return clamp01 (0.45f * dissonance + 0.35f * dist + 0.20f * pull);
+}
+
+/** Chord-symbol estimate for candidate pruning and the legacy listening score. */
 inline float tensionOf (Chord c, int tonic, int scaleIdx)
 {
-    const float diss = typeDissonance (c.type);
-    const float dist = norm01 ((float) tonalDistanceRaw (c, tonic, scaleIdx), Calibration::tonalLo, Calibration::tonalHi);
-    const Function f = functionOf (c, tonic);
-    const int deg = mod12 (c.root - tonic);
-    const float func = (deg == 10) ? (scaleHasMinorThird (scaleIdx) ? 0.7f : 0.4f)
-                                   : (f == Function::tonic ? 0.0f : (f == Function::subdominant ? 0.4f : 1.0f));
-    return clamp01 (0.45f * diss + 0.35f * dist + 0.20f * func);
+    return tensionFromDissonance (c, tonic, scaleIdx, typeDissonance (c.type));
+}
+
+/** Static tension with the sounding register and intervals in the roughness term. */
+inline float voicedTension (Chord c, int tonic, int scaleIdx, const int* notes, int n)
+{
+    n = std::min (n, 16);
+    if (n <= 0)
+        return tensionOf (c, tonic, scaleIdx);
+    const float rough = norm01 ((float) (roughness (notes, n) / n),
+                                Calibration::voicedRoughLo, Calibration::voicedRoughHi);
+    return tensionFromDissonance (c, tonic, scaleIdx, 0.5f * rough + 0.5f * harmonicDissonance (c.type));
 }
 
 /** Metrics for a chord with a neutral register (used while choosing chords,

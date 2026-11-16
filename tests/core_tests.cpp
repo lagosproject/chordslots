@@ -1447,9 +1447,28 @@ static void testVariety()
     CHECK (distinctRolls (1.0f) > distinctRolls (0.5f));
 }
 
+static void testVoicedTension()
+{
+    Progression p;
+    p.numSlots = 1;
+    p.tonic = 0;
+    p.scale = 0;
+    auto& slot = p.slots[0];
+    slot.chord = ch (0, "7");
+    slot.voicing.n = 4;
+    slot.voicing.notes = { 36, 40, 43, 46 };
+    updateActuals (p);
+    const float compact = slot.tension;
+
+    slot.voicing.notes = { 36, 55, 64, 70 };
+    updateActuals (p);
+    CHECK (compact > slot.tension + 0.03f);
+}
+
 int main()
 {
     testGoldenTheory();
+    testVoicedTension();
     testExactRing();
     testVariety();
     CHECK (chordTypes().size() == std::size (kPythonQualityClasses));
