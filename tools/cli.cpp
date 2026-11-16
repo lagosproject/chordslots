@@ -267,7 +267,7 @@ static int runEval (int argc, char** argv)
         {
             voicingStyle = parseVoicingStyle (argv[++i]);
         }
-        else if (std::strcmp (argv[i], "--out") == 0 && i + 1 < argc)
+        else if ((std::strcmp (argv[i], "--out") == 0 || std::strcmp (argv[i], "--write") == 0) && i + 1 < argc)
         {
             outPath = argv[++i];
         }
