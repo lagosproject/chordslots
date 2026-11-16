@@ -9,6 +9,7 @@
 #include "Voicing.h"
 
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <random>
 
@@ -96,6 +97,7 @@ struct Progression
     int timeSigDen = 4;
     int numSlots = 4;
     int snap = 12; // cut grid in steps: 24 = 1/4, 16 = 1/4T, 12 = 1/8, 8 = 1/8T, 6 = 1/16, 4 = 1/16T, 3 = 1/32
+    float variety = 0.5f;     // sampling temperature for a full Roll
     float adventure = 0.3f;   // 0 = diatonic triads, 1 = borrowed chords and extensions
     float syncopation = 0.3f; // how irregular randomised cuts are
     float bassMotion = 0.0f;  // 0 = keep root in bass, 1 = smooth walking bass / pedal inversions
@@ -339,6 +341,14 @@ inline float transitionCost (Chord a, Chord b, int tonic, float adventure, int s
     return transitionCost (a, b, tonic, adventure, scaleIdx, style);
 }
 
+inline float rollTemperature (float variety)
+{
+    const float value = clamp01 (variety);
+    // Piecewise logarithmic interpolation preserves the previous 0.012 midpoint.
+    return value <= 0.5f ? 0.004f * std::pow (3.0f, 2.0f * value)
+                         : 0.012f * std::pow (2.5f, 2.0f * value - 1.0f);
+}
+
 inline float slotUnaryCost (const Progression& p, int slot, const Candidate& cand)
 {
     const Slot& s = p.slots[(size_t) slot];
@@ -469,6 +479,20 @@ inline float bassLeapCost (int first, int second) noexcept
 
 // Convert semitone costs from the bass-only DP into the harmonic cost scale.
 constexpr float kBassCostScale = 0.03f;
+
+inline float jointBassCost (const Progression& p, Chord a, Chord b)
+{
+    if (p.bassMotion < 0.05f)
+        return 0.0f;
+    return kBassCostScale * bassLeapCost (pickBassRegister (a.bassPc(), 40),
+                                         pickBassRegister (b.bassPc(), 40));
+}
+
+inline float harmonicTransitionCost (const Progression& p, CorpusStyle style, Chord a, Chord b)
+{
+    a.bassInt = b.bassInt = 0;
+    return transitionCost (a, b, p.tonic, p.adventure, p.scale, style);
+}
 
 inline float inversionCost (const Progression& p, int slot, int bassInt)
 {
@@ -654,20 +678,12 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
         float& cost = transitionCache[src * chordCount + dst];
         if (cost < 0.0f)
         {
-            const Chord harmonicA { a.root, a.type, 0 }, harmonicB { b.root, b.type, 0 };
-            cost = transitionCost (harmonicA, harmonicB, p.tonic, p.adventure, p.scale, style);
+            cost = detail::harmonicTransitionCost (p, style, a, b);
         }
         return cost;
     };
     if (n > 1)
     {
-        const auto bassCost = [&] (Chord a, Chord b)
-        {
-            if (p.bassMotion < 0.05f)
-                return 0.0f;
-            return detail::kBassCostScale * detail::bassLeapCost (pickBassRegister (a.bassPc(), 40),
-                                                                 pickBassRegister (b.bassPc(), 40));
-        };
         for (int slot = 0; slot < n; ++slot)
         {
             const int from = nodeOf[(size_t) slot], to = nodeOf[(size_t) ((slot + 1) % n)];
@@ -677,7 +693,7 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
             costs.reserve (first.size() * second.size());
             for (Chord a : first)
                 for (Chord b : second)
-                    costs.push_back (transition (a, b) + bassCost (a, b));
+                    costs.push_back (transition (a, b) + detail::jointBassCost (p, a, b));
             ring.addEdge (from, to, detail::boltzmannWeights (costs, temperature));
         }
     }
@@ -693,24 +709,67 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
     }
 }
 
-/** Best-fitting replacements for one slot, best first (for the alternatives menu). */
+/** Ranks distinct chord identities by the best joint state with the other slots fixed. */
 inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxCount)
 {
-    // Offer a slightly wider vocabulary than Roll would use on its own.
-    const auto all = buildCandidates (p.tonic, p.scale, std::max (p.adventure, 0.45f));
     const int n = p.numSlots;
-    const Chord* prev = n > 1 ? &p.slots[(size_t) ((slot + n - 1) % n)].chord : nullptr;
-    const Chord* next = n > 1 ? &p.slots[(size_t) ((slot + 1) % n)].chord : nullptr;
+    if (slot < 0 || slot >= n || maxCount <= 0)
+        return {};
 
+    // The manual picker retains its wider palette at low Adventure.
+    const auto all = buildCandidates (p.tonic, p.scale, std::max (p.adventure, 0.45f));
+    const auto current = p.slots[(size_t) slot].chord;
+    const auto neighbour = [&] (int offset) { return p.slots[(size_t) ((slot + n + offset) % n)].chord; };
+    const Chord previous = neighbour (-1), next = neighbour (1);
+    const auto style = styleForProgression (p);
     std::vector<std::pair<float, Chord>> scored;
-    for (const auto& c : all)
-        if (c.chord != p.slots[(size_t) slot].chord)
-            scored.push_back ({ slotCost (p, slot, c, prev, next), c.chord });
+    for (const auto& candidate : all)
+    {
+        if (candidate.chord.root == current.root && candidate.chord.type == current.type)
+            continue;
 
-    std::sort (scored.begin(), scored.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+        const Chord chord = candidate.chord;
+        float harmonic = slotUnaryCost (p, slot, candidate);
+        if (n > 1)
+            harmonic += detail::harmonicTransitionCost (p, style, previous, chord)
+                      + detail::harmonicTransitionCost (p, style, chord, next);
+        if (n > 2)
+        {
+            const int count = oscillates (neighbour (-2), previous, chord)
+                            + oscillates (previous, chord, next)
+                            + oscillates (chord, next, neighbour (2));
+            harmonic += (1.0f - p.adventure) * 0.08f * (float) count;
+        }
+
+        Chord best = chord;
+        float bestCost = std::numeric_limits<float>::infinity();
+        for (int bassInt : detail::bassOptions (p, slot, chord))
+        {
+            Chord proposed = chord;
+            proposed.bassInt = bassInt;
+            float cost = harmonic + detail::inversionCost (p, slot, bassInt);
+            if (n > 1)
+                cost += detail::jointBassCost (p, previous, proposed) + detail::jointBassCost (p, proposed, next);
+            if (cost < bestCost)
+            {
+                bestCost = cost;
+                best = proposed;
+            }
+        }
+        scored.emplace_back (bestCost, best);
+    }
+
+    const auto count = std::min (scored.size(), (size_t) maxCount);
+    std::partial_sort (scored.begin(), scored.begin() + count, scored.end(), [] (const auto& a, const auto& b)
+    {
+        if (a.first != b.first) return a.first < b.first;
+        if (a.second.root != b.second.root) return a.second.root < b.second.root;
+        return a.second.type < b.second.type;
+    });
     std::vector<Chord> out;
-    for (int i = 0; i < (int) scored.size() && i < maxCount; ++i)
-        out.push_back (scored[(size_t) i].second);
+    out.reserve (count);
+    for (size_t i = 0; i < count; ++i)
+        out.push_back (scored[i].second);
     return out;
 }
 
@@ -1109,7 +1168,7 @@ inline void roll (Progression& p, Rng& rng)
     for (int i = 0; i < p.numSlots; ++i)
         before[i] = p.slots[(size_t) i].chord;
 
-    generateChords (p, rng);
+    generateChords (p, rng, rollTemperature (p.variety));
 
     for (int i = 0; i < p.numSlots; ++i)
         changed[i] = before[i] != p.slots[(size_t) i].chord;

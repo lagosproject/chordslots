@@ -330,6 +330,7 @@ void testStateRoundTrip()
         cs::applyMood (p, 5);
         p.style = (int) cs::CorpusStyle::SoulRnb;
         p.voicingStyle = (int) cs::VoicingStyle::Spread;
+        p.variety = 0.83f;
         p.locks.colors = true;
         cs::roll (p, rng);
         p.slots[2].locked = true;
@@ -347,6 +348,7 @@ void testStateRoundTrip()
     CHECK (pa.style == pb.style && pb.style == (int) cs::CorpusStyle::SoulRnb);
     CHECK (pa.voicingStyle == pb.voicingStyle && pb.voicingStyle == (int) cs::VoicingStyle::Spread);
     CHECK (std::abs (pa.adventure - pb.adventure) < 1.0e-4f);
+    CHECK (std::abs (pb.variety - 0.83f) < 1.0e-4f);
     for (int i = 0; i < pa.numSlots; ++i)
     {
         const cs::Slot& x = pa.slots[(size_t) i];
@@ -374,6 +376,7 @@ void testStateRoundTrip()
         juce::AudioProcessor::copyXmlToBinary (*v3Root.createXml(), v3Block);
         hV3.processor.setStateInformation (v3Block.getData(), (int) v3Block.getSize());
         CHECK (hV3.processor.getProgression().style == -1);
+        CHECK (hV3.processor.getProgression().variety == 0.5f);
         CHECK (hV3.processor.getProgression().voicingStyle == (int) cs::VoicingStyle::Close);
     }
 
@@ -815,6 +818,7 @@ void testVariationBankAndHistory()
     h.processor.edit ([] (cs::Progression& p, cs::Rng& rng)
     {
         p.tonic = 2; // D
+        p.variety = 0.21f;
         p.bars = 4;
         cs::setNumSlots (p, 6);
         cs::applyMood (p, 3);
@@ -827,6 +831,7 @@ void testVariationBankAndHistory()
     h.processor.edit ([] (cs::Progression& p, cs::Rng& rng)
     {
         p.tonic = 7; // G
+        p.variety = 0.79f;
         p.bars = 2;
         cs::setNumSlots (p, 4);
         cs::applyMood (p, 7);
@@ -910,6 +915,8 @@ void testVariationBankAndHistory()
     h2.processor.setStateInformation (state.getData(), (int) state.getSize());
     CHECK (h2.processor.getProgression (0).tonic == h.processor.getProgression (0).tonic);
     CHECK (h2.processor.getProgression (1).tonic == h.processor.getProgression (1).tonic);
+    CHECK (std::abs (h2.processor.getProgression (0).variety - 0.21f) < 1.0e-4f);
+    CHECK (std::abs (h2.processor.getProgression (1).variety - 0.79f) < 1.0e-4f);
 
     // 8. State persistence legacy migration (v1 format: single <ChordSlotsState><Progression .../></ChordSlotsState>)
     juce::ValueTree v1Root ("ChordSlotsState");

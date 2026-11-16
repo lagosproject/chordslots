@@ -65,8 +65,8 @@ private:
     // Footer Panel 1: Harmony Generator
     juce::TextButton lockRhythm { "Rhythm" }, lockRoots { "Roots" }, lockColors { "Colors" }, lockVoicing { "Voicing" };
     juce::Label lockCaption;
-    juce::Slider adventure, syncopation, bassMotion;
-    juce::Label adventureLabel, syncopationLabel, bassMotionLabel;
+    juce::Slider adventure, variety, syncopation, bassMotion;
+    juce::Label adventureLabel, varietyLabel, syncopationLabel, bassMotionLabel;
     juce::TextButton undoButton { "Undo" }, rollButton { "ROLL" };
 
     // Footer Panel 2: Groove & Feel

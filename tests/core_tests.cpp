@@ -1419,10 +1419,39 @@ static void testExactRing()
         CHECK (first.slots[(size_t) i].chord == second.slots[(size_t) i].chord);
 }
 
+static void testVariety()
+{
+    const auto distinctRolls = [] (float variety)
+    {
+        constexpr int numSlots = 4;
+        std::set<std::array<int, numSlots>> chords;
+        for (int seed = 0; seed < 50; ++seed)
+        {
+            Progression p;
+            p.numSlots = numSlots;
+            p.variety = variety;
+            applyMood (p, 2); // Epic
+            Rng rng ((unsigned) seed);
+            roll (p, rng);
+            std::array<int, numSlots> sequence {};
+            for (int slot = 0; slot < numSlots; ++slot)
+            {
+                const Chord chord = p.slots[(size_t) slot].chord;
+                sequence[(size_t) slot] = chord.root * (int) chordTypes().size() + chord.type;
+            }
+            chords.insert (sequence);
+        }
+        return chords.size();
+    };
+    CHECK (distinctRolls (0.0f) <= 2);
+    CHECK (distinctRolls (1.0f) > distinctRolls (0.5f));
+}
+
 int main()
 {
     testGoldenTheory();
     testExactRing();
+    testVariety();
     CHECK (chordTypes().size() == std::size (kPythonQualityClasses));
     for (size_t type = 0; type < std::size (kPythonQualityClasses); ++type)
         CHECK (int (qualityClassOf (int (type))) == kPythonQualityClasses[type]);

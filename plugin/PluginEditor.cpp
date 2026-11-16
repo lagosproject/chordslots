@@ -312,7 +312,8 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     addChildComponent (pickerOverlay);
 
     // Footer Panel 1: Locks
-    lockCaption.setText ("LOCKS (Survive Roll)", juce::dontSendNotification);
+    lockCaption.setText ("LOCKS", juce::dontSendNotification);
+    lockCaption.setTooltip ("Locked layers keep their values when you roll.");
     lockCaption.setFont (ui::font (10.0f, true));
     lockCaption.setColour (juce::Label::textColourId, ui::textDim);
     addAndMakeVisible (lockCaption);
@@ -343,6 +344,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 
     // Knobs with numeric text boxes
     setupKnob (adventure, adventureLabel, "ADVENTURE");
+    setupKnob (variety, varietyLabel, "VARIETY");
     setupKnob (syncopation, syncopationLabel, "SYNCOPATION");
     setupKnob (bassMotion, bassMotionLabel, "BASS MOTION");
     setupKnob (strum, strumLabel, "STRUM");
@@ -352,6 +354,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     setupKnob (volume, volumeLabel, "SYNTH VOL");
 
     adventure.setRange (0.0, 1.0, 0.01);
+    variety.setRange (0.0, 1.0, 0.01);
     syncopation.setRange (0.0, 1.0, 0.01);
     bassMotion.setRange (0.0, 1.0, 0.01);
     strum.setRange (-1.0, 1.0, 0.01);
@@ -359,6 +362,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     humanize.setRange (0.0, 1.0, 0.01);
 
     adventure.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
+    variety.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
     syncopation.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
     bassMotion.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
     strum.textFromValueFunction = [] (double v)
@@ -375,6 +379,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     };
 
     adventure.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
+    variety.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
     syncopation.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
     bassMotion.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
     strum.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 80.0; };
@@ -387,6 +392,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     };
 
     adventure.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
+    variety.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
     syncopation.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
     bassMotion.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
     strum.setColour (juce::Slider::rotarySliderFillColourId, ui::energy);
@@ -400,6 +406,12 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         if (refreshing) return;
         const float val = (float) adventure.getValue();
         processor.edit ([val] (cs::Progression& pr, cs::Rng&) { pr.adventure = val; }, false);
+    };
+    variety.onValueChange = [this]
+    {
+        if (refreshing) return;
+        const float value = (float) variety.getValue();
+        processor.edit ([value] (cs::Progression& pr, cs::Rng&) { pr.variety = value; }, false);
     };
     syncopation.onValueChange = [this]
     {
@@ -644,6 +656,7 @@ void ChordSlotsEditor::refresh()
     lockVoicing.setToggleState (p.locks.voicing, juce::dontSendNotification);
 
     adventure.setValue (p.adventure, juce::dontSendNotification);
+    variety.setValue (p.variety, juce::dontSendNotification);
     syncopation.setValue (p.syncopation, juce::dontSendNotification);
     bassMotion.setValue (p.bassMotion, juce::dontSendNotification);
 
@@ -1047,27 +1060,26 @@ void ChordSlotsEditor::resized()
         auto hInner = harmonyPanelBounds.reduced (8, 4);
         hInner.removeFromTop (16);
 
-        auto locks = hInner.removeFromLeft (168);
-        lockCaption.setBounds (locks.removeFromTop (14));
-        locks.removeFromTop (4);
-        auto lockButtons = locks.removeFromTop (26);
-        const int lw = (lockButtons.getWidth() - 9) / 4;
-        for (auto* b : { &lockRhythm, &lockRoots, &lockColors, &lockVoicing })
-        {
-            b->setBounds (lockButtons.removeFromLeft (lw));
-            lockButtons.removeFromLeft (3);
-        }
-        hInner.removeFromLeft (8);
-
         auto harmActions = hInner.removeFromRight (74);
         undoButton.setBounds (harmActions.removeFromTop (26));
         harmActions.removeFromTop (4);
         rollButton.setBounds (harmActions.removeFromTop (36));
         hInner.removeFromRight (6);
 
+        auto lockButtons = hInner.removeFromTop (20);
+        lockCaption.setBounds (lockButtons.removeFromLeft (50));
+        const int lw = (lockButtons.getWidth() - 9) / 4;
+        for (auto* b : { &lockRhythm, &lockRoots, &lockColors, &lockVoicing })
+        {
+            b->setBounds (lockButtons.removeFromLeft (lw));
+            lockButtons.removeFromLeft (3);
+        }
+        hInner.removeFromTop (3);
+
         auto harmKnobs = hInner;
-        const int hkw = harmKnobs.getWidth() / 3;
-        for (const Knob& k : { Knob { &adventure, &adventureLabel }, Knob { &syncopation, &syncopationLabel },
+        const int hkw = harmKnobs.getWidth() / 4;
+        for (const Knob& k : { Knob { &adventure, &adventureLabel }, Knob { &variety, &varietyLabel },
+                               Knob { &syncopation, &syncopationLabel },
                                Knob { &bassMotion, &bassMotionLabel } })
         {
             auto cell = harmKnobs.removeFromLeft (hkw);

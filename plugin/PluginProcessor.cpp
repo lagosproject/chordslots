@@ -21,6 +21,7 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
     t.setProperty ("timeSigDen", p.timeSigDen, nullptr);
     t.setProperty ("snap", p.snap, nullptr);
     t.setProperty ("adventure", p.adventure, nullptr);
+    t.setProperty ("variety", p.variety, nullptr);
     t.setProperty ("syncopation", p.syncopation, nullptr);
     t.setProperty ("bassMotion", p.bassMotion, nullptr);
     t.setProperty ("mood", p.mood, nullptr);
@@ -86,6 +87,8 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p, int stat
         snap = 12;
     p.snap = snap;
     p.adventure = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("adventure", 0.3f));
+    const float variety = (float) t.getProperty ("variety", 0.5f);
+    p.variety = std::isfinite (variety) ? cs::clamp01 (variety) : 0.5f;
     p.syncopation = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("syncopation", 0.3f));
     p.bassMotion = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("bassMotion", 0.0f));
     p.mood = juce::jlimit (-1, (int) cs::moods().size() - 1, (int) t.getProperty ("mood", -1));
