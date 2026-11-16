@@ -5,6 +5,7 @@
 #include "Corpus.h"
 #include "Metrics.h"
 #include "Performance.h"
+#include "RingInference.h"
 #include "Voicing.h"
 
 #include <cstring>
@@ -338,8 +339,7 @@ inline float transitionCost (Chord a, Chord b, int tonic, float adventure, int s
     return transitionCost (a, b, tonic, adventure, scaleIdx, style);
 }
 
-inline float slotCost (const Progression& p, int slot, const Candidate& cand,
-                       const Chord* prev, const Chord* next, const Chord* prev2 = nullptr)
+inline float slotUnaryCost (const Progression& p, int slot, const Candidate& cand)
 {
     const Slot& s = p.slots[(size_t) slot];
     const float dB = cand.brightness - s.targetB;
@@ -354,6 +354,13 @@ inline float slotCost (const Progression& p, int slot, const Candidate& cand,
     if (slot == 0 && cand.chord.root == p.tonic)
         cost -= 0.012f; // a gentle pull towards starting at home
 
+    return cost;
+}
+
+inline float slotCost (const Progression& p, int slot, const Candidate& cand,
+                       const Chord* prev, const Chord* next, const Chord* prev2 = nullptr)
+{
+    float cost = slotUnaryCost (p, slot, cand);
     // A-B-A Anti-Oscillation Penalty: discourage ping-ponging back to the chord 2 slots ago
     if (prev2 != nullptr && prev != nullptr && cand.chord == *prev2 && cand.chord != *prev)
         cost += (1.0f - p.adventure) * 0.08f;
@@ -418,106 +425,143 @@ inline std::vector<Candidate> slotCandidates (const Progression& p, int i, const
     return v;
 }
 
-/** Picks chords for every unlocked slot so that their measured brightness and
-    tension follow the per-slot targets. Gibbs sampling over the loop: each slot
-    is resampled given both neighbours, so the last chord also leads back into
-    the first. */
+namespace detail
+{
+
+inline Candidate currentCandidate (const Progression& p, int slot)
+{
+    const Chord chord = p.slots[(size_t) slot].chord;
+    const auto metrics = chordMetrics (chord, p.tonic, p.scale);
+    return { chord, metrics.brightness, metrics.tension, tonesOutsideScale (chord, p.tonic, p.scale),
+             chordTypes()[(size_t) chord.type].complexity };
+}
+
+struct ChordVariable
+{
+    std::vector<Chord> states;
+    std::vector<float> costs;
+};
+
+inline ChordVariable makeChordVariable (const Progression& p, int first, int second,
+                                       const std::vector<Candidate>& pool)
+{
+    ChordVariable variable;
+    std::vector<std::pair<float, Chord>> options;
+    for (const auto& candidate : pool)
+    {
+        float cost = slotUnaryCost (p, first, candidate);
+        if (second >= 0)
+            cost += slotUnaryCost (p, second, candidate);
+        options.emplace_back (cost, candidate.chord);
+    }
+
+    constexpr size_t beamSize = 64;
+    const auto n = std::min (options.size(), beamSize);
+    std::partial_sort (options.begin(), options.begin() + n, options.end(), [] (const auto& a, const auto& b)
+    {
+        if (a.first != b.first)
+            return a.first < b.first;
+        if (a.second.root != b.second.root)
+            return a.second.root < b.second.root;
+        return a.second.type < b.second.type;
+    });
+    for (size_t i = 0; i < n; ++i)
+    {
+        variable.costs.push_back (options[i].first);
+        variable.states.push_back (options[i].second);
+    }
+    return variable;
+}
+
+} // namespace detail
+
+/** Draws from the first-order Boltzmann distribution on the chord loop. */
 inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f)
 {
+    const int n = p.numSlots;
+    if (n < 1)
+        return;
+
     const auto all = buildCandidates (p.tonic, p.scale, p.adventure);
     if (all.empty())
         return;
 
-    const int n = p.numSlots;
     std::vector<std::vector<Candidate>> pools ((size_t) n);
-    for (int i = 0; i < n; ++i)
-        if (! slotChordIsFixed (p, i))
-            pools[(size_t) i] = slotCandidates (p, i, all);
+    for (int slot = 0; slot < n; ++slot)
+        pools[(size_t) slot] = slotChordIsFixed (p, slot)
+            ? std::vector<Candidate> { detail::currentCandidate (p, slot) }
+            : slotCandidates (p, slot, all);
 
-    const bool aa = p.phraseRepeat && n >= 4 && (n % 2 == 0);
-    const int h = n / 2;
-
-    auto isTied = [&] (int j) -> bool {
-        if (! aa || j < 0 || j >= h - 1)
-            return false;
-        const int j2 = j + h;
-        if (slotChordIsFixed (p, j) || slotChordIsFixed (p, j2))
-            return false;
-        return true;
-    };
-
-    std::vector<bool> assigned ((size_t) n, false);
-    for (int i = 0; i < n; ++i)
-        if (slotChordIsFixed (p, i))
-            assigned[(size_t) i] = true;
-
-    std::vector<float> costs;
-    for (int sweep = 0; sweep < 4; ++sweep)
+    const bool repeat = p.phraseRepeat && n >= 4 && n % 2 == 0;
+    const int half = n / 2;
+    std::vector<detail::ChordVariable> variables;
+    std::vector<int> nodeOf ((size_t) n, -1);
+    for (int slot = 0; slot < n; ++slot)
     {
-        for (int i = 0; i < n; ++i)
+        if (nodeOf[(size_t) slot] >= 0)
+            continue;
+        const int node = (int) variables.size();
+        nodeOf[(size_t) slot] = node;
+        const int partner = slot + half;
+        if (repeat && slot < half - 1 && ! slotChordIsFixed (p, slot) && ! slotChordIsFixed (p, partner))
         {
-            if (slotChordIsFixed (p, i))
-                continue;
-
-            // If this slot is the second half of a tied pair, it was already sampled with i - h
-            if (aa && i >= h && i < n - 1 && isTied (i - h))
-                continue;
-
-            const bool tied = isTied (i);
-            const int i2 = i + h;
-
-            const auto& pool = pools[(size_t) i];
-            if (pool.empty())
-                continue;
-
-            const int pi = (i + n - 1) % n, ni = (i + 1) % n, p2i = (i + n - 2) % n;
-            const bool usePrev = n > 1 && (sweep > 0 || assigned[(size_t) pi]);
-            const bool useNext = n > 1 && (sweep > 0 || assigned[(size_t) ni]);
-            const bool usePrev2 = n > 2 && (sweep > 0 || assigned[(size_t) p2i]);
-            const Chord* prev = usePrev ? &p.slots[(size_t) pi].chord : nullptr;
-            const Chord* next = useNext ? &p.slots[(size_t) ni].chord : nullptr;
-            const Chord* prev2 = usePrev2 ? &p.slots[(size_t) p2i].chord : nullptr;
-
-            if (tied)
+            std::vector<Candidate> common;
+            const auto& other = pools[(size_t) partner];
+            for (const auto& candidate : pools[(size_t) slot])
+                if (std::any_of (other.begin(), other.end(), [&] (const auto& c) { return c.chord == candidate.chord; }))
+                    common.push_back (candidate);
+            if (! common.empty())
             {
-                const int pi2 = (i2 + n - 1) % n, ni2 = (i2 + 1) % n, p2i2 = (i2 + n - 2) % n;
-                const bool usePrevTied = n > 1 && (sweep > 0 || assigned[(size_t) pi2]);
-                const bool useNextTied = n > 1 && (sweep > 0 || assigned[(size_t) ni2]);
-                const bool usePrev2Tied = n > 2 && (sweep > 0 || assigned[(size_t) p2i2]);
-                const Chord* prevTied = usePrevTied ? &p.slots[(size_t) pi2].chord : nullptr;
-                const Chord* nextTied = useNextTied ? &p.slots[(size_t) ni2].chord : nullptr;
-                const Chord* prev2Tied = usePrev2Tied ? &p.slots[(size_t) p2i2].chord : nullptr;
-
-                costs.resize (pool.size());
-                for (size_t k = 0; k < pool.size(); ++k)
-                {
-                    costs[k] = slotCost (p, i, pool[k], prev, next, prev2)
-                             + slotCost (p, i2, pool[k], prevTied, nextTied, prev2Tied);
-                }
-
-                const int pick = sampleSoftmin (costs, temperature, rng);
-                if (pick >= 0)
-                {
-                    p.slots[(size_t) i].chord = pool[(size_t) pick].chord;
-                    p.slots[(size_t) i2].chord = pool[(size_t) pick].chord;
-                    assigned[(size_t) i] = true;
-                    assigned[(size_t) i2] = true;
-                }
-            }
-            else
-            {
-                costs.resize (pool.size());
-                for (size_t k = 0; k < pool.size(); ++k)
-                    costs[k] = slotCost (p, i, pool[k], prev, next, prev2);
-
-                const int pick = sampleSoftmin (costs, temperature, rng);
-                if (pick >= 0)
-                {
-                    p.slots[(size_t) i].chord = pool[(size_t) pick].chord;
-                    assigned[(size_t) i] = true;
-                }
+                nodeOf[(size_t) partner] = node;
+                variables.push_back (detail::makeChordVariable (p, slot, partner, common));
+                continue;
             }
         }
+        variables.push_back (detail::makeChordVariable (p, slot, -1, pools[(size_t) slot]));
+    }
+
+    std::vector<detail::RingInference::Weights> unary;
+    for (const auto& variable : variables)
+        unary.push_back (detail::boltzmannWeights (variable.costs, temperature));
+    detail::RingInference ring (std::move (unary));
+    const CorpusStyle style = styleForProgression (p);
+    const size_t numTypes = chordTypes().size();
+    const size_t chordCount = 12 * numTypes;
+    std::vector<float> transitionCache (chordCount * chordCount, -1.0f);
+    const auto transition = [&] (Chord a, Chord b)
+    {
+        if (a.bassInt != 0 || b.bassInt != 0)
+            return transitionCost (a, b, p.tonic, p.adventure, p.scale, style);
+        const size_t src = (size_t) a.root * numTypes + (size_t) a.type;
+        const size_t dst = (size_t) b.root * numTypes + (size_t) b.type;
+        float& cost = transitionCache[src * chordCount + dst];
+        if (cost < 0.0f)
+            cost = transitionCost (a, b, p.tonic, p.adventure, p.scale, style);
+        return cost;
+    };
+    if (n > 1)
+    {
+        for (int slot = 0; slot < n; ++slot)
+        {
+            const int from = nodeOf[(size_t) slot], to = nodeOf[(size_t) ((slot + 1) % n)];
+            const auto& first = variables[(size_t) from].states;
+            const auto& second = variables[(size_t) to].states;
+            std::vector<float> costs;
+            costs.reserve (first.size() * second.size());
+            for (Chord a : first)
+                for (Chord b : second)
+                    costs.push_back (transition (a, b));
+            ring.addEdge (from, to, detail::boltzmannWeights (costs, temperature));
+        }
+    }
+
+    const auto sampled = ring.sample ([&] { return rand01 (rng); });
+    if (sampled.empty())
+        return;
+    for (int slot = 0; slot < n; ++slot)
+    {
+        const int node = nodeOf[(size_t) slot];
+        p.slots[(size_t) slot].chord = variables[(size_t) node].states[(size_t) sampled[(size_t) node]];
     }
 }
 

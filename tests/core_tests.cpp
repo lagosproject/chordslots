@@ -1344,9 +1344,55 @@ static void testVoicingStylesAndEssentialTones()
     }
 }
 
+static void testExactRing()
+{
+    // The three directed edges have different weights, including the closing edge.
+    const detail::RingInference::Weights unary[] = { { 1, 2 }, { 2, 1 }, { 1, 3 } };
+    const detail::RingInference::Weights edges[] = { { 3, 1, 2, 5 }, { 1, 4, 3, 1 }, { 2, 1, 1, 5 } };
+    detail::RingInference ring ({ unary[0], unary[1], unary[2] });
+    for (int slot = 0; slot < 3; ++slot)
+        ring.addEdge (slot, (slot + 1) % 3, edges[slot]);
+
+    std::array<double, 8> exact {};
+    std::array<int, 8> counts {};
+    double normalizer = 0.0;
+    for (int a : { 0, 1 })
+        for (int b : { 0, 1 })
+            for (int c : { 0, 1 })
+            {
+                const int index = a * 4 + b * 2 + c;
+                exact[index] = unary[0][a] * unary[1][b] * unary[2][c]
+                             * edges[0][a * 2 + b] * edges[1][b * 2 + c] * edges[2][c * 2 + a];
+                normalizer += exact[index];
+            }
+
+    constexpr int draws = 20000;
+    Rng rng (151);
+    for (int sample = 0; sample < draws; ++sample)
+    {
+        const auto states = ring.sample ([&] { return rand01 (rng); });
+        if (states.size() != 3)
+        {
+            CHECK (states.size() == 3);
+            return;
+        }
+        ++counts[states[0] * 4 + states[1] * 2 + states[2]];
+    }
+    for (size_t i = 0; i < counts.size(); ++i)
+        CHECK (std::abs (double (counts[i]) / draws - exact[i] / normalizer) < 0.01);
+
+    Progression first, second;
+    Rng firstSeed (972), secondSeed (972);
+    generateChords (first, firstSeed);
+    generateChords (second, secondSeed);
+    for (int i = 0; i < first.numSlots; ++i)
+        CHECK (first.slots[(size_t) i].chord == second.slots[(size_t) i].chord);
+}
+
 int main()
 {
     testGoldenTheory();
+    testExactRing();
     CHECK (chordTypes().size() == std::size (kPythonQualityClasses));
     for (size_t type = 0; type < std::size (kPythonQualityClasses); ++type)
         CHECK (int (qualityClassOf (int (type))) == kPythonQualityClasses[type]);
