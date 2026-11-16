@@ -1066,14 +1066,16 @@ void testExportPlaybackParity()
         cs::CompStyle::TripletSwing
     };
 
-    for (auto style : compStyles)
+    for (double bpm : { 120.0, 200.0, 60.0 })
     {
-        for (bool split : { false, true })
+        for (auto style : compStyles)
         {
-            for (float strum : { 0.0f, 1.0f })
+            for (bool split : { false, true })
             {
-                Host h (48000.0, 256);
-                h.playHead.bpm = 120.0;
+                for (float strum : { 0.0f, 1.0f })
+                {
+                    Host h (48000.0, 256);
+                    h.playHead.bpm = bpm;
 
                 if (auto* p = h.processor.apvts.getParameter ("compStyle"))
                     p->setValueNotifyingHost (p->convertTo0to1 ((float) (int) style));
@@ -1135,7 +1137,8 @@ void testExportPlaybackParity()
                 for (const auto& ev : h.events)
                 {
                     const double tick = (double) ev.sample * ticksPerSample;
-                    if (tick < loopEndTick + 1.0)
+                    const bool isLoop1 = ev.on ? (tick < loopEndTick - 0.5) : (tick < loopEndTick + 0.5);
+                    if (isLoop1)
                     {
                         renderedEvents.push_back ({
                             ev.channel,
@@ -1146,6 +1149,52 @@ void testExportPlaybackParity()
                         });
                     }
                 }
+
+                // Assert that every exported note has off-tick > on-tick
+                std::map<std::pair<int, int>, std::vector<double>> expOnTicks;
+                for (const auto& exp : exportEvents)
+                {
+                    const auto key = std::make_pair (exp.channel, exp.note);
+                    if (exp.on)
+                    {
+                        expOnTicks[key].push_back (exp.tick);
+                    }
+                    else
+                    {
+                        CHECK (! expOnTicks[key].empty());
+                        if (! expOnTicks[key].empty())
+                        {
+                            const double onTick = expOnTicks[key].front();
+                            expOnTicks[key].erase (expOnTicks[key].begin());
+                            CHECK (exp.tick > onTick);
+                        }
+                    }
+                }
+                for (const auto& kv : expOnTicks)
+                    CHECK (kv.second.empty());
+
+                // Assert that every live note-on has a later note-off
+                std::map<std::pair<int, int>, std::vector<double>> liveOnTicks;
+                for (const auto& ren : renderedEvents)
+                {
+                    const auto key = std::make_pair (ren.channel, ren.note);
+                    if (ren.on)
+                    {
+                        liveOnTicks[key].push_back (ren.tick);
+                    }
+                    else
+                    {
+                        CHECK (! liveOnTicks[key].empty());
+                        if (! liveOnTicks[key].empty())
+                        {
+                            const double onTick = liveOnTicks[key].front();
+                            liveOnTicks[key].erase (liveOnTicks[key].begin());
+                            CHECK (ren.tick > onTick);
+                        }
+                    }
+                }
+                for (const auto& kv : liveOnTicks)
+                    CHECK (kv.second.empty());
 
                 CHECK (renderedEvents.size() == exportEvents.size());
 
@@ -1185,6 +1234,61 @@ void testExportPlaybackParity()
             }
         }
     }
+    }
+}
+
+// P1.9: Safe event buffering under extreme block size and tempo
+void testLargeBlockDenseCompingSafety()
+{
+    Host h (48000.0, 65536);
+    h.playHead.bpm = 999.0;
+
+    if (auto* p = h.processor.apvts.getParameter ("compStyle"))
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) (int) cs::CompStyle::PulseEighth));
+    if (auto* p = h.processor.apvts.getParameter ("splitMidi"))
+        p->setValueNotifyingHost (1.0f);
+    if (auto* p = h.processor.apvts.getParameter ("strum"))
+        p->setValueNotifyingHost (p->convertTo0to1 (1.0f));
+
+    h.processor.edit ([] (cs::Progression& prog, cs::Rng& rng)
+    {
+        prog.bars = 8;
+        prog.numSlots = 16;
+        cs::layoutEven (prog);
+        cs::roll (prog, rng);
+    });
+
+    const cs::Progression p = h.processor.getProgression();
+    const double sps = samplesPerStep (h);
+    const int totalBlocks = (int) std::ceil ((double) p.lengthSteps() * sps / (double) h.blockSize);
+
+    // Render 1 loop
+    h.playHead.ppq = 0.0;
+    h.playHead.playing = true;
+    h.run (totalBlocks + 1);
+
+    // Stop transport
+    h.playHead.playing = false;
+    h.run (2);
+
+    CHECK (! h.events.empty());
+    CHECK (h.heldAfterReplay() == 0); // Assert zero stuck notes after transport stop
+
+    // Assert every note-on has a matching note-off
+    std::map<std::pair<int, int>, int> sounding;
+    for (const auto& ev : h.events)
+    {
+        const auto key = std::make_pair (ev.channel, ev.note);
+        if (ev.on)
+            ++sounding[key];
+        else
+        {
+            CHECK (sounding[key] > 0);
+            --sounding[key];
+        }
+    }
+    for (const auto& kv : sounding)
+        CHECK (kv.second == 0);
 }
 
 } // namespace
@@ -1227,6 +1331,7 @@ int main (int argc, char** argv)
     testIncomingMidiTriggerIntegration();
     testSplitMidiOutput();
     testExportPlaybackParity();
+    testLargeBlockDenseCompingSafety();
     testVariationBankAndHistory();
     testMeterAndTripletGrid();
     std::printf ("%d checks, %d failures\n", checks, failures);

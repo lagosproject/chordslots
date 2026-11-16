@@ -125,6 +125,18 @@ inline std::vector<CompHit> getCompHits (CompStyle style, int slotSteps, int met
     return std::vector<CompHit> (buf, buf + count);
 }
 
+/**
+ * Scales per-voice strum/humanize offsets for a comp hit so that the latest voice
+ * starts no later than 50% of the hit's duration:
+ * scale = min(1, 0.5 * hitDurationMs / maxOffsetMs)
+ */
+inline double compHitOffsetScale (double hitDurationMs, double maxOffsetMs) noexcept
+{
+    if (maxOffsetMs <= 0.0 || hitDurationMs <= 0.0)
+        return 1.0;
+    return std::min (1.0, 0.5 * hitDurationMs / maxOffsetMs);
+}
+
 struct PerformanceParams
 {
     CompStyle compStyle      = CompStyle::Sustain;

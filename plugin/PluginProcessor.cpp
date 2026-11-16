@@ -491,7 +491,12 @@ void ChordSlotsProcessor::copyVariation (int src, int dst)
 void ChordSlotsProcessor::publish()
 {
     const cs::PerformanceParams perf = getPerformanceParams();
-    const double bpm = lastBpm.load();
+    double bpm = lastBpm.load();
+    if (auto* ph = getPlayHead())
+        if (const auto pos = ph->getPosition())
+            if (const auto b = pos->getBpm())
+                if (*b >= 20.0 && *b <= 999.0)
+                    bpm = *b;
     cs::PlayBank pb;
     for (int i = 0; i < cs::kNumVariations; ++i)
         pb.variations[i] = cs::toPlayData (variations[(size_t) i], perf, bpm);
@@ -820,13 +825,18 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
         const int firstUpper = (split || s.numHits > 1) ? s.bassCount : 0;
         const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * (double) kTicksPerStep * (double) gate - 1.0);
+        const double hitDurationMs = (double) hit.durationSteps * (60000.0 / (bpm * (double) cs::kStepsPerQuarter));
+        double maxOffsetMs = 0.0;
+        for (int i = firstUpper; i < s.n && i < cs::kMaxNotes; ++i)
+            maxOffsetMs = std::max (maxOffsetMs, (double) s.offsetMs[i]);
+        const double hitScale = cs::compHitOffsetScale (hitDurationMs, maxOffsetMs);
 
         for (int i = firstUpper; i < s.n && i < cs::kMaxNotes; ++i)
         {
             const int note = s.notes[i];
             const int baseVel = s.velocities[i] > 0 ? s.velocities[i] : s.velocity;
             const int vel = juce::jlimit (1, 127, (int) std::lround ((float) baseVel * hit.velScale));
-            const double noteOffsetTicks = (double) s.offsetMs[i] * msToTicks;
+            const double noteOffsetTicks = (double) s.offsetMs[i] * hitScale * msToTicks;
             const double delayTicks = std::min (hitDurTicks - 1.0, noteOffsetTicks);
 
             if (elapsedTicks >= delayTicks)
@@ -1056,9 +1066,34 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             int slot;
             int hitIdx;
         };
-        Event events[512];
+        static constexpr int kMaxBlockEvents = 512;
+        static constexpr int kReservedOffEvents = 64;
+        static constexpr int kMaxOnEvents = kMaxBlockEvents - kReservedOffEvents;
+        Event events[kMaxBlockEvents];
         int numEvents = 0;
-        const double endStep = startStep + numSamples * stepsPerSample;
+
+        // Dropping must never leave a stuck note. When the event array approaches capacity,
+        // we stop adding note-on events (SlotStart, HitStart) beyond kMaxOnEvents (448),
+        // reserving the remaining kReservedOffEvents (64) exclusively for note-off events (SlotOff, HitOff).
+        // This ensures every sounded note can be paired with its note-off even under extreme
+        // block sizes and event densities, preventing buffer overflows and stuck notes.
+        auto pushEvent = [&] (int sample, EventType type, int slot, int hitIdx)
+        {
+            const bool isOff = (type == EventType::SlotOff || type == EventType::HitOff);
+            if (isOff)
+            {
+                if (numEvents < kMaxBlockEvents)
+                    events[numEvents++] = { sample, type, slot, hitIdx };
+            }
+            else
+            {
+                if (numEvents < kMaxOnEvents)
+                    events[numEvents++] = { sample, type, slot, hitIdx };
+            }
+        };
+        double endStep = startStep + numSamples * stepsPerSample;
+        if (std::abs (endStep - std::round (endStep)) < 1e-7)
+            endStep = std::round (endStep);
 
         for (int k = 0; k < 2; ++k)
         {
@@ -1074,13 +1109,13 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                 {
                     const int sample = juce::jlimit (0, numSamples - 1, (int) std::lround ((tBassOn - startStep) / stepsPerSample));
                     if (! (sample == 0 && startedAtZeroBass && i == currentSlot))
-                        events[numEvents++] = { sample, EventType::SlotStart, i, 0 };
+                        pushEvent (sample, EventType::SlotStart, i, 0);
                 }
 
                 if (tBassOff > startStep && tBassOff < endStep)
                 {
                     const int sample = juce::jlimit (0, numSamples - 1, (int) std::lround ((tBassOff - startStep) / stepsPerSample));
-                    events[numEvents++] = { sample, EventType::SlotOff, i, 0 };
+                    pushEvent (sample, EventType::SlotOff, i, 0);
                 }
 
                 // Upper hits timeline
@@ -1093,13 +1128,13 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                     {
                         const int sample = juce::jlimit (0, numSamples - 1, (int) std::lround ((tHitOn - startStep) / stepsPerSample));
                         if (! (sample == 0 && startedAtZeroHit && i == currentSlot && h == startedHitIdx))
-                            events[numEvents++] = { sample, EventType::HitStart, i, h };
+                            pushEvent (sample, EventType::HitStart, i, h);
                     }
 
                     if (tHitOff > startStep && tHitOff < endStep)
                     {
                         const int sample = juce::jlimit (0, numSamples - 1, (int) std::lround ((tHitOff - startStep) / stepsPerSample));
-                        events[numEvents++] = { sample, EventType::HitOff, i, h };
+                        pushEvent (sample, EventType::HitOff, i, h);
                     }
                 }
             }
@@ -1211,7 +1246,12 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
 {
     const cs::Progression p = getProgression();
     const cs::PerformanceParams perf = getPerformanceParams();
-    const double bpm = lastBpm.load();
+    double bpm = lastBpm.load();
+    if (auto* ph = getPlayHead())
+        if (const auto pos = ph->getPosition())
+            if (const auto b = pos->getBpm())
+                if (*b >= 20.0 && *b <= 999.0)
+                    bpm = *b;
     const cs::PlayData playData = cs::toPlayData (p, perf, bpm);
     const float gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
     const bool split = isSplitMidi();
@@ -1250,11 +1290,17 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
                 // Upper structure notes to Ch 1 (with comping pattern if active)
                 if (perf.compStyle == cs::CompStyle::Sustain)
                 {
+                    const double slotDurationMs = (double) (p.slotEnd (i) - ps.start) * (60000.0 / (bpm * (double) cs::kStepsPerQuarter));
+                    double maxOffsetMs = 0.0;
+                    for (int j = ps.bassCount; j < ps.n; ++j)
+                        maxOffsetMs = std::max (maxOffsetMs, (double) ps.offsetMs[(size_t) j]);
+                    const double hitScale = cs::compHitOffsetScale (slotDurationMs, maxOffsetMs);
+
                     for (int j = ps.bassCount; j < ps.n; ++j)
                     {
                         const int note = ps.notes[(size_t) j];
                         const int vel = ps.velocities[(size_t) j];
-                        const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * msToTicks;
+                        const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * hitScale * msToTicks;
                         const double noteOn = std::min (off - 1.0, baseOn + noteOffsetTicks);
                         chordsSeq.addEvent (juce::MidiMessage::noteOn (kMidiChannelChords, note, (juce::uint8) juce::jlimit (1, 127, vel)), noteOn);
                         chordsSeq.addEvent (juce::MidiMessage::noteOff (kMidiChannelChords, note), off);
@@ -1268,12 +1314,17 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
                         const double hitOn = baseOn + (double) hit.stepOffset * kTicksPerStep;
                         const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * kTicksPerStep * (double) gate - gateOffDiscount);
                         const double hitOff = hitOn + hitDurTicks;
+                        const double hitDurationMs = (double) hit.durationSteps * (60000.0 / (bpm * (double) cs::kStepsPerQuarter));
+                        double maxOffsetMs = 0.0;
+                        for (int j = ps.bassCount; j < ps.n; ++j)
+                            maxOffsetMs = std::max (maxOffsetMs, (double) ps.offsetMs[(size_t) j]);
+                        const double hitScale = cs::compHitOffsetScale (hitDurationMs, maxOffsetMs);
 
                         for (int j = ps.bassCount; j < ps.n; ++j)
                         {
                             const int note = ps.notes[(size_t) j];
                             const int vel = juce::jlimit (1, 127, (int) std::lround ((float) ps.velocities[(size_t) j] * hit.velScale));
-                            const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * msToTicks;
+                            const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * hitScale * msToTicks;
                             const double noteOn = std::min (hitOff - 1.0, hitOn + noteOffsetTicks);
                             chordsSeq.addEvent (juce::MidiMessage::noteOn (kMidiChannelChords, note, (juce::uint8) vel), noteOn);
                             chordsSeq.addEvent (juce::MidiMessage::noteOff (kMidiChannelChords, note), hitOff);
@@ -1317,11 +1368,17 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
 
                 if (perf.compStyle == cs::CompStyle::Sustain)
                 {
+                    const double slotDurationMs = (double) (p.slotEnd (i) - ps.start) * (60000.0 / (bpm * (double) cs::kStepsPerQuarter));
+                    double maxOffsetMs = 0.0;
+                    for (int j = 0; j < ps.n; ++j)
+                        maxOffsetMs = std::max (maxOffsetMs, (double) ps.offsetMs[(size_t) j]);
+                    const double hitScale = cs::compHitOffsetScale (slotDurationMs, maxOffsetMs);
+
                     for (int j = 0; j < ps.n; ++j)
                     {
                         const int note = ps.notes[(size_t) j];
                         const int vel = ps.velocities[(size_t) j];
-                        const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * msToTicks;
+                        const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * hitScale * msToTicks;
                         const double noteOn = std::min (off - 1.0, baseOn + noteOffsetTicks);
                         seq.addEvent (juce::MidiMessage::noteOn (kMidiChannelChords, note, (juce::uint8) juce::jlimit (1, 127, vel)), noteOn);
                         seq.addEvent (juce::MidiMessage::noteOff (kMidiChannelChords, note), off);
@@ -1345,12 +1402,17 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
                         const double hitOn = baseOn + (double) hit.stepOffset * kTicksPerStep;
                         const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * kTicksPerStep * (double) gate - gateOffDiscount);
                         const double hitOff = hitOn + hitDurTicks;
+                        const double hitDurationMs = (double) hit.durationSteps * (60000.0 / (bpm * (double) cs::kStepsPerQuarter));
+                        double maxOffsetMs = 0.0;
+                        for (int j = ps.bassCount; j < ps.n; ++j)
+                            maxOffsetMs = std::max (maxOffsetMs, (double) ps.offsetMs[(size_t) j]);
+                        const double hitScale = cs::compHitOffsetScale (hitDurationMs, maxOffsetMs);
 
                         for (int j = ps.bassCount; j < ps.n; ++j)
                         {
                             const int note = ps.notes[(size_t) j];
                             const int vel = juce::jlimit (1, 127, (int) std::lround ((float) ps.velocities[(size_t) j] * hit.velScale));
-                            const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * msToTicks;
+                            const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * hitScale * msToTicks;
                             const double noteOn = std::min (hitOff - 1.0, hitOn + noteOffsetTicks);
                             seq.addEvent (juce::MidiMessage::noteOn (kMidiChannelChords, note, (juce::uint8) vel), noteOn);
                             seq.addEvent (juce::MidiMessage::noteOff (kMidiChannelChords, note), hitOff);
@@ -1383,11 +1445,17 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
 
             if (perf.compStyle == cs::CompStyle::Sustain)
             {
+                const double slotDurationMs = (double) (p.slotEnd (i) - ps.start) * (60000.0 / (bpm * (double) cs::kStepsPerQuarter));
+                double maxOffsetMs = 0.0;
+                for (int j = ps.bassCount; j < ps.n; ++j)
+                    maxOffsetMs = std::max (maxOffsetMs, (double) ps.offsetMs[(size_t) j]);
+                const double hitScale = cs::compHitOffsetScale (slotDurationMs, maxOffsetMs);
+
                 for (int j = ps.bassCount; j < ps.n; ++j)
                 {
                     const int note = ps.notes[(size_t) j];
                     const int vel = ps.velocities[(size_t) j];
-                    const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * msToTicks;
+                    const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * hitScale * msToTicks;
                     const double noteOn = std::min (off - 1.0, baseOn + noteOffsetTicks);
                     seq.addEvent (juce::MidiMessage::noteOn (kMidiChannelChords, note, (juce::uint8) juce::jlimit (1, 127, vel)), noteOn);
                     seq.addEvent (juce::MidiMessage::noteOff (kMidiChannelChords, note), off);
@@ -1401,12 +1469,17 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
                     const double hitOn = baseOn + (double) hit.stepOffset * kTicksPerStep;
                     const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * kTicksPerStep * (double) gate - gateOffDiscount);
                     const double hitOff = hitOn + hitDurTicks;
+                    const double hitDurationMs = (double) hit.durationSteps * (60000.0 / (bpm * (double) cs::kStepsPerQuarter));
+                    double maxOffsetMs = 0.0;
+                    for (int j = ps.bassCount; j < ps.n; ++j)
+                        maxOffsetMs = std::max (maxOffsetMs, (double) ps.offsetMs[(size_t) j]);
+                    const double hitScale = cs::compHitOffsetScale (hitDurationMs, maxOffsetMs);
 
                     for (int j = ps.bassCount; j < ps.n; ++j)
                     {
                         const int note = ps.notes[(size_t) j];
                         const int vel = juce::jlimit (1, 127, (int) std::lround ((float) ps.velocities[(size_t) j] * hit.velScale));
-                        const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * msToTicks;
+                        const double noteOffsetTicks = (double) ps.offsetMs[(size_t) j] * hitScale * msToTicks;
                         const double noteOn = std::min (hitOff - 1.0, hitOn + noteOffsetTicks);
                         seq.addEvent (juce::MidiMessage::noteOn (kMidiChannelChords, note, (juce::uint8) vel), noteOn);
                         seq.addEvent (juce::MidiMessage::noteOff (kMidiChannelChords, note), hitOff);
