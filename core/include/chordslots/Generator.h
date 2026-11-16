@@ -88,6 +88,14 @@ struct Locks
     bool voicing = false; // inversions and register
 };
 
+struct MelodyNote
+{
+    float start = 0.0f, end = 0.0f; // fractions of the loop
+    int pitch = 60;
+};
+
+constexpr size_t kMaxMelodyNotes = 4096;
+
 struct Progression
 {
     int tonic = 9; // A
@@ -97,6 +105,8 @@ struct Progression
     int timeSigDen = 4;
     int numSlots = 4;
     int snap = 12; // cut grid in steps: 24 = 1/4, 16 = 1/4T, 12 = 1/8, 8 = 1/8T, 6 = 1/16, 4 = 1/16T, 3 = 1/32
+    std::vector<MelodyNote> melody;
+    float melodyFit = 0.75f;
     float variety = 0.5f;     // sampling temperature for a full Roll
     float adventure = 0.3f;   // 0 = diatonic triads, 1 = borrowed chords and extensions
     float syncopation = 0.3f; // how irregular randomised cuts are
@@ -386,12 +396,78 @@ inline float contextualEditCost (const Progression& p, int slot, const Candidate
     return delta;
 }
 
-inline float slotUnaryCost (const Progression& p, int slot, const Candidate& cand)
+using MelodyProfile = std::array<float, 12>;
+
+inline MelodyProfile slotMelodyProfile (const Progression& p, int slot)
+{
+    MelodyProfile profile {};
+    if (p.melody.empty() || p.melodyFit <= 0.0f)
+        return profile;
+
+    const int length = p.lengthSteps();
+    const auto meter = p.meter();
+    const int slotStart = p.slots[(size_t) slot].start, slotEnd = p.slotEnd (slot);
+    for (const auto& note : p.melody)
+    {
+        if (! (note.start >= 0.0f && note.end <= 1.0f && note.end > note.start))
+            continue;
+        const int start = std::clamp ((int) std::lround (note.start * length), 0, length - 1);
+        const int end = std::clamp ((int) std::lround (note.end * length), start + 1, length);
+        const int overlap = std::min (slotEnd, end) - std::max (slotStart, start);
+        if (overlap <= 0)
+            continue;
+        const int offset = start % meter.stepsPerBar;
+        const auto endStrong = meter.strongOffsets.end();
+        const bool strong = std::find (meter.strongOffsets.begin(), endStrong, offset) != endStrong;
+        profile[(size_t) mod12 (note.pitch)] += (float) overlap * (strong ? 1.5f : 1.0f);
+    }
+    return profile;
+}
+
+inline float melodyNoteCost (Chord chord, int pitchClass)
+{
+    pitchClass = mod12 (pitchClass);
+    const int interval = mod12 (pitchClass - chord.root);
+    const auto& notes = chordTypes()[(size_t) chord.type].iv;
+    if ((chordMask (chord) & (1u << pitchClass)) != 0)
+        return 0.0f;
+
+    const bool major = hasMajorThird (notes), minor = hasMinorThird (notes);
+    const bool dominant = seventhKind (notes) == SeventhKind::Minor7 && (major || isSus (notes));
+    if ((major && interval == 5) || (! dominant && interval == 1) || (dominant && interval == 11))
+        return 1.4f;
+    if (interval == 2 || (minor && interval == 5) || (major && interval == 6) || interval == 9)
+        return 0.12f;
+    return 0.55f;
+}
+
+inline float melodyCost (Chord chord, const MelodyProfile& profile, float weight)
+{
+    if (weight <= 0.0f)
+        return 0.0f;
+
+    float total = 0.0f, penalty = 0.0f;
+    for (int pc = 0; pc < 12; ++pc)
+    {
+        const float duration = profile[(size_t) pc];
+        if (duration > 0.0f)
+        {
+            total += duration;
+            penalty += duration * melodyNoteCost (chord, pc);
+        }
+    }
+    return total > 0.0f ? weight * penalty / total : 0.0f;
+}
+
+inline float slotUnaryCost (const Progression& p, int slot, const Candidate& cand,
+                            const MelodyProfile* melody = nullptr)
 {
     const Slot& s = p.slots[(size_t) slot];
     const float dB = cand.brightness - s.targetB;
     const float dT = cand.tension - s.targetT;
     float cost = dB * dB + dT * dT;
+    if (! p.melody.empty() && p.melodyFit > 0.0f)
+        cost += melodyCost (cand.chord, melody != nullptr ? *melody : slotMelodyProfile (p, slot), p.melodyFit);
 
     // Low adventure keeps to plain triads in the scale; the price of colour
     // fades quadratically as the dial goes up.
@@ -411,9 +487,10 @@ inline bool oscillates (Chord first, Chord middle, Chord last) noexcept
 }
 
 inline float slotCost (const Progression& p, int slot, const Candidate& cand,
-                       const Chord* prev, const Chord* next, const Chord* prev2 = nullptr)
+                       const Chord* prev, const Chord* next, const Chord* prev2 = nullptr,
+                       const MelodyProfile* melody = nullptr)
 {
-    float cost = slotUnaryCost (p, slot, cand) + contextualEditCost (p, slot, cand, prev, next);
+    float cost = slotUnaryCost (p, slot, cand, melody) + contextualEditCost (p, slot, cand, prev, next);
     // A-B-A Anti-Oscillation Penalty: discourage ping-ponging back to the chord 2 slots ago
     if (prev2 != nullptr && prev != nullptr && oscillates (*prev2, *prev, cand.chord))
         cost += (1.0f - p.adventure) * 0.08f;
@@ -547,6 +624,8 @@ inline ChordVariable makeChordVariable (const Progression& p, int first, int sec
 {
     ChordVariable variable;
     std::vector<std::pair<float, Chord>> options;
+    const auto firstMelody = slotMelodyProfile (p, first);
+    const auto secondMelody = second >= 0 ? slotMelodyProfile (p, second) : MelodyProfile {};
     for (const auto& candidate : pool)
     {
         const auto firstOptions = bassOptions (p, first, candidate.chord);
@@ -558,12 +637,12 @@ inline ChordVariable makeChordVariable (const Progression& p, int first, int sec
 
             Chord chord = candidate.chord;
             chord.bassInt = bassInt;
-            float cost = slotUnaryCost (p, first, candidate) + inversionCost (p, first, bassInt);
+            float cost = slotUnaryCost (p, first, candidate, &firstMelody) + inversionCost (p, first, bassInt);
             if constexpr (kUseContextualTension)
                 if (p.numSlots == 1)
                     cost += contextualEditCost (p, first, candidate, nullptr, nullptr);
             if (second >= 0)
-                cost += slotUnaryCost (p, second, candidate) + inversionCost (p, second, bassInt);
+                cost += slotUnaryCost (p, second, candidate, &secondMelody) + inversionCost (p, second, bassInt);
             options.emplace_back (cost, chord);
         }
     }
@@ -793,6 +872,7 @@ inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxC
     const auto neighbour = [&] (int offset) { return p.slots[(size_t) ((slot + n + offset) % n)].chord; };
     const Chord previous = neighbour (-1), next = neighbour (1);
     const auto style = styleForProgression (p);
+    const auto melody = slotMelodyProfile (p, slot);
     std::vector<std::pair<float, Chord>> scored;
     for (const auto& candidate : all)
     {
@@ -800,7 +880,7 @@ inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxC
             continue;
 
         const Chord chord = candidate.chord;
-        float harmonic = slotUnaryCost (p, slot, candidate);
+        float harmonic = slotUnaryCost (p, slot, candidate, &melody);
         harmonic += contextualEditCost (p, slot, candidate, n > 1 ? &previous : nullptr, n > 1 ? &next : nullptr);
         if (n > 1)
             harmonic += detail::harmonicTransitionCost (p, style, previous, chord)
@@ -1361,8 +1441,9 @@ inline void rollSlotRoot (Progression& p, int slot, Rng& rng)
     const Chord* prev2 = n > 2 ? &p.slots[(size_t) p2i].chord : nullptr;
 
     std::vector<float> costs (candidates.size());
+    const auto melody = slotMelodyProfile (p, slot);
     for (size_t i = 0; i < candidates.size(); ++i)
-        costs[i] = slotCost (p, slot, candidates[i], prev, next, prev2);
+        costs[i] = slotCost (p, slot, candidates[i], prev, next, prev2, &melody);
 
     const int pick = sampleSoftmin (costs, 0.004f, rng);
     if (pick >= 0)
@@ -1405,8 +1486,9 @@ inline void rollSlotColor (Progression& p, int slot, Rng& rng)
     const Chord* prev2 = n > 2 ? &p.slots[(size_t) p2i].chord : nullptr;
 
     std::vector<float> costs (candidates.size());
+    const auto melody = slotMelodyProfile (p, slot);
     for (size_t i = 0; i < candidates.size(); ++i)
-        costs[i] = slotCost (p, slot, candidates[i], prev, next, prev2);
+        costs[i] = slotCost (p, slot, candidates[i], prev, next, prev2, &melody);
 
     const int pick = sampleSoftmin (costs, 0.004f, rng);
     if (pick >= 0)

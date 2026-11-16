@@ -1527,11 +1527,57 @@ static void testSpiralTension()
     }
 }
 
+static void testMelodyHarmonization()
+{
+    Progression p;
+    p.tonic = 0;
+    p.scale = 0;
+    p.numSlots = 8;
+    p.locks.rhythm = true;
+    layoutEven (p);
+    // Twinkle Twinkle, first two lines, one quarter note per entry.
+    const int notes[] { 60, 60, 67, 67, 69, 69, 67, 67, 65, 65, 64, 64, 62, 62, 60, 60 };
+    for (int beat = 0; beat < 16; ++beat)
+        p.melody.push_back ({ beat / 16.0f, (beat + 1) / 16.0f, notes[beat] });
+    const auto f = slotMelodyProfile (p, 4);
+    CHECK (f[5] == 60.0f); // 24 steps on a strong beat + 24 on a weak beat.
+    CHECK (melodyNoteCost (ch (0, ""), 4) == 0.0f);
+    CHECK (melodyNoteCost (ch (0, "m"), 5) < melodyNoteCost (ch (0, ""), 5));
+    CHECK (melodyNoteCost (ch (0, "7"), 11) > melodyNoteCost (ch (0, "7"), 2));
+    CHECK (melodyCost (ch (0, ""), f, 0.0f) == 0.0f);
+    CHECK (melodyCost (ch (0, ""), f, 0.25f) < melodyCost (ch (0, ""), f, 0.75f));
+    CHECK (melodyCost (ch (0, ""), f, 0.75f) < melodyCost (ch (0, ""), f, 1.0f));
+
+    for (unsigned seed = 0; seed < 12; ++seed)
+    {
+        auto harmonized = p;
+        Rng rng (seed);
+        roll (harmonized, rng);
+        for (int slot = 0; slot < p.numSlots; ++slot)
+            CHECK (melodyNoteCost (harmonized.slots[(size_t) slot].chord, notes[slot * 2]) < 1.0f);
+    }
+
+    auto ignored = p, noMelody = p;
+    ignored.melodyFit = 0.0f;
+    noMelody.melody.clear();
+    Rng first (81), second (81);
+    roll (ignored, first);
+    roll (noMelody, second);
+    for (int slot = 0; slot < p.numSlots; ++slot)
+        CHECK (ignored.slots[(size_t) slot].chord == noMelody.slots[(size_t) slot].chord);
+
+    p.melody = { { 0.0f, 0.25f, 60 } };
+    CHECK (slotMelodyProfile (p, 0)[0] == 72.0f);
+    CHECK (slotMelodyProfile (p, 1)[0] == 72.0f);
+    CHECK (slotMelodyProfile (p, 2)[0] == 0.0f);
+}
+
 int main()
 {
     testGoldenTheory();
     testVoicedTension();
     testSpiralTension();
+    testMelodyHarmonization();
     testExactRing();
     testVariety();
     CHECK (chordTypes().size() == std::size (kPythonQualityClasses));

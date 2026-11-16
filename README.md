@@ -20,6 +20,10 @@ finds chords whose *measured* properties follow those curves.
   with **Strum** (bidirectional timing spread, with pinned bass), **Accent** (boosts
   top melody notes, softens inner voices), and **Humanize** (deterministic microtiming
   and velocity jitter). **Re-Feel** rolls fresh jitter without regenerating chords.
+- **Harmonize Melody** – choose a MIDI file from the **MIDI** menu. ChordSlots
+  fits the selected melody track to the current loop and weights sustained notes
+  and strong beats when choosing chords. **Melody Fit** controls the weight per
+  variation. At 0% Roll ignores the imported melody.
 - **Locks & Rolls** – freeze any layer (Rhythm, Roots, Colors, Voicing) or any single
   slot, then **Roll** the rest.
 - **Moods** – named sets of target curves (Euphoric, Uplifting, Epic,

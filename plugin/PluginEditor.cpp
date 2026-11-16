@@ -299,10 +299,26 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     };
     addAndMakeVisible (resetCurvesBtn);
 
-    analyzeMidiBtn.setButtonText (juce::String::fromUTF8 ("Analyze MIDI ▾"));
-    analyzeMidiBtn.setTooltip ("Import a MIDI file and extract Brightness, Tension, and Energy curves");
-    analyzeMidiBtn.onClick = [this] { analyzeMidi(); };
+    analyzeMidiBtn.setTooltip ("Analyze a MIDI file or harmonize a MIDI melody");
+    analyzeMidiBtn.onClick = [this] { showMidiImportMenu(); };
     addAndMakeVisible (analyzeMidiBtn);
+
+    setupKnob (melodyFit, melodyFitLabel, "MELODY FIT");
+    melodyFit.setRange (0.0, 1.0, 0.01);
+    melodyFit.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    melodyFit.setPopupDisplayEnabled (true, true, this);
+    melodyFit.setTooltip ("Melody weight on the next Roll. Set to 0% to ignore the melody.");
+    melodyFit.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
+    melodyFit.textFromValueFunction = [] (double value)
+    {
+        return juce::String (juce::roundToInt (100.0 * value)) + " %";
+    };
+    melodyFit.onValueChange = [this]
+    {
+        if (refreshing) return;
+        const float value = (float) melodyFit.getValue();
+        processor.edit ([value] (cs::Progression& pr, cs::Rng&) { pr.melodyFit = value; }, false);
+    };
 
     addAndMakeVisible (lanes);
 
@@ -659,6 +675,9 @@ void ChordSlotsEditor::refresh()
     variety.setValue (p.variety, juce::dontSendNotification);
     syncopation.setValue (p.syncopation, juce::dontSendNotification);
     bassMotion.setValue (p.bassMotion, juce::dontSendNotification);
+    melodyFit.setValue (p.melodyFit, juce::dontSendNotification);
+    melodyFit.setEnabled (! p.melody.empty());
+    analyzeMidiBtn.setButtonText (juce::String::fromUTF8 (p.melody.empty() ? "MIDI ▾" : "MIDI: Melody ▾"));
 
     const cs::TriggerConfig tc = processor.getTriggerConfig();
     const char* modeNames[] = { "Auto", "Trig", "Loop" };
@@ -840,22 +859,46 @@ void ChordSlotsEditor::applyShapeStamp (int stampId)
     });
 }
 
-void ChordSlotsEditor::analyzeMidi()
+void ChordSlotsEditor::showMidiImportMenu()
 {
-    chooser = std::make_unique<juce::FileChooser> ("Select MIDI file to extract curves...",
+    juce::PopupMenu menu;
+    menu.addItem (1, "Analyze MIDI");
+    menu.addItem (2, "Harmonize Melody");
+    menu.addItem (3, "Clear Melody", ! processor.getProgression().melody.empty());
+    auto editor = juce::Component::SafePointer<ChordSlotsEditor> (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&analyzeMidiBtn), [editor] (int command)
+    {
+        if (editor == nullptr)
+            return;
+        if (command == 1 || command == 2)
+            editor->importMidi (command == 2);
+        else if (command == 3)
+            editor->processor.edit ([] (cs::Progression& p, cs::Rng&) { p.melody.clear(); });
+    });
+}
+
+void ChordSlotsEditor::importMidi (bool harmonize)
+{
+    chooser = std::make_unique<juce::FileChooser> (harmonize ? "Select a MIDI melody..." : "Select MIDI file to extract curves...",
                                                     juce::File::getSpecialLocation (juce::File::userHomeDirectory),
                                                     "*.mid;*.midi");
     const auto browserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
-    chooser->launchAsync (browserFlags, [this] (const juce::FileChooser& fc)
+    auto editor = juce::Component::SafePointer<ChordSlotsEditor> (this);
+    chooser->launchAsync (browserFlags, [editor, harmonize] (const juce::FileChooser& fc)
     {
-        const auto result = fc.getResult();
-        if (result.existsAsFile())
+        const auto file = fc.getResult();
+        if (editor == nullptr || ! file.existsAsFile())
+            return;
+
+        auto& proc = editor->processor;
+        if (harmonize)
         {
-            if (processor.loadMidiToCurves (result))
-            {
-                processor.edit ([] (cs::Progression& pr, cs::Rng& rng) { cs::roll (pr, rng); });
-            }
+            if (! proc.harmonizeMidi (file))
+                juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon, "Harmonize Melody",
+                    "Choose a MIDI track with pitched notes and durations (maximum 4096 notes).");
         }
+        else if (proc.loadMidiToCurves (file))
+            proc.edit ([] (cs::Progression& p, cs::Rng& rng) { cs::roll (p, rng); });
     });
 }
 
@@ -1182,6 +1225,10 @@ void ChordSlotsEditor::resized()
     resetCurvesBtn.setBounds (laneBar.removeFromRight (58).withSizeKeepingCentre (56, 24));
     laneBar.removeFromRight (6);
     analyzeMidiBtn.setBounds (laneBar.removeFromRight (112).withSizeKeepingCentre (110, 24));
+    laneBar.removeFromRight (8);
+    auto melodyControl = laneBar.removeFromRight (105);
+    melodyFit.setBounds (melodyControl.removeFromRight (34).withSizeKeepingCentre (32, 28));
+    melodyFitLabel.setBounds (melodyControl);
 
     area.removeFromTop (4);
     lanes.setBounds (area);

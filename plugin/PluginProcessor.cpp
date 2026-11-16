@@ -11,6 +11,20 @@ constexpr int kMidiChannelBass   = 2;
 constexpr int kTicksPerQuarter = 480;
 constexpr int kTicksPerStep = kTicksPerQuarter / cs::kStepsPerQuarter;
 
+bool readMidi (const juce::File& file, juce::MidiFile& midi)
+{
+    juce::FileInputStream stream (file);
+    return stream.openedOk() && midi.readFrom (stream);
+}
+
+bool isMelodyNote (const juce::MidiMessageSequence::MidiEventHolder& event)
+{
+    return event.message.isNoteOn() && event.message.getChannel() != 10
+        && event.noteOffObject != nullptr
+        && event.message.getTimeStamp() >= 0.0
+        && event.noteOffObject->message.getTimeStamp() > event.message.getTimeStamp();
+}
+
 juce::ValueTree progressionToTree (const cs::Progression& p)
 {
     juce::ValueTree t ("Progression");
@@ -22,6 +36,7 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
     t.setProperty ("snap", p.snap, nullptr);
     t.setProperty ("adventure", p.adventure, nullptr);
     t.setProperty ("variety", p.variety, nullptr);
+    t.setProperty ("melodyFit", p.melodyFit, nullptr);
     t.setProperty ("syncopation", p.syncopation, nullptr);
     t.setProperty ("bassMotion", p.bassMotion, nullptr);
     t.setProperty ("mood", p.mood, nullptr);
@@ -52,6 +67,19 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
         st.setProperty ("notes", notes.joinIntoString (" "), nullptr);
         t.appendChild (st, nullptr);
     }
+    if (! p.melody.empty())
+    {
+        juce::ValueTree melody ("Melody");
+        for (const auto& note : p.melody)
+        {
+            juce::ValueTree item ("Note");
+            item.setProperty ("start", note.start, nullptr);
+            item.setProperty ("end", note.end, nullptr);
+            item.setProperty ("pitch", note.pitch, nullptr);
+            melody.appendChild (item, nullptr);
+        }
+        t.appendChild (melody, nullptr);
+    }
     return t;
 }
 
@@ -68,7 +96,19 @@ int chordTypeFromSuffix (const juce::String& suffix)
     state. */
 bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p, int stateVersion = 3)
 {
-    if (! t.hasType ("Progression") || t.getNumChildren() == 0)
+    if (! t.hasType ("Progression"))
+        return false;
+
+    std::array<juce::ValueTree, cs::kMaxSlots> slots;
+    int numSlots = 0;
+    for (const auto child : t)
+    {
+        if (child.hasType ("Slot"))
+            slots[(size_t) numSlots++] = child;
+        if (numSlots == cs::kMaxSlots)
+            break;
+    }
+    if (numSlots == 0)
         return false;
 
     p = cs::Progression();
@@ -89,6 +129,19 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p, int stat
     p.adventure = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("adventure", 0.3f));
     const float variety = (float) t.getProperty ("variety", 0.5f);
     p.variety = std::isfinite (variety) ? cs::clamp01 (variety) : 0.5f;
+    const float melodyFit = (float) t.getProperty ("melodyFit", p.melodyFit);
+    if (std::isfinite (melodyFit))
+        p.melodyFit = cs::clamp01 (melodyFit);
+    for (const auto item : t.getChildWithName ("Melody"))
+    {
+        if (p.melody.size() == cs::kMaxMelodyNotes)
+            break;
+        const float start = (float) item.getProperty ("start", -1.0f);
+        const float end = (float) item.getProperty ("end", -1.0f);
+        const int pitch = (int) item.getProperty ("pitch", -1);
+        if (item.hasType ("Note") && start >= 0.0f && end <= 1.0f && end > start && pitch >= 0 && pitch <= 127)
+            p.melody.push_back ({ start, end, pitch });
+    }
     p.syncopation = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("syncopation", 0.3f));
     p.bassMotion = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("bassMotion", 0.0f));
     p.mood = juce::jlimit (-1, (int) cs::moods().size() - 1, (int) t.getProperty ("mood", -1));
@@ -99,11 +152,11 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p, int stat
     p.locks.colors = (bool) t.getProperty ("lockColors", false);
     p.locks.voicing = (bool) t.getProperty ("lockVoicing", false);
 
-    p.numSlots = juce::jlimit (1, std::min (cs::kMaxSlots, p.lengthSteps()), t.getNumChildren());
+    p.numSlots = std::min (numSlots, p.lengthSteps());
     cs::Rng tmp (1);
     for (int i = 0; i < p.numSlots; ++i)
     {
-        const auto st = t.getChild (i);
+        const auto& st = slots[(size_t) i];
         cs::Slot& s = p.slots[(size_t) i];
         int rawStart = (int) st.getProperty ("start", 0);
         if (stateVersion < 3)
@@ -275,15 +328,8 @@ void ChordSlotsProcessor::setSynthModel (PreviewSoundModel model)
 
 bool ChordSlotsProcessor::loadMidiToCurves (const juce::File& file)
 {
-    if (! file.existsAsFile())
-        return false;
-
-    juce::FileInputStream stream (file);
-    if (! stream.openedOk())
-        return false;
-
     juce::MidiFile midi;
-    if (! midi.readFrom (stream))
+    if (! readMidi (file, midi))
         return false;
 
     const int numTracks = midi.getNumTracks();
@@ -382,6 +428,70 @@ bool ChordSlotsProcessor::loadMidiToCurves (const juce::File& file)
         }
     });
 
+    return true;
+}
+
+bool ChordSlotsProcessor::harmonizeMidi (const juce::File& file)
+{
+    juce::MidiFile midi;
+    if (! readMidi (file, midi))
+        return false;
+
+    const juce::MidiMessageSequence* selected = nullptr;
+    std::pair<int, int> best {};
+    for (int i = 0; i < midi.getNumTracks(); ++i)
+    {
+        const auto* track = midi.getTrack (i);
+        std::pair<int, int> score {};
+        for (int n = 0; n < track->getNumEvents(); ++n)
+        {
+            const auto& event = *track->getEventPointer (n);
+            if (isMelodyNote (event))
+            {
+                score.first += event.message.getNoteNumber() > 60;
+                ++score.second;
+            }
+        }
+        if (score > best)
+        {
+            best = score;
+            selected = track;
+        }
+    }
+    if (selected == nullptr || (size_t) best.second > cs::kMaxMelodyNotes)
+        return false;
+
+    double endTick = 0.0;
+    for (int n = 0; n < selected->getNumEvents(); ++n)
+    {
+        const auto& event = *selected->getEventPointer (n);
+        if (isMelodyNote (event))
+            endTick = std::max (endTick, event.noteOffObject->message.getTimeStamp());
+    }
+    if (! std::isfinite (endTick) || endTick <= 0.0)
+        return false;
+
+    std::vector<cs::MelodyNote> notes;
+    notes.reserve ((size_t) best.second);
+    for (int n = 0; n < selected->getNumEvents(); ++n)
+    {
+        const auto& event = *selected->getEventPointer (n);
+        if (isMelodyNote (event))
+        {
+            const float start = (float) (event.message.getTimeStamp() / endTick);
+            const float end = (float) (event.noteOffObject->message.getTimeStamp() / endTick);
+            if (end > start)
+                notes.push_back ({ start, end, event.message.getNoteNumber() });
+        }
+    }
+    if (notes.empty())
+        return false;
+
+    edit ([&notes] (cs::Progression& p, cs::Rng& rng)
+    {
+        p.melody = std::move (notes);
+        cs::roll (p, rng);
+    });
     return true;
 }
 

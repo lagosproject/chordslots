@@ -319,6 +319,61 @@ void testEditWhilePlaying()
     CHECK (! h.nonFinite);
 }
 
+void testHarmonizeMelody()
+{
+    juce::MidiMessageSequence accompaniment, melody, drums;
+    const auto addNote = [] (juce::MidiMessageSequence& track, int channel, int pitch, double begin, double end)
+    {
+        auto on = juce::MidiMessage::noteOn (channel, pitch, (juce::uint8) 90);
+        auto off = juce::MidiMessage::noteOff (channel, pitch);
+        on.setTimeStamp (begin);
+        off.setTimeStamp (end);
+        track.addEvent (on);
+        track.addEvent (off);
+    };
+    for (int n = 0; n < 8; ++n)
+    {
+        addNote (accompaniment, 1, 45, n * 480.0, n * 480.0 + 400);
+        addNote (drums, 10, 78, n * 240.0, n * 240.0 + 100);
+    }
+    addNote (melody, 2, 64, 120, 600);
+    addNote (melody, 2, 67, 480, 960);
+
+    juce::MidiFile midi;
+    midi.setTicksPerQuarterNote (480);
+    midi.addTrack (accompaniment);
+    midi.addTrack (drums);
+    midi.addTrack (melody);
+    juce::TemporaryFile temp (".mid");
+    const auto file = temp.getFile();
+    {
+        juce::FileOutputStream out (file);
+        CHECK (out.openedOk() && midi.writeTo (out, 1));
+    }
+
+    Host host;
+    const int slots = host.processor.getProgression().numSlots;
+    CHECK (host.processor.harmonizeMidi (file));
+    host.processor.edit ([] (cs::Progression& p, cs::Rng&) { p.melodyFit = 0.4f; }, false);
+    juce::MemoryBlock state;
+    host.processor.getStateInformation (state);
+
+    Host restored;
+    restored.processor.setStateInformation (state.getData(), (int) state.getSize());
+    const auto p = restored.processor.getProgression();
+    CHECK (p.numSlots == slots);
+    CHECK (std::abs (p.melodyFit - 0.4f) < 1.0e-5f);
+    CHECK (p.melody.size() == 2);
+    if (p.melody.size() == 2)
+    {
+        CHECK (p.melody[0].pitch == 64 && p.melody[1].pitch == 67);
+        CHECK (std::abs (p.melody[0].start - 0.125f) < 1.0e-5f);
+        CHECK (std::abs (p.melody[0].end - 0.625f) < 1.0e-5f);
+        CHECK (std::abs (p.melody[1].start - 0.5f) < 1.0e-5f);
+        CHECK (p.melody[1].end == 1.0f);
+    }
+}
+
 void testStateRoundTrip()
 {
     Host a;
@@ -1448,6 +1503,7 @@ int main (int argc, char** argv)
     testPreviewAndAudition();
     testEditWhilePlaying();
     testStateRoundTrip();
+    testHarmonizeMelody();
     testMidiFile();
     testPerformanceAndStrum();
     testIncomingMidiTriggerIntegration();

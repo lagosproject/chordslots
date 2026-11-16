@@ -30,7 +30,8 @@ private:
     void setupKnob (juce::Slider&, juce::Label&, const juce::String& caption);
     void showInputMenu();
     void saveMidi();
-    void analyzeMidi();
+    void showMidiImportMenu();
+    void importMidi (bool harmonize);
     void applyShapeStamp (int stampId);
     bool keyPressed (const juce::KeyPress& key) override;
 
@@ -59,6 +60,8 @@ private:
     juce::Label moodLabel, styleLabel, voicingLabel, shapeLabel;
     juce::TextButton resetCurvesBtn { "Reset" };
     juce::TextButton analyzeMidiBtn;
+    juce::Slider melodyFit;
+    juce::Label melodyFitLabel;
 
     LanesView lanes;
 

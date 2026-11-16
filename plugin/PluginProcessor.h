@@ -103,6 +103,7 @@ public:
 
     /** Extracts Brightness, Tension, and Energy curves from a dropped MIDI file. */
     bool loadMidiToCurves (const juce::File& file);
+    bool harmonizeMidi (const juce::File& file);
     void setSynthModel (PreviewSoundModel model);
     bool isSplitMidi() const noexcept;
 
