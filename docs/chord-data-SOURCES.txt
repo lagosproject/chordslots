@@ -1,0 +1,8 @@
+choco-v1.0.0.zip   https://zenodo.org/api/records/7706751/files/smashub/choco-v1.0.0.zip/content
+  md5 c26f23805e0f6beef7a0624df6be1ed0  sha256 cfd3531f4bc23afcede3e092a6fe50e31ee4280d7c53db33fd17ec7444a99c01
+  used partitions: billboard (CC0 per ChoCo metadata page; CC BY 4.0 per ChoCo LICENSE.md -> treat as CC BY 4.0), rock-corpus (CC BY 4.0)
+rs200_harmony_clt.zip  http://rockcorpus.midside.com/harmonic_analyses/rs200_harmony_clt.zip
+  sha256 796582dcb5e2a945cb1dcf5307dc193ccb5a2e574866a4c7d6958888fa2dd30a  licence CC BY 4.0 (rockcorpus.midside.com)
+rs200_harmony.zip      http://rockcorpus.midside.com/harmonic_analyses/rs200_harmony.zip
+  sha256 ad715fbd132380a3f6ecc686a87008d5e6d6ae8d05cf23ea09094229eabe3bab
+Excluded (non-commercial or unclear): jaah, chordify, mozart-piano-sonatas (CC BY-NC-SA), biab, isophonics, robbie-williams, uspop2002, rwc-pop, real-book, jazz-corpus, nottingham (unspecified), weimar (ODbL), when-in-rome (CC BY-SA), wikifonia, ireal-pro.

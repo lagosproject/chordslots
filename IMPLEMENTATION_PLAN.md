@@ -1,5 +1,9 @@
 # ChordSlots v0.2: Prioritized Implementation Plan
 
+> **Status (2026-11-16):** P0–P3 are done and merged. P4–P8 are next; executor-ready prompts are in
+> `docs/phase-prompts/`, and the workflow, review checklist and data setup are in `docs/HANDOFF.md`.
+
+
 > Source: the review of 2026-11-15 (corpus, metrics, voicing, inference, producer
 > features). This plan replaces the remaining stages of Section 8 in
 > `ROADMAP_AND_SPECIFICATION.md`. Section 8 items that are already built (UI split,
