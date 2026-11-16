@@ -3,7 +3,7 @@
 //
 //   chordslots-cli table [scale]                metric table for every candidate chord in C
 //   chordslots-cli roll [mood] [count] [seed]   generate progressions for a mood
-//   chordslots-cli eval [N] [--out file] [--bigrams file] [--compare baseline]
+//   chordslots-cli eval [N] [--out file] [--bigrams file] [--adventure value] [--compare baseline]
 
 #include "chordslots/Generator.h"
 
@@ -256,6 +256,7 @@ static std::map<std::string, double> loadFlatJson (const std::string& path)
 static int runEval (int argc, char** argv)
 {
     int N = 1000;
+    float adventureOverride = -1.0f;
     std::string outPath;
     std::string bigramsPath;
     std::string comparePath;
@@ -266,6 +267,23 @@ static int runEval (int argc, char** argv)
         if (std::strcmp (argv[i], "--voicing") == 0 && i + 1 < argc)
         {
             voicingStyle = parseVoicingStyle (argv[++i]);
+        }
+        else if (std::strcmp (argv[i], "--adventure") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                std::fprintf (stderr, "--adventure requires a number between 0 and 1\n");
+                return 1;
+            }
+            const char* value = argv[++i];
+            char* end = nullptr;
+            adventureOverride = std::strtof (value, &end);
+            if (end == value || *end != '\0' || ! std::isfinite (adventureOverride)
+                || adventureOverride < 0.0f || adventureOverride > 1.0f)
+            {
+                std::fprintf (stderr, "--adventure requires a number between 0 and 1\n");
+                return 1;
+            }
         }
         else if ((std::strcmp (argv[i], "--out") == 0 || std::strcmp (argv[i], "--write") == 0) && i + 1 < argc)
         {
@@ -322,6 +340,8 @@ static int runEval (int argc, char** argv)
                 p.voicingStyle = voicingStyle;
                 layoutEven (p);
                 applyMood (p, (int) m);
+                if (adventureOverride >= 0.0f)
+                    p.adventure = adventureOverride;
                 p.voicingStyle = voicingStyle;
                 p.numSlots = cfg.slots;
                 roll (p, rng);
@@ -635,6 +655,6 @@ int main (int argc, char** argv)
         return 0;
     }
 
-    std::fprintf (stderr, "usage: chordslots-cli table [scaleIndex] | roll [mood|all] [count] [seed] [--voicing style] | eval [N] [--voicing style] [--out file] [--bigrams file] [--compare baseline] | voicings\n");
+    std::fprintf (stderr, "usage: chordslots-cli table [scaleIndex] | roll [mood|all] [count] [seed] [--voicing style] | eval [N] [--voicing style] [--out file] [--bigrams file] [--adventure value] [--compare baseline] | voicings\n");
     return 1;
 }
