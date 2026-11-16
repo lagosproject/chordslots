@@ -53,6 +53,15 @@ struct Host
         processor.prepareToPlay (sr, bs);
     }
 
+    void setBpm (double bpm)
+    {
+        playHead.bpm = bpm;
+        run (1);
+        processor.publish();
+        position = 0;
+        events.clear();
+    }
+
     void run (int numBlocks)
     {
         juce::AudioBuffer<float> buffer (2, blockSize);
@@ -964,7 +973,7 @@ void testMeterAndTripletGrid()
     // 3. Triplet cut timing (1/8T = 8 steps, 1/16T = 4 steps)
     {
         Host h (44100.0, 128); // Awkward sample rate & small buffer
-        h.playHead.bpm = 97.3;
+        h.setBpm (97.3);
         h.processor.edit ([] (cs::Progression& p, cs::Rng&)
         {
             p.bars = 1;
@@ -1075,7 +1084,7 @@ void testExportPlaybackParity()
                 for (float strum : { 0.0f, 1.0f })
                 {
                     Host h (48000.0, 256);
-                    h.playHead.bpm = bpm;
+                    h.setBpm (bpm);
 
                 if (auto* p = h.processor.apvts.getParameter ("compStyle"))
                     p->setValueNotifyingHost (p->convertTo0to1 ((float) (int) style));
@@ -1241,7 +1250,7 @@ void testExportPlaybackParity()
 void testLargeBlockDenseCompingSafety()
 {
     Host h (48000.0, 65536);
-    h.playHead.bpm = 999.0;
+    h.setBpm (999.0);
 
     if (auto* p = h.processor.apvts.getParameter ("compStyle"))
         p->setValueNotifyingHost (p->convertTo0to1 ((float) (int) cs::CompStyle::PulseEighth));
@@ -1291,6 +1300,69 @@ void testLargeBlockDenseCompingSafety()
         CHECK (kv.second == 0);
 }
 
+// P1.10: Thread safety of tempo reads — host tempo change detected on audio thread and re-published
+void testHostTempoChangeRepublish()
+{
+    Host h (48000.0, 256);
+    h.setBpm (120.0);
+
+    // Strum creates tempo-dependent voice offsets (cap = slotLenMs * 0.5)
+    if (auto* p = h.processor.apvts.getParameter ("strum"))
+        p->setValueNotifyingHost (p->convertTo0to1 (1.0f));
+
+    // Progression with a short 2-step slot (slot 0: 2 steps)
+    // At 120 BPM: 2 steps = 250 ms -> cap = 125 ms -> spread = 80 ms (strumMaxMs)
+    // At 200 BPM: 2 steps = 150 ms -> cap = 75 ms -> spread = 75 ms (< 80 ms)
+    h.processor.edit ([] (cs::Progression& prog, cs::Rng&)
+    {
+        prog.bars = 1;
+        prog.numSlots = 2;
+        prog.slots[0].start = 0;
+        prog.slots[1].start = 2;
+        prog.slots[0].voicing.notes[0] = 60;
+        prog.slots[0].voicing.notes[1] = 64;
+        prog.slots[0].voicing.notes[2] = 67;
+        prog.slots[0].voicing.n = 3;
+    });
+
+    // Run blocks at 120 BPM
+    h.playHead.playing = true;
+    h.run (10);
+
+    CHECK (std::abs (h.processor.getPublishedBpm() - 120.0) < 0.01);
+    const cs::PlayData play120 = h.processor.getPlayData();
+    const float offset120 = play120.slots[0].offsetMs[play120.slots[0].n - 1];
+    CHECK (std::abs (offset120 - 14.5833f) < 0.05f);
+
+    // Change fake host tempo to 200 BPM and run a block
+    h.playHead.bpm = 200.0;
+    h.run (1);
+
+    // Tempo was read on the audio thread, but message thread re-publish has not run yet
+    CHECK (std::abs (h.processor.getLastBpm() - 200.0) < 0.01);
+    CHECK (std::abs (h.processor.getPublishedBpm() - 120.0) < 0.01);
+
+    // Trigger the re-publish path (via timer callback)
+    h.processor.timerCallback();
+
+    // Check newly baked PlayData uses 200 BPM
+    CHECK (std::abs (h.processor.getPublishedBpm() - 200.0) < 0.01);
+    const cs::PlayData play200 = h.processor.getPlayData();
+    const float offset200 = play200.slots[0].offsetMs[play200.slots[0].n - 1];
+    CHECK (std::abs (offset200 - 8.75f) < 0.05f);
+    CHECK (offset200 < offset120);
+
+    // Exported MIDI file also reflects 200 BPM
+    const juce::MidiFile midi200 = h.processor.createMidiFile();
+    CHECK (midi200.getNumTracks() > 0);
+
+    // Clean playback continue & stop
+    h.run (20);
+    h.playHead.playing = false;
+    h.run (5);
+    CHECK (h.heldAfterReplay() == 0);
+}
+
 } // namespace
 
 int main (int argc, char** argv)
@@ -1332,6 +1404,7 @@ int main (int argc, char** argv)
     testSplitMidiOutput();
     testExportPlaybackParity();
     testLargeBlockDenseCompingSafety();
+    testHostTempoChangeRepublish();
     testVariationBankAndHistory();
     testMeterAndTripletGrid();
     std::printf ("%d checks, %d failures\n", checks, failures);

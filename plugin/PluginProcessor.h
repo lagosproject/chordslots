@@ -14,6 +14,7 @@
 
 class ChordSlotsProcessor final : public juce::AudioProcessor,
                                   public juce::ChangeBroadcaster,
+                                  public juce::Timer,
                                   private juce::AudioProcessorValueTreeState::Listener
 {
 public:
@@ -25,6 +26,12 @@ public:
     int getTriggeredSlot() const noexcept { return uiTriggeredSlot.load(); }
     void resetTrigger() noexcept;
     void refeel() noexcept;
+
+    void timerCallback() override;
+    void publish();
+    cs::PlayData getPlayData (int variationIndex = 0) const;
+    double getPublishedBpm() const noexcept { return publishedBpm.load(); }
+    double getLastBpm() const noexcept { return lastBpm.load(); }
 
     //==============================================================================
     // Model access (any non-audio thread). Listeners get a change message after
@@ -129,7 +136,6 @@ public:
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void pushHistory (int variationIndex);
-    void publish();
 
     //==============================================================================
     // Model (guarded by modelLock)
@@ -141,7 +147,7 @@ private:
     std::atomic<bool> followPlayback { false };
 
     // Hand-over to the audio thread
-    juce::SpinLock playLock;
+    mutable juce::SpinLock playLock;
     cs::PlayBank pendingPlayBank;
     std::atomic<bool> playDirty { false };
 
@@ -178,6 +184,8 @@ private:
     std::atomic<int> auditionRequest { -1 };
     std::atomic<double> uiStep { -1.0 };
     std::atomic<double> lastBpm { 120.0 };
+    std::atomic<double> publishedBpm { 120.0 };
+    std::atomic<bool> tempoDirty { false };
 
     void parameterChanged (const juce::String&, float) override;
 

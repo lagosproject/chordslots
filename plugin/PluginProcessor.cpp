@@ -202,10 +202,12 @@ ChordSlotsProcessor::ChordSlotsProcessor()
 
     publish();
     playBank = pendingPlayBank;
+    startTimerHz (10);
 }
 
 ChordSlotsProcessor::~ChordSlotsProcessor()
 {
+    stopTimer();
     apvts.removeParameterListener ("strum", this);
     apvts.removeParameterListener ("accent", this);
     apvts.removeParameterListener ("humanize", this);
@@ -488,22 +490,31 @@ void ChordSlotsProcessor::copyVariation (int src, int dst)
     sendChangeMessage();
 }
 
+void ChordSlotsProcessor::timerCallback()
+{
+    if (tempoDirty.exchange (false))
+        publish();
+}
+
 void ChordSlotsProcessor::publish()
 {
+    const juce::ScopedLock sl (modelLock);
     const cs::PerformanceParams perf = getPerformanceParams();
-    double bpm = lastBpm.load();
-    if (auto* ph = getPlayHead())
-        if (const auto pos = ph->getPosition())
-            if (const auto b = pos->getBpm())
-                if (*b >= 20.0 && *b <= 999.0)
-                    bpm = *b;
+    const double bpm = lastBpm.load();
+    publishedBpm.store (bpm);
     cs::PlayBank pb;
     for (int i = 0; i < cs::kNumVariations; ++i)
         pb.variations[i] = cs::toPlayData (variations[(size_t) i], perf, bpm);
 
-    const juce::SpinLock::ScopedLockType sl (playLock);
+    const juce::SpinLock::ScopedLockType psl (playLock);
     pendingPlayBank = pb;
     playDirty.store (true);
+}
+
+cs::PlayData ChordSlotsProcessor::getPlayData (int variationIndex) const
+{
+    const juce::SpinLock::ScopedLockType sl (playLock);
+    return pendingPlayBank.variations[(size_t) juce::jlimit (0, cs::kNumVariations - 1, variationIndex)];
 }
 
 //==============================================================================
@@ -587,6 +598,8 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (! (bpm >= 20.0 && bpm <= 999.0))
         bpm = 120.0;
     lastBpm.store (bpm);
+    if (std::abs (bpm - publishedBpm.load()) > 0.01)
+        tempoDirty.store (true);
 
     const bool playing = (hostPlaying || previewOn.load()) && numSamples > 0;
     if (! playing && activePlayingVariation != targetVar)
@@ -1246,12 +1259,7 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
 {
     const cs::Progression p = getProgression();
     const cs::PerformanceParams perf = getPerformanceParams();
-    double bpm = lastBpm.load();
-    if (auto* ph = getPlayHead())
-        if (const auto pos = ph->getPosition())
-            if (const auto b = pos->getBpm())
-                if (*b >= 20.0 && *b <= 999.0)
-                    bpm = *b;
+    const double bpm = lastBpm.load();
     const cs::PlayData playData = cs::toPlayData (p, perf, bpm);
     const float gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
     const bool split = isSplitMidi();
