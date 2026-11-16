@@ -1457,12 +1457,13 @@ static void testVoicedTension()
     slot.chord = ch (0, "7");
     slot.voicing.n = 4;
     slot.voicing.notes = { 36, 40, 43, 46 };
-    updateActuals (p);
-    const float compact = slot.tension;
-
+    const auto tension = [&]
+    {
+        return voicedTension (slot.chord, p.tonic, p.scale, slot.voicing.notes.data(), slot.voicing.n);
+    };
+    const float compact = tension();
     slot.voicing.notes = { 36, 55, 64, 70 };
-    updateActuals (p);
-    CHECK (compact > slot.tension);
+    CHECK (compact > tension());
 }
 
 static void testSpiralTension()
@@ -1499,12 +1500,31 @@ static void testSpiralTension()
         slot.voicing.notes = { 48, 52, 55 };
     }
     updateActuals (p);
-    const float original = p.slots[0].tension;
+    const float original = measuredContextualTension (p, 0);
     p.slots[1].chord = ch (1, "");
     p.slots[1].voicing.notes = { 49, 53, 56 };
     updateActuals (p, 1);
-    CHECK (p.slots[0].tension > original);
-    CHECK (near (p.slots[0].tension, measuredContextualTension (p, 0)));
+    const float changed = measuredContextualTension (p, 0);
+    CHECK (changed > original);
+    if constexpr (kUseContextualTension)
+    {
+        CHECK (near (p.slots[0].tension, changed));
+
+        p.bars = 2;
+        p.numSlots = 16;
+        const Slot tonic = p.slots[0], borrowed = p.slots[1];
+        for (int i = 0; i < p.numSlots; ++i)
+        {
+            p.slots[(size_t) i] = i == 15 ? borrowed : tonic;
+            p.slots[(size_t) i].start = i * 12;
+        }
+        updateActuals (p);
+        const float beforeRemap = p.slots[0].tension;
+        setBars (p, 1);
+        CHECK (p.numSlots == 8);
+        CHECK (p.slots[0].tension < beforeRemap);
+        CHECK (near (p.slots[0].tension, measuredContextualTension (p, 0)));
+    }
 }
 
 int main()

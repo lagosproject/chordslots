@@ -277,9 +277,9 @@ inline constexpr bool kUseContextualTension = true;
 
 struct ContextualTension
 {
-    static constexpr float staticWeight = 0.82f;
-    static constexpr float strainWeight = 0.11f;
-    static constexpr float momentumWeight = 0.07f;
+    static constexpr float staticWeight = 0.86f;
+    static constexpr float strainWeight = 0.09f;
+    static constexpr float momentumWeight = 0.05f;
     static constexpr float strainCeiling = 0.33f;
     static constexpr float momentumCeiling = 0.36f;
 };
