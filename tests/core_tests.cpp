@@ -1462,13 +1462,56 @@ static void testVoicedTension()
 
     slot.voicing.notes = { 36, 55, 64, 70 };
     updateActuals (p);
-    CHECK (compact > slot.tension + 0.03f);
+    CHECK (compact > slot.tension);
+}
+
+static void testSpiralTension()
+{
+    // Reference values calculated with Partitura 1.9.0 CloudDiameter,
+    // CloudMomentum and TensileStrain at equal note durations.
+    const int cMajor[] { 0, 4, 1 };              // C E G
+    const int gSeven[] { 1, 5, 2, -1 };          // G B D F
+    const int cDim[] { 0, -3, -6 };              // C Eb Gb
+    const int aMinor[] { 3, 0, 4 };              // A C E
+    const int eSeven[] { 4, 8, 5, 2 };           // E G# B D
+    const auto c = spiralCenter (cMajor, 3), g = spiralCenter (gSeven, 4);
+    const auto dim = spiralCenter (cDim, 3);
+    const auto a = spiralCenter (aMinor, 3), e = spiralCenter (eSeven, 4);
+    const auto near = [] (float value, double expected) { return std::abs (value - expected) < 1.0e-6; };
+    CHECK (near (cloudDiameter (cMajor, 3), 0.3333333333));
+    CHECK (near (cloudMomentum (g, c), 0.0854177903));
+    CHECK (near (tensileStrain (c, spiralKey (0, false)), 0.0557555695));
+    CHECK (near (cloudDiameter (cDim, 3), 0.5331228197));
+    CHECK (near (cloudMomentum (c, dim), 0.3937471061));
+    CHECK (near (tensileStrain (dim, spiralKey (0, false)), 0.3458245896));
+    CHECK (near (cloudMomentum (e, a), 0.2120231035));
+    CHECK (near (tensileStrain (e, spiralKey (3, true)), 0.1301746268));
+
+    Progression p;
+    p.numSlots = 2;
+    p.tonic = 0;
+    p.scale = 0;
+    for (int i = 0; i < p.numSlots; ++i)
+    {
+        auto& slot = p.slots[(size_t) i];
+        slot.chord = ch (0, "");
+        slot.voicing.n = 3;
+        slot.voicing.notes = { 48, 52, 55 };
+    }
+    updateActuals (p);
+    const float original = p.slots[0].tension;
+    p.slots[1].chord = ch (1, "");
+    p.slots[1].voicing.notes = { 49, 53, 56 };
+    updateActuals (p, 1);
+    CHECK (p.slots[0].tension > original);
+    CHECK (near (p.slots[0].tension, measuredContextualTension (p, 0)));
 }
 
 int main()
 {
     testGoldenTheory();
     testVoicedTension();
+    testSpiralTension();
     testExactRing();
     testVariety();
     CHECK (chordTypes().size() == std::size (kPythonQualityClasses));

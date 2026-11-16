@@ -349,6 +349,43 @@ inline float rollTemperature (float variety)
                          : 0.012f * std::pow (2.5f, 2.0f * value - 1.0f);
 }
 
+inline SpiralPoint progressionSpiralKey (const Progression& p)
+{
+    return spiralKey (0, scaleHasMinorThird (p.scale)); // relative to tonic
+}
+
+inline float tensionErrorDelta (float oldTension, float newTension, float target) noexcept
+{
+    const float oldError = oldTension - target, newError = newTension - target;
+    return newError * newError - oldError * oldError;
+}
+
+inline float estimateContextualTension (const Progression& p, Chord chord, const Chord* previous, float estimate)
+{
+    const auto current = chordSpiralCenter (chord, p.tonic, p.scale);
+    const float momentum = previous != nullptr
+        ? cloudMomentum (chordSpiralCenter (*previous, p.tonic, p.scale), current) : 0.0f;
+    return blendContextualTension (estimate, tensileStrain (current, progressionSpiralKey (p)), momentum);
+}
+
+inline float contextualEditCost (const Progression& p, int slot, const Candidate& cand,
+                                  const Chord* previous, const Chord* next)
+{
+    if constexpr (! kUseContextualTension)
+        return 0.0f;
+
+    const auto& current = cand.chord;
+    float delta = tensionErrorDelta (cand.tension, estimateContextualTension (p, current, previous, cand.tension),
+                                     p.slots[(size_t) slot].targetT);
+    if (next != nullptr)
+    {
+        const float neutral = tensionOf (*next, p.tonic, p.scale);
+        delta += tensionErrorDelta (neutral, estimateContextualTension (p, *next, &current, neutral),
+                                    p.slots[(size_t) ((slot + 1) % p.numSlots)].targetT);
+    }
+    return delta;
+}
+
 inline float slotUnaryCost (const Progression& p, int slot, const Candidate& cand)
 {
     const Slot& s = p.slots[(size_t) slot];
@@ -376,7 +413,7 @@ inline bool oscillates (Chord first, Chord middle, Chord last) noexcept
 inline float slotCost (const Progression& p, int slot, const Candidate& cand,
                        const Chord* prev, const Chord* next, const Chord* prev2 = nullptr)
 {
-    float cost = slotUnaryCost (p, slot, cand);
+    float cost = slotUnaryCost (p, slot, cand) + contextualEditCost (p, slot, cand, prev, next);
     // A-B-A Anti-Oscillation Penalty: discourage ping-ponging back to the chord 2 slots ago
     if (prev2 != nullptr && prev != nullptr && oscillates (*prev2, *prev, cand.chord))
         cost += (1.0f - p.adventure) * 0.08f;
@@ -522,6 +559,9 @@ inline ChordVariable makeChordVariable (const Progression& p, int first, int sec
             Chord chord = candidate.chord;
             chord.bassInt = bassInt;
             float cost = slotUnaryCost (p, first, candidate) + inversionCost (p, first, bassInt);
+            if constexpr (kUseContextualTension)
+                if (p.numSlots == 1)
+                    cost += contextualEditCost (p, first, candidate, nullptr, nullptr);
             if (second >= 0)
                 cost += slotUnaryCost (p, second, candidate) + inversionCost (p, second, bassInt);
             options.emplace_back (cost, chord);
@@ -670,6 +710,26 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
     const CorpusStyle style = styleForProgression (p);
     const size_t numTypes = chordTypes().size();
     const size_t chordCount = 12 * numTypes;
+    struct EstimatedTension
+    {
+        SpiralPoint center;
+        float strain = -1.0f;
+        float neutral = 0.0f;
+    };
+    std::vector<EstimatedTension> estimates (kUseContextualTension ? chordCount : 0);
+    const auto key = progressionSpiralKey (p);
+    const auto lookupTension = [&] (Chord chord) -> const EstimatedTension&
+    {
+        auto& estimate = estimates[(size_t) chord.root * numTypes + (size_t) chord.type];
+        if (estimate.strain < 0.0f)
+        {
+            estimate.center = chordSpiralCenter (chord, p.tonic, p.scale);
+            estimate.strain = tensileStrain (estimate.center, key);
+            chord.bassInt = 0;
+            estimate.neutral = tensionOf (chord, p.tonic, p.scale);
+        }
+        return estimate;
+    };
     std::vector<float> transitionCache (chordCount * chordCount, -1.0f);
     const auto transition = [&] (Chord a, Chord b)
     {
@@ -693,7 +753,18 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
             costs.reserve (first.size() * second.size());
             for (Chord a : first)
                 for (Chord b : second)
-                    costs.push_back (transition (a, b) + detail::jointBassCost (p, a, b));
+                {
+                    float cost = transition (a, b) + detail::jointBassCost (p, a, b);
+                    if constexpr (kUseContextualTension)
+                    {
+                        const auto& previous = lookupTension (a);
+                        const auto& current = lookupTension (b);
+                        const float momentum = cloudMomentum (previous.center, current.center);
+                        const float measured = blendContextualTension (current.neutral, current.strain, momentum);
+                        cost += tensionErrorDelta (current.neutral, measured, p.slots[(size_t) ((slot + 1) % n)].targetT);
+                    }
+                    costs.push_back (cost);
+                }
             ring.addEdge (from, to, detail::boltzmannWeights (costs, temperature));
         }
     }
@@ -730,6 +801,7 @@ inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxC
 
         const Chord chord = candidate.chord;
         float harmonic = slotUnaryCost (p, slot, candidate);
+        harmonic += contextualEditCost (p, slot, candidate, n > 1 ? &previous : nullptr, n > 1 ? &next : nullptr);
         if (n > 1)
             harmonic += detail::harmonicTransitionCost (p, style, previous, chord)
                       + detail::harmonicTransitionCost (p, style, chord, next);
@@ -774,8 +846,22 @@ inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxC
 }
 
 //==============================================================================
+inline float measuredContextualTension (const Progression& p, int slot)
+{
+    const auto& current = p.slots[(size_t) slot];
+    const auto center = [&] (const Slot& s)
+    {
+        return voicingSpiralCenter (s.chord, p.tonic, p.scale, s.voicing.notes.data(), s.voicing.n);
+    };
+    const auto cloud = center (current);
+    const auto& previous = p.slots[(size_t) ((slot + p.numSlots - 1) % p.numSlots)];
+    const float momentum = p.numSlots > 1 ? cloudMomentum (center (previous), cloud) : 0.0f;
+    const float local = voicedTension (current.chord, p.tonic, p.scale, current.voicing.notes.data(), current.voicing.n);
+    return blendContextualTension (local, tensileStrain (cloud, progressionSpiralKey (p)), momentum);
+}
+
 /** Recomputes the measured metrics of one slot from its chord and voicing. */
-inline void updateActuals (Progression& p, int i)
+inline void updateActualsLocal (Progression& p, int i)
 {
     Slot& s = p.slots[(size_t) i];
     int upper[kMaxNotes];
@@ -787,7 +873,8 @@ inline void updateActuals (Progression& p, int i)
     s.brightness = combineBrightness (qualityBrightness (s.chord.type),
                                       modalBrightness (s.chord, p.tonic, p.scale),
                                       registerBrightness (upper, n));
-    s.tension = voicedTension (s.chord, p.tonic, p.scale, s.voicing.notes.data(), s.voicing.n);
+    s.tension = kUseContextualTension ? measuredContextualTension (p, i)
+                                      : tensionOf (s.chord, p.tonic, p.scale);
 
     // Energy is a performance property (loudness and density), not a harmonic one.
     const float vel = clamp01 (((float) s.voicing.velocity - 45.0f) / 75.0f);
@@ -795,10 +882,21 @@ inline void updateActuals (Progression& p, int i)
     s.energy = clamp01 (0.6f * vel + 0.4f * density);
 }
 
+inline void updateActuals (Progression& p, int i)
+{
+    updateActualsLocal (p, i);
+    if constexpr (kUseContextualTension)
+        if (p.numSlots > 1)
+        {
+            const int next = (i + 1) % p.numSlots;
+            p.slots[(size_t) next].tension = measuredContextualTension (p, next);
+        }
+}
+
 inline void updateActuals (Progression& p)
 {
     for (int i = 0; i < p.numSlots; ++i)
-        updateActuals (p, i);
+        updateActualsLocal (p, i);
 }
 
 /** Voices the whole progression with smooth voice leading.
@@ -1377,6 +1475,8 @@ inline void setNumSlots (Progression& p, int newCount)
     }
     p.numSlots = newCount;
     layoutEven (p);
+    if constexpr (kUseContextualTension)
+        updateActuals (p);
 }
 
 inline void setBars (Progression& p, int newBars)
@@ -1384,12 +1484,16 @@ inline void setBars (Progression& p, int newBars)
     newBars = std::clamp (newBars, 1, kMaxBars);
     if (newBars == p.bars)
         return;
+    const int oldCount = p.numSlots;
     const double ratio = (double) newBars / p.bars;
     p.bars = newBars;
     p.numSlots = std::min (p.numSlots, p.maxSlots());
     for (int i = 0; i < p.numSlots; ++i)
         p.slots[(size_t) i].start = (int) std::lround (p.slots[(size_t) i].start * ratio / p.snap) * p.snap;
     sanitizeRhythm (p);
+    if constexpr (kUseContextualTension)
+        if (p.numSlots != oldCount)
+            updateActuals (p);
 }
 
 /** Adds a cut inside slot i at the given step: the slot is split in two and
@@ -1408,6 +1512,8 @@ inline bool splitSlot (Progression& p, int i, int step)
     p.slots[(size_t) (i + 1)].start = step;
     p.slots[(size_t) (i + 1)].locked = false;
     ++p.numSlots;
+    if constexpr (kUseContextualTension)
+        updateActuals (p, i + 1);
     return true;
 }
 
@@ -1419,6 +1525,11 @@ inline bool removeSlot (Progression& p, int i)
     for (int j = i; j + 1 < p.numSlots; ++j)
         p.slots[(size_t) j] = p.slots[(size_t) (j + 1)];
     --p.numSlots;
+    if constexpr (kUseContextualTension)
+    {
+        const int changed = i % p.numSlots;
+        p.slots[(size_t) changed].tension = measuredContextualTension (p, changed);
+    }
     return true;
 }
 

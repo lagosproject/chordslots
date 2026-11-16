@@ -15,7 +15,7 @@
 //                  consonance", JNMR 2016).
 #pragma once
 
-#include "Theory.h"
+#include "SpiralTension.h"
 
 #include <complex>
 
@@ -270,6 +270,25 @@ inline float voicedTension (Chord c, int tonic, int scaleIdx, const int* notes, 
     const float rough = norm01 ((float) (roughness (notes, n) / n),
                                 Calibration::voicedRoughLo, Calibration::voicedRoughHi);
     return tensionFromDissonance (c, tonic, scaleIdx, 0.5f * rough + 0.5f * harmonicDissonance (c.type));
+}
+
+// P6 preview. Change this only after comparing the blind listening scores.
+inline constexpr bool kUseContextualTension = true;
+
+struct ContextualTension
+{
+    static constexpr float staticWeight = 0.82f;
+    static constexpr float strainWeight = 0.11f;
+    static constexpr float momentumWeight = 0.07f;
+    static constexpr float strainCeiling = 0.33f;
+    static constexpr float momentumCeiling = 0.36f;
+};
+
+inline float blendContextualTension (float staticTension, float strain, float momentum) noexcept
+{
+    return clamp01 (ContextualTension::staticWeight * staticTension
+                    + ContextualTension::strainWeight * clamp01 (strain / ContextualTension::strainCeiling)
+                    + ContextualTension::momentumWeight * clamp01 (momentum / ContextualTension::momentumCeiling));
 }
 
 /** Metrics for a chord with a neutral register (used while choosing chords,
