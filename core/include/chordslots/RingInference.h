@@ -143,7 +143,14 @@ public:
     {
         auto probabilities = unary[(size_t) node];
         for (int other : neighboursOf (node))
-            applyConditional (probabilities, { other, orientedEdge (node, other) }, states);
+        {
+            const auto& edge = edgeBetween (node, other);
+            const size_t selected = (size_t) states[(size_t) other];
+            for (size_t s = 0; s < probabilities.size(); ++s)
+                probabilities[s] *= edge[node < other ? s * size (other) + selected
+                                                       : selected * size (node) + s];
+            normalize (probabilities);
+        }
         return probabilities;
     }
 

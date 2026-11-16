@@ -357,12 +357,18 @@ inline float slotUnaryCost (const Progression& p, int slot, const Candidate& can
     return cost;
 }
 
+inline bool oscillates (Chord first, Chord middle, Chord last) noexcept
+{
+    return first.root == last.root && first.type == last.type
+        && (first.root != middle.root || first.type != middle.type);
+}
+
 inline float slotCost (const Progression& p, int slot, const Candidate& cand,
                        const Chord* prev, const Chord* next, const Chord* prev2 = nullptr)
 {
     float cost = slotUnaryCost (p, slot, cand);
     // A-B-A Anti-Oscillation Penalty: discourage ping-ponging back to the chord 2 slots ago
-    if (prev2 != nullptr && prev != nullptr && cand.chord == *prev2 && cand.chord != *prev)
+    if (prev2 != nullptr && prev != nullptr && oscillates (*prev2, *prev, cand.chord))
         cost += (1.0f - p.adventure) * 0.08f;
 
     const CorpusStyle style = styleForProgression (p);
@@ -473,6 +479,70 @@ inline ChordVariable makeChordVariable (const Progression& p, int first, int sec
     return variable;
 }
 
+inline void correctOscillations (const Progression& p, const RingInference& ring,
+                                 const std::vector<ChordVariable>& variables,
+                                 const std::vector<int>& nodeOf, std::vector<int>& sampled,
+                                 Rng& rng, float temperature)
+{
+    const int n = p.numSlots;
+    if (n < 3 || p.adventure >= 1.0f)
+        return;
+
+    std::vector<int> mutableNodes;
+    for (int node = 0; node < (int) variables.size(); ++node)
+        if (ring.size (node) > 1)
+            mutableNodes.push_back (node);
+    if (mutableNodes.empty())
+        return;
+
+    const auto chordAt = [&] (int slot)
+    {
+        const int node = nodeOf[(size_t) (slot % n)];
+        return variables[(size_t) node].states[(size_t) sampled[(size_t) node]];
+    };
+    const auto countOscillations = [&]
+    {
+        int count = 0;
+        for (int slot = 0; slot < n; ++slot)
+            count += oscillates (chordAt (slot), chordAt (slot + 1), chordAt (slot + 2));
+        return count;
+    };
+    int oscillations = countOscillations();
+    const double penalty = 0.08 * (1.0 - p.adventure) / temperature;
+
+    std::uniform_int_distribution<size_t> chooseNode (0, mutableNodes.size() - 1);
+    for (int step = 0; step < 2 * n; ++step)
+    {
+        const int node = mutableNodes[chooseNode (rng)];
+        const int previous = sampled[(size_t) node];
+        const int proposal = RingInference::pick (ring.conditional (node, sampled), rand01 (rng));
+        if (proposal == previous)
+            continue;
+        sampled[(size_t) node] = proposal;
+        const int proposedOscillations = countOscillations();
+        // The first-order conditional cancels from the MH acceptance ratio.
+        const int difference = proposedOscillations - oscillations;
+        if (difference <= 0 || rand01 (rng) < std::exp (-penalty * difference))
+            oscillations = proposedOscillations;
+        else
+            sampled[(size_t) node] = previous;
+    }
+
+    // A first-order proposal can put almost all its mass on an alternating
+    // pair at low temperature. A full-conditional sweep includes the ABA
+    // term in the proposal, so every draw is accepted by the target model.
+    for (int node : mutableNodes)
+    {
+        auto weights = ring.conditional (node, sampled);
+        for (size_t state = 0; state < weights.size(); ++state)
+        {
+            sampled[(size_t) node] = (int) state;
+            weights[state] *= std::exp (-penalty * countOscillations());
+        }
+        sampled[(size_t) node] = RingInference::pick (weights, rand01 (rng));
+    }
+}
+
 } // namespace detail
 
 /** Draws from the first-order Boltzmann distribution on the chord loop. */
@@ -555,9 +625,10 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
         }
     }
 
-    const auto sampled = ring.sample ([&] { return rand01 (rng); });
+    auto sampled = ring.sample ([&] { return rand01 (rng); });
     if (sampled.empty())
         return;
+    detail::correctOscillations (p, ring, variables, nodeOf, sampled, rng, temperature);
     for (int slot = 0; slot < n; ++slot)
     {
         const int node = nodeOf[(size_t) slot];
