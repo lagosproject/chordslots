@@ -1204,6 +1204,61 @@ static void testGoldenTheory()
     }
 }
 
+static void testVoicingEngineP31()
+{
+    // 1. Low-interval limits
+    // Table: {1, 52}, {2, 52}, {3, 48}, {4, 46}, {5, 41}
+    int pair_m2_viol[] = { 51, 52 };
+    CHECK (violatesLowIntervalLimit (pair_m2_viol, 2));
+    int pair_m2_ok[] = { 52, 53 };
+    CHECK (! violatesLowIntervalLimit (pair_m2_ok, 2));
+
+    int pair_M2_viol[] = { 50, 52 };
+    CHECK (violatesLowIntervalLimit (pair_M2_viol, 2));
+    int pair_M2_ok[] = { 52, 54 };
+    CHECK (! violatesLowIntervalLimit (pair_M2_ok, 2));
+
+    int pair_m3_viol[] = { 47, 50 };
+    CHECK (violatesLowIntervalLimit (pair_m3_viol, 2));
+    int pair_m3_ok[] = { 48, 51 };
+    CHECK (! violatesLowIntervalLimit (pair_m3_ok, 2));
+
+    int pair_M3_viol[] = { 45, 49 };
+    CHECK (violatesLowIntervalLimit (pair_M3_viol, 2));
+    int pair_M3_ok[] = { 46, 50 };
+    CHECK (! violatesLowIntervalLimit (pair_M3_ok, 2));
+
+    int pair_P4_viol[] = { 40, 45 };
+    CHECK (violatesLowIntervalLimit (pair_P4_viol, 2));
+    int pair_P4_ok[] = { 41, 46 };
+    CHECK (! violatesLowIntervalLimit (pair_P4_ok, 2));
+
+    // Fifths and octaves never violate, even very low
+    int pair_P5[] = { 24, 31 };
+    CHECK (! violatesLowIntervalLimit (pair_P5, 2));
+    int pair_P8[] = { 24, 36 };
+    CHECK (! violatesLowIntervalLimit (pair_P8, 2));
+
+    // 2. Assignment-based voice leading distance
+    // Identical chords -> 0
+    std::vector<int> ceg = { 60, 64, 67 };
+    CHECK (std::abs (voiceLeadingDistance (ceg, ceg) - 0.0f) < 1e-5f);
+
+    // C-E-G -> C-F-A = 3/3 = 1.0
+    std::vector<int> cfa = { 60, 65, 69 };
+    CHECK (std::abs (voiceLeadingDistance (ceg, cfa) - 1.0f) < 1e-5f);
+
+    // One voice moving by 2 -> 2/3
+    std::vector<int> cea = { 60, 64, 69 };
+    CHECK (std::abs (voiceLeadingDistance (ceg, cea) - (2.0f / 3.0f)) < 1e-5f);
+
+    // 3 -> 4 voice case with the penalty
+    // Extra voice 72 matched to nearest in ceg (67, dist 5) + 2 penalty = 7. Mean cost = 7 / 4 = 1.75
+    std::vector<int> cegc = { 60, 64, 67, 72 };
+    CHECK (std::abs (voiceLeadingDistance (ceg, cegc) - 1.75f) < 1e-5f);
+    CHECK (std::abs (voiceLeadingDistance (cegc, ceg) - 1.75f) < 1e-5f);
+}
+
 static void testVoicingNoDroppedChordTones()
 {
     Rng rng (1337);
@@ -1233,6 +1288,7 @@ static void testVoicingNoDroppedChordTones()
 int main()
 {
     testGoldenTheory();
+    testVoicingEngineP31();
     testVoicingNoDroppedChordTones();
     testSpelling();
     testBassModel();

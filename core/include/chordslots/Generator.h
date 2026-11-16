@@ -5,6 +5,7 @@
 #include "Corpus.h"
 #include "Metrics.h"
 #include "Performance.h"
+#include "Voicing.h"
 
 #include <cstring>
 #include <random>
@@ -13,7 +14,6 @@ namespace cs
 {
 
 constexpr int kMaxSlots = 16;
-constexpr int kMaxNotes = 8;
 constexpr int kStepsPerQuarter = 24;
 static_assert (kStepsPerQuarter == 24, "kStepsPerQuarter must be 24");
 constexpr int kStepsPerBar = 4 * kStepsPerQuarter; // 4/4 default: 96 steps
@@ -67,23 +67,6 @@ using Rng = std::mt19937;
 inline float rand01 (Rng& rng) { return std::uniform_real_distribution<float> (0.0f, 1.0f) (rng); }
 
 //==============================================================================
-struct Voicing
-{
-    int n = 0;
-    std::array<int, kMaxNotes> notes {};
-    int velocity = 96;
-    int bassCount = 0;
-
-    int computeBassCount (int upperFloor = 48) const noexcept
-    {
-        int c = 0;
-        for (int i = 0; i < n; ++i)
-            if (notes[(size_t) i] < upperFloor)
-                c++;
-        return c;
-    }
-};
-
 struct Slot
 {
     int start = 0; // steps (24 per quarter note) from the start of the loop
@@ -563,8 +546,6 @@ inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxC
 //==============================================================================
 // Voicing
 
-constexpr int kUpperFloor = 48; // notes below this are bass doublings
-
 /** Primary bass note of a voicing (highest note below kUpperFloor, or -1 if none). */
 inline int primaryBassNote (const Voicing& v, int upperFloor = kUpperFloor) noexcept
 {
@@ -646,30 +627,6 @@ inline void revoiceBass (Voicing& v, Chord c, int refBassNote = -1, float energy
     for (int i = 0; i < v.n; ++i)
         v.notes[(size_t) i] = std::clamp (all[(size_t) i], 0, 127);
     v.bassCount = v.computeBassCount (upperFloor);
-}
-
-inline float voiceLeadingDistance (const Voicing& a, const std::vector<int>& b)
-{
-    std::vector<int> au;
-    for (int i = 0; i < a.n; ++i)
-        if (a.notes[(size_t) i] >= kUpperFloor)
-            au.push_back (a.notes[(size_t) i]);
-    if (au.empty() || b.empty())
-        return 0.0f;
-
-    auto oneWay = [] (const std::vector<int>& from, const std::vector<int>& to)
-    {
-        float sum = 0.0f;
-        for (int x : from)
-        {
-            int best = 1000;
-            for (int y : to)
-                best = std::min (best, std::abs (x - y));
-            sum += (float) best;
-        }
-        return sum / (float) from.size();
-    };
-    return 0.5f * (oneWay (au, b) + oneWay (b, au));
 }
 
 /** Builds a playable voicing.

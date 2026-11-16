@@ -53,51 +53,9 @@ static void printDetail (const Progression& p)
 // Evaluation Harness & Baseline
 //==============================================================================
 
-// Low-interval limits table. Put in one named constant because phase P3 will move it into the core.
-// An adjacent pair is a violation when:
-// - i in {1, 2} and L < 52 (E3)
-// - i = 3 and L < 48 (C3)
-// - i = 4 and L < 46 (Bb2)
-// - i = 5 and L < 41 (F2)
-// Octaves, fifths and wider intervals never count.
-struct LowIntervalLimit
-{
-    int interval;
-    int minLowerPitch;
-};
-
-static constexpr LowIntervalLimit kLowIntervalLimits[] = {
-    { 1, 52 }, // m2 below E3
-    { 2, 52 }, // M2 below E3
-    { 3, 48 }, // m3 below C3
-    { 4, 46 }, // M3 below Bb2
-    { 5, 41 }  // P4 below F2
-};
-
-static bool breaksLowIntervalLimit (int lowerPitch, int intervalSemitones)
-{
-    for (const auto& limit : kLowIntervalLimits)
-    {
-        if (limit.interval == intervalSemitones)
-            return lowerPitch < limit.minLowerPitch;
-    }
-    return false;
-}
-
 static bool voicingHasLowIntervalViolation (const Voicing& v)
 {
-    if (v.n < 2)
-        return false;
-    std::vector<int> notes (v.notes.data(), v.notes.data() + v.n);
-    std::sort (notes.begin(), notes.end());
-    for (size_t k = 0; k + 1 < notes.size(); ++k)
-    {
-        const int L = notes[k];
-        const int interval = notes[k + 1] - notes[k];
-        if (breaksLowIntervalLimit (L, interval))
-            return true;
-    }
-    return false;
+    return violatesLowIntervalLimit (v);
 }
 
 // Guard thresholds table.
