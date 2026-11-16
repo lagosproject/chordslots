@@ -90,6 +90,49 @@ static void testMetricOrdering()
     // Roughness: a semitone cluster is rougher than a fifth.
     const int cluster[] = { 60, 61 }, fifth[] = { 60, 67 };
     CHECK (roughness (cluster, 2) > roughness (fifth, 2));
+
+    // P2.3: Extended chord type metric checks
+    // 1. Altered dominants (7b9, 7#9) must be tenser than 7 on the same root
+    for (int r = 0; r < 12; ++r)
+    {
+        CHECK (T (ch (r, "7b9")) > T (ch (r, "7")));
+        CHECK (T (ch (r, "7#9")) > T (ch (r, "7")));
+    }
+
+    // 2. maj7#11 must be brighter than maj7
+    CHECK (B (ch (0, "maj7#11")) > B (ch (0, "maj7")));
+    const auto mF_maj7 = chordMetrics (ch (5, "maj7"), 9, 1);
+    const auto mF_maj711 = chordMetrics (ch (5, "maj7#11"), 9, 1);
+    CHECK (mF_maj711.brightness > mF_maj7.brightness);
+
+    // 3. m11 must be darker than maj9
+    CHECK (B (ch (0, "m11")) < B (ch (0, "maj9")));
+    CHECK (B (ch (2, "m11")) < B (ch (2, "maj9")));
+
+    // 4. No new type saturates to exactly 0.0 or 1.0 brightness or tension in C Major or A Minor
+    struct NaturalTypeSpec { const char* suffix; int root; int tonic; int scale; };
+    const NaturalTypeSpec naturalSpecs[] = {
+        { "m11",     2, 0, 0 }, // Dm11 (ii in C)
+        { "maj7#11", 5, 9, 1 }, // Fmaj7#11 (bVI in Am)
+        { "13",      7, 0, 0 }, // G13 (V in C)
+        { "m13",     2, 0, 0 }, // Dm13 (ii in C)
+        { "6/9",     0, 0, 0 }, // C6/9 (I in C)
+        { "m6/9",    2, 0, 0 }, // Dm6/9 (ii in C)
+        { "7b9",     7, 0, 0 }, // G7b9 (V in C)
+        { "7#9",     7, 0, 0 }, // G7#9 (V in C)
+        { "add11",   0, 0, 0 }, // Cadd11 (I in C)
+        { "9sus4",   7, 0, 0 }, // G9sus4 (V in C)
+        { "quartal", 2, 0, 0 }, // Dquartal (ii in C)
+    };
+
+    for (const auto& nts : naturalSpecs)
+    {
+        auto m = chordMetrics (ch (nts.root, nts.suffix), nts.tonic, nts.scale);
+        CHECK (m.brightness > 0.0f);
+        CHECK (m.brightness < 1.0f);
+        CHECK (m.tension > 0.0f);
+        CHECK (m.tension < 1.0f);
+    }
 }
 
 static bool rhythmValid (const Progression& p)
