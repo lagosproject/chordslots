@@ -254,9 +254,9 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 
     setupCombo (styleBox, styleLabel, "STYLE PRIOR");
     styleBox.addItem ("Auto (from scale)", 1);
-    styleBox.addItem ("Pop/Rock", 2);
-    styleBox.addItem ("Minor Loops", 3);
-    styleBox.addItem ("Soul / Jazz", 4);
+    styleBox.addItem ("Major (Billboard + RS200)", 2);
+    styleBox.addItem ("Minor (Billboard + RS200)", 3);
+    styleBox.addItem ("Extended harmony (7ths/9ths)", 4);
     styleBox.addItem ("Free", 5);
     styleBox.setSelectedId (1, juce::dontSendNotification);
 

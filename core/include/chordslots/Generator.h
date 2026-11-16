@@ -8,6 +8,7 @@
 #include "Voicing.h"
 
 #include <cstring>
+#include <optional>
 #include <random>
 
 namespace cs
@@ -273,20 +274,20 @@ struct Mood
     float adventure;
     float syncopation;
     std::vector<float> b, t, e; // control points spread across the loop
-    CorpusStyle defaultStyle = CorpusStyle::PopRock;
+    std::optional<CorpusStyle> defaultStyle = std::nullopt; // Auto follows the current scale
 };
 
 inline const std::vector<Mood>& moods()
 {
     static const std::vector<Mood> m = {
-        { "Euphoric",    0, 0.30f, 0.25f, { 0.70f, 0.78f, 0.85f, 0.80f }, { 0.22f, 0.45f, 0.60f, 0.40f }, { 0.70f, 0.80f, 0.90f, 1.00f }, CorpusStyle::PopRock },
-        { "Uplifting",   1, 0.30f, 0.30f, { 0.35f, 0.60f, 0.70f, 0.62f }, { 0.25f, 0.38f, 0.45f, 0.62f }, { 0.75f, 0.80f, 0.90f, 0.95f }, CorpusStyle::MinorLoops },
-        { "Epic",        1, 0.35f, 0.20f, { 0.30f, 0.58f, 0.66f, 0.40f }, { 0.22f, 0.40f, 0.62f, 0.68f }, { 0.70f, 0.80f, 0.90f, 1.00f }, CorpusStyle::MinorLoops },
-        { "Melancholic", 1, 0.40f, 0.20f, { 0.30f, 0.25f, 0.55f, 0.28f }, { 0.25f, 0.50f, 0.42f, 0.60f }, { 0.40f, 0.45f, 0.50f, 0.40f }, CorpusStyle::MinorLoops },
-        { "Dark",        3, 0.50f, 0.35f, { 0.25f, 0.15f, 0.30f, 0.10f }, { 0.25f, 0.60f, 0.55f, 0.75f }, { 0.65f, 0.70f, 0.70f, 0.80f }, CorpusStyle::MinorLoops },
-        { "Tense",       7, 0.65f, 0.45f, { 0.30f, 0.35f, 0.20f, 0.40f }, { 0.45f, 0.65f, 0.80f, 0.90f }, { 0.50f, 0.60f, 0.70f, 0.85f }, CorpusStyle::MinorLoops },
+        { "Euphoric",    0, 0.30f, 0.25f, { 0.70f, 0.78f, 0.85f, 0.80f }, { 0.22f, 0.45f, 0.60f, 0.40f }, { 0.70f, 0.80f, 0.90f, 1.00f } },
+        { "Uplifting",   1, 0.30f, 0.30f, { 0.35f, 0.60f, 0.70f, 0.62f }, { 0.25f, 0.38f, 0.45f, 0.62f }, { 0.75f, 0.80f, 0.90f, 0.95f } },
+        { "Epic",        1, 0.35f, 0.20f, { 0.30f, 0.58f, 0.66f, 0.40f }, { 0.22f, 0.40f, 0.62f, 0.68f }, { 0.70f, 0.80f, 0.90f, 1.00f } },
+        { "Melancholic", 1, 0.40f, 0.20f, { 0.30f, 0.25f, 0.55f, 0.28f }, { 0.25f, 0.50f, 0.42f, 0.60f }, { 0.40f, 0.45f, 0.50f, 0.40f } },
+        { "Dark",        3, 0.50f, 0.35f, { 0.25f, 0.15f, 0.30f, 0.10f }, { 0.25f, 0.60f, 0.55f, 0.75f }, { 0.65f, 0.70f, 0.70f, 0.80f } },
+        { "Tense",       7, 0.65f, 0.45f, { 0.30f, 0.35f, 0.20f, 0.40f }, { 0.45f, 0.65f, 0.80f, 0.90f }, { 0.50f, 0.60f, 0.70f, 0.85f } },
         { "Dreamy",      4, 0.60f, 0.15f, { 0.85f, 0.70f, 0.90f, 0.75f }, { 0.40f, 0.55f, 0.48f, 0.55f }, { 0.30f, 0.30f, 0.35f, 0.30f }, CorpusStyle::SoulRnb },
-        { "Hard",        1, 0.15f, 0.50f, { 0.28f, 0.35f, 0.22f, 0.45f }, { 0.22f, 0.50f, 0.55f, 0.65f }, { 1.00f, 1.00f, 1.00f, 1.00f }, CorpusStyle::MinorLoops },
+        { "Hard",        1, 0.15f, 0.50f, { 0.28f, 0.35f, 0.22f, 0.45f }, { 0.22f, 0.50f, 0.55f, 0.65f }, { 1.00f, 1.00f, 1.00f, 1.00f } },
     };
     return m;
 }
@@ -298,8 +299,9 @@ inline CorpusStyle styleForProgression (const Progression& p) noexcept
 
     if (p.mood >= 0 && p.mood < (int) moods().size())
     {
-        if (moods()[(size_t) p.mood].defaultStyle == CorpusStyle::SoulRnb)
-            return CorpusStyle::SoulRnb;
+        const auto style = moods()[(size_t) p.mood].defaultStyle;
+        if (style.has_value())
+            return *style;
     }
 
     return scaleHasMinorThird (p.scale) ? CorpusStyle::MinorLoops : CorpusStyle::PopRock;
@@ -316,7 +318,7 @@ inline float transitionCost (Chord a, Chord b, int tonic, float adventure, int s
     else if (a.root == b.root)
         c += (a.isSlash() != b.isSlash() || a.bassInt != b.bassInt) ? 0.2f : 0.6f;
 
-    // Hand-authored style prior (provisional)
+    // Billboard and RS200 transition prior
     const float corpusCost = corpusTransitionCost (a, b, tonic, scaleIdx, style);
 
     // Adventure modulates prior strength:

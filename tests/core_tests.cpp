@@ -770,19 +770,19 @@ static void testModernTransitionPrior()
         pMajor.style = (int) CorpusStyle::Free;
         CHECK (styleForProgression (pMajor) == CorpusStyle::Free);
 
-        // Uplifting, Epic, Hard moods in Minor scale get MinorLoops by default
-        for (const char* mName : { "Uplifting", "Epic", "Hard" })
+        // Auto follows the current scale, with an extended-harmony default for Dreamy.
+        for (size_t mood = 0; mood < moods().size(); ++mood)
         {
-            for (size_t mi = 0; mi < moods().size(); ++mi)
-            {
-                if (std::strcmp (moods()[mi].name, mName) == 0)
-                {
-                    Progression pMood;
-                    applyMood (pMood, (int) mi);
-                    CHECK (pMood.scale == 1);
-                    CHECK (styleForProgression (pMood) == CorpusStyle::MinorLoops);
-                }
-            }
+            Progression pMood;
+            applyMood (pMood, int (mood));
+            const bool dreamy = std::strcmp (moods()[mood].name, "Dreamy") == 0;
+
+            pMood.scale = 0;
+            CHECK (styleForProgression (pMood) == (dreamy ? CorpusStyle::SoulRnb : CorpusStyle::PopRock));
+            pMood.scale = 1;
+            CHECK (styleForProgression (pMood) == (dreamy ? CorpusStyle::SoulRnb : CorpusStyle::MinorLoops));
+            pMood.style = int (CorpusStyle::Free);
+            CHECK (styleForProgression (pMood) == CorpusStyle::Free);
         }
     }
 
