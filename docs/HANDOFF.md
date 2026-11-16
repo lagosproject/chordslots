@@ -111,6 +111,12 @@ re-check it.
 
 ## 7. Known small issues (backlog, folded into P7.5 unless noted)
 
+- **Tense tonic presence (revisit after P5).** P4's 1,000-loop evaluation dropped from
+  62.3% to 54.7% at 4 slots and from 73.9% to 65.9% at 8 slots versus P3.
+  Keep the P3 comparison as a reference. After P5's sampler change, rerun both
+  configurations and listen to whether the loops still establish a clear tonal
+  center before deciding whether to adjust Tense.
+
 - `voiceLeadingDistance` DP table is sized for ≤ 8 voices; add a guard/clamp.
 - GCC 15 false-positive `-Warray-bounds` around `std::sort` in `violatesLowIntervalLimit`.
 - Truncated labels in the footer at the default size (`ADVE…`, `Rhy…`); knob readouts lack units.
