@@ -774,6 +774,7 @@ inline std::vector<Voicing> candidateVoicingsForSlot (const Progression& p, int 
     {
         Voicing v;
         float dist;
+        bool hasSemitone;
     };
     std::vector<Scored> scored;
 
@@ -787,11 +788,28 @@ inline std::vector<Voicing> candidateVoicingsForSlot (const Progression& p, int 
         if (dist > 14.0f)
             continue;
 
+        if (hasAdjacentGapViolation (notes, style))
+            continue;
+
         Voicing v = assembleVoicing (s.chord, notes, s.targetE, style, -1);
         if (style != VoicingStyle::Close && violatesLowIntervalLimit (v))
             continue;
 
-        scored.push_back ({ v, dist });
+        scored.push_back ({ v, dist, hasAdjacentSemitoneCluster (notes) });
+    }
+
+    if (style != VoicingStyle::Close && ! scored.empty())
+    {
+        bool anyClean = false;
+        for (const auto& sc : scored)
+            if (! sc.hasSemitone) { anyClean = true; break; }
+        if (anyClean)
+        {
+            std::vector<Scored> cleanScored;
+            for (const auto& sc : scored)
+                if (! sc.hasSemitone) cleanScored.push_back (sc);
+            scored = std::move (cleanScored);
+        }
     }
 
     std::sort (scored.begin(), scored.end(), [] (const Scored& a, const Scored& b) {

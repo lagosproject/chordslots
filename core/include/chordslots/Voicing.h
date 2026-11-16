@@ -463,6 +463,35 @@ inline std::vector<int> getPitchClassesAfterOmissions (Chord c, bool allowRoot =
 }
 
 //==============================================================================
+// Gap and Cluster Rules
+inline bool hasAdjacentGapViolation (const std::vector<int>& upper, VoicingStyle style) noexcept
+{
+    if (upper.size() < 2)
+        return false;
+    for (size_t i = 0; i + 1 < upper.size(); ++i)
+    {
+        const int gap = upper[i + 1] - upper[i];
+        if (gap > 12)
+            return true;
+        if (style == VoicingStyle::Spread && gap < 3)
+            return true;
+    }
+    return false;
+}
+
+inline bool hasAdjacentSemitoneCluster (const std::vector<int>& upper) noexcept
+{
+    if (upper.size() < 2)
+        return false;
+    for (size_t i = 0; i + 1 < upper.size(); ++i)
+    {
+        if (upper[i + 1] - upper[i] == 1)
+            return true;
+    }
+    return false;
+}
+
+//==============================================================================
 // Style Upper Structure Generators
 inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingStyle style)
 {
@@ -488,7 +517,8 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                 }
                 if (notes.front() < kUpperFloor || notes.back() > 96)
                     continue;
-                cands.push_back (notes);
+                if (! hasAdjacentGapViolation (notes, style))
+                    cands.push_back (notes);
             }
         }
     }
@@ -558,47 +588,72 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
         if (lhShells.empty())
             lhShells.push_back ({ 48 + mod12 (a.fifth >= 0 ? a.fifth : a.thirdOrSus) });
 
-        auto rhPcs = getPitchClassesAfterOmissions (c, false);
-        if (rhPcs.empty())
-        {
-            for (int pc : a.allPcs)
-                if (pc != a.root)
-                    rhPcs.push_back (pc);
-            if (rhPcs.empty())
-                rhPcs.push_back (a.root);
-        }
-        std::sort (rhPcs.begin(), rhPcs.end());
-        const int K = (int) rhPcs.size();
-
-        std::vector<std::vector<int>> rhCands;
-        for (int inv = 0; inv < K; ++inv)
-        {
-            for (int base : { 60, 72 })
-            {
-                for (int targetSize : { 3, 4 })
-                {
-                    std::vector<int> rh;
-                    int note = base + rhPcs[(size_t) inv];
-                    rh.push_back (note);
-                    for (int j = 1; j < targetSize; ++j)
-                    {
-                        int step = mod12 (rhPcs[(size_t) ((inv + j) % K)] - rhPcs[(size_t) ((inv + j - 1) % K)]);
-                        if (step == 0) step = 12;
-                        note += step;
-                        rh.push_back (note);
-                    }
-                    if (rh.front() >= 60 && rh.back() <= 96)
-                        rhCands.push_back (rh);
-                }
-            }
-        }
-        if (rhCands.empty())
-        {
-            rhCands.push_back ({ 60 + rhPcs[0], 64 + rhPcs[0 % K], 67 + rhPcs[0 % K] });
-        }
-
         for (const auto& lh : lhShells)
         {
+            bool lhHas3 = false;
+            bool lhHas7 = false;
+            for (int n : lh)
+            {
+                if (a.thirdOrSus >= 0 && mod12 (n) == a.thirdOrSus)
+                    lhHas3 = true;
+                if (a.seventhOrSixth >= 0 && mod12 (n) == a.seventhOrSixth)
+                    lhHas7 = true;
+            }
+
+            // Piano must not double 3rd or 7th across hands.
+            // RH also never contains the root.
+            std::vector<int> rhPcs;
+            for (int pc : a.allPcs)
+            {
+                if (pc == a.root)
+                    continue;
+                if (lhHas3 && pc == a.thirdOrSus)
+                    continue;
+                if (lhHas7 && pc == a.seventhOrSixth)
+                    continue;
+                rhPcs.push_back (pc);
+            }
+
+            if (rhPcs.empty())
+            {
+                if (a.fifth >= 0 && mod12 (a.fifth) != a.root)
+                    rhPcs.push_back (a.fifth);
+                else
+                    continue;
+            }
+
+            std::sort (rhPcs.begin(), rhPcs.end());
+            const int K = (int) rhPcs.size();
+
+            std::vector<std::vector<int>> rhCands;
+            for (int inv = 0; inv < K; ++inv)
+            {
+                for (int base : { 60, 72 })
+                {
+                    for (int targetSize : { 3, 4 })
+                    {
+                        std::vector<int> rh;
+                        int note = base + rhPcs[(size_t) inv];
+                        rh.push_back (note);
+                        for (int j = 1; j < targetSize; ++j)
+                        {
+                            int step = mod12 (rhPcs[(size_t) ((inv + j) % K)] - rhPcs[(size_t) ((inv + j - 1) % K)]);
+                            if (step == 0) step = 12;
+                            note += step;
+                            rh.push_back (note);
+                        }
+                        if (rh.front() >= 60 && rh.back() <= 96)
+                        {
+                            bool ok = true;
+                            for (size_t g = 0; g + 1 < rh.size(); ++g)
+                                if (rh[g + 1] - rh[g] > 12) { ok = false; break; }
+                            if (ok)
+                                rhCands.push_back (rh);
+                        }
+                    }
+                }
+            }
+
             for (const auto& rh : rhCands)
             {
                 std::vector<int> u = lh;
@@ -607,6 +662,10 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                 u.erase (std::unique (u.begin(), u.end()), u.end());
 
                 if (u.front() < 48 || u.back() > 96 || u.size() > 6)
+                    continue;
+
+                // Gap rule: no two adjacent upper notes > 12 apart
+                if (hasAdjacentGapViolation (u, style))
                     continue;
 
                 // Ensure all essential tones are present in u
@@ -638,17 +697,17 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                 {
                     int n2 = n1 + mod12 (p2 - p1);
                     if (n2 - n1 < 3) n2 += 12;
-                    if (n2 > 74) continue;
+                    if (n2 - n1 > 12 || n2 > 74) continue;
                     for (int p3 : pcs)
                     {
                         int n3 = n2 + mod12 (p3 - p2);
                         if (n3 - n2 < 3) n3 += 12;
-                        if (n3 > 82) continue;
+                        if (n3 - n2 > 12 || n3 > 82) continue;
                         for (int p4 : pcs)
                         {
                             int n4 = n3 + mod12 (p4 - p3);
                             if (n4 - n3 < 3) n4 += 12;
-                            if (n4 > 88) continue;
+                            if (n4 - n3 > 12 || n4 > 88) continue;
 
                             if (a.thirdOrSus >= 0 && a.seventhOrSixth >= 0)
                             {
@@ -665,7 +724,9 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                                 }
                             if (! hasEssentials) continue;
 
-                            cands.push_back ({ n1, n2, n3, n4 });
+                            std::vector<int> u = { n1, n2, n3, n4 };
+                            if (! hasAdjacentGapViolation (u, style))
+                                cands.push_back (u);
                         }
                     }
                 }
@@ -675,35 +736,62 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
     else if (style == VoicingStyle::Drop2 || style == VoicingStyle::Drop3)
     {
         auto pcs = getPitchClassesAfterOmissions (c, true);
-        while (pcs.size() < 4)
-            pcs.push_back (a.root);
-        std::sort (pcs.begin(), pcs.end());
+        std::vector<std::vector<int>> closePositions;
 
-        for (int inv = 0; inv < 4; ++inv)
+        if (pcs.size() >= 4)
         {
-            for (int base : { 48, 60, 72 })
+            std::sort (pcs.begin(), pcs.end());
+            pcs.resize (4);
+            const int K = 4;
+            for (int inv = 0; inv < K; ++inv)
             {
-                std::vector<int> notes;
-                int note = base + pcs[(size_t) inv];
-                notes.push_back (note);
-                for (int j = 1; j < 4; ++j)
+                for (int base : { 36, 48, 60, 72 })
                 {
-                    int step = mod12 (pcs[(size_t) ((inv + j) % 4)] - pcs[(size_t) ((inv + j - 1) % 4)]);
-                    if (step == 0) step = 12;
-                    note += step;
-                    notes.push_back (note);
+                    std::vector<int> close;
+                    int note = base + pcs[(size_t) inv];
+                    close.push_back (note);
+                    for (int j = 1; j < K; ++j)
+                    {
+                        int step = mod12 (pcs[(size_t) ((inv + j) % K)] - pcs[(size_t) ((inv + j - 1) % K)]);
+                        if (step == 0) step = 12;
+                        note += step;
+                        close.push_back (note);
+                    }
+                    if (close.back() - close.front() <= 12)
+                        closePositions.push_back (close);
                 }
-                if (notes.front() < 48 || notes.back() > 96)
-                    continue;
+            }
+        }
+        else
+        {
+            // Triad: build 4-note close position doubling root at the top
+            int rPc = a.root;
+            int tPc = a.thirdOrSus >= 0 ? a.thirdOrSus : mod12 (rPc + 4);
+            int fPc = a.fifth >= 0 ? a.fifth : mod12 (rPc + 7);
 
-                std::vector<int> dropped = notes;
-                if (style == VoicingStyle::Drop2)
-                    dropped[2] -= 12; // 2nd voice from top
-                else
-                    dropped[1] -= 12; // 3rd voice from top
+            for (int base : { 36, 48, 60, 72 })
+            {
+                int n0 = base + rPc;
+                int n1 = n0 + mod12 (tPc - rPc);
+                int n2 = n1 + mod12 (fPc - tPc);
+                int n3 = n0 + 12;
+                if (n3 - n0 <= 12)
+                    closePositions.push_back ({ n0, n1, n2, n3 });
+            }
+        }
 
-                std::sort (dropped.begin(), dropped.end());
-                if (dropped.front() >= 48 && dropped.back() <= 96)
+        for (const auto& close : closePositions)
+        {
+            std::vector<int> dropped = close;
+            if (style == VoicingStyle::Drop2)
+                dropped[2] -= 12; // 2nd voice from top
+            else
+                dropped[1] -= 12; // 3rd voice from top
+
+            std::sort (dropped.begin(), dropped.end());
+            if (dropped.front() >= 48 && dropped.back() <= 96)
+            {
+                if (! hasAdjacentGapViolation (dropped, style))
                     cands.push_back (dropped);
             }
         }
@@ -730,15 +818,17 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
             {
                 std::vector<int> u = { n0 };
                 int curr = n0;
+                bool gapOk = true;
                 for (size_t step = 1; step < pcs.size() || u.size() < 4; ++step)
                 {
                     int targetPc = pcs[(idxA + step) % pcs.size()];
                     int n = curr + mod12 (targetPc - curr);
                     if (n <= curr) n += 12;
+                    if (n - curr > 12) { gapOk = false; break; }
                     u.push_back (n);
                     curr = n;
                 }
-                if (u.back() <= 96)
+                if (gapOk && u.back() <= 96 && ! hasAdjacentGapViolation (u, style))
                     cands.push_back (u);
             }
         }
@@ -755,15 +845,17 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
             {
                 std::vector<int> u = { n0 };
                 int curr = n0;
+                bool gapOk = true;
                 for (size_t step = 1; step < pcs.size() || u.size() < 4; ++step)
                 {
                     int targetPc = pcs[(idxB + step) % pcs.size()];
                     int n = curr + mod12 (targetPc - curr);
                     if (n <= curr) n += 12;
+                    if (n - curr > 12) { gapOk = false; break; }
                     u.push_back (n);
                     curr = n;
                 }
-                if (u.back() <= 96)
+                if (gapOk && u.back() <= 96 && ! hasAdjacentGapViolation (u, style))
                     cands.push_back (u);
             }
         }
@@ -790,7 +882,8 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
                 if (notes.front() >= 48 && topDoubled <= 96)
                 {
                     notes.push_back (topDoubled);
-                    cands.push_back (notes);
+                    if (! hasAdjacentGapViolation (notes, style))
+                        cands.push_back (notes);
                 }
             }
         }
@@ -817,7 +910,17 @@ inline Voicing assembleVoicing (Chord c, const std::vector<int>& upper, float en
     {
         int candTop = 60 + c.root;
         while (candTop <= upper.back()) candTop += 12;
-        if (candTop <= 96) top = candTop;
+        if (candTop <= 96)
+        {
+            const int gap = candTop - upper.back();
+            bool ok = (gap <= 12);
+            if (style == VoicingStyle::Spread && gap < 3)
+                ok = false;
+            if (style != VoicingStyle::Close && gap == 1)
+                ok = false;
+            if (ok)
+                top = candTop;
+        }
     }
 
     if (top >= 0) all.push_back (top);
@@ -888,45 +991,67 @@ inline Voicing makeVoicing (Chord c, const Voicing* ref, float centre, float ene
     for (const auto& u : cands)
         scored.push_back (buildAndScore (u));
 
-    // Hard filter: reject any candidate that violates low-interval limit (except Close)
+    // Hard filter:
+    // 1. Reject any candidate that violates low-interval limit (except Close)
+    // 2. Reject any candidate with adjacent upper gap > 12 (or in Spread, gap < 3)
     std::vector<ScoredCandidate> valid;
-    if (style == VoicingStyle::Close)
+    for (const auto& sc : scored)
     {
-        valid = scored;
+        if (style != VoicingStyle::Close && sc.violations > 0)
+            continue;
+        if (hasAdjacentGapViolation (sc.upperNotes, style))
+            continue;
+        valid.push_back (sc);
     }
-    else
-    {
-        for (const auto& sc : scored)
-            if (sc.violations == 0)
-                valid.push_back (sc);
 
-        // If no candidate survives, transpose the upper structure up an octave and retry
-        if (valid.empty())
+    // If no candidate survives, transpose the upper structure up an octave and retry
+    if (valid.empty())
+    {
+        for (const auto& u : cands)
         {
-            for (const auto& u : cands)
+            if (u.back() + 12 <= 96)
             {
-                if (u.back() + 12 <= 96)
-                {
-                    std::vector<int> transposed = u;
-                    for (int& x : transposed) x += 12;
-                    auto sc = buildAndScore (transposed);
-                    if (sc.violations == 0)
-                        valid.push_back (sc);
-                }
+                std::vector<int> transposed = u;
+                for (int& x : transposed) x += 12;
+                auto sc = buildAndScore (transposed);
+                if ((style == VoicingStyle::Close || sc.violations == 0) && ! hasAdjacentGapViolation (sc.upperNotes, style))
+                    valid.push_back (sc);
             }
         }
+    }
 
-        // If still none survive, fall back to the best candidate with the fewest violations
+    // Fallback: fewest violations without gap violations if possible
+    if (valid.empty())
+    {
+        for (const auto& sc : scored)
+            if (! hasAdjacentGapViolation (sc.upperNotes, style))
+                valid.push_back (sc);
         if (valid.empty())
+            valid = scored;
+    }
+
+    // Semitone cluster rule (every style except Close):
+    // Reject candidates with an adjacent 1-semitone upper pair whenever another candidate without one exists
+    if (style != VoicingStyle::Close && ! valid.empty())
+    {
+        bool anyWithoutSemitone = false;
+        for (const auto& sc : valid)
         {
-            std::sort (scored.begin(), scored.end(), [] (const auto& x, const auto& y)
+            if (! hasAdjacentSemitoneCluster (sc.upperNotes))
             {
-                if (x.violations != y.violations)
-                    return x.violations < y.violations;
-                return x.cost < y.cost;
-            });
-            if (! scored.empty())
-                valid.push_back (scored.front());
+                anyWithoutSemitone = true;
+                break;
+            }
+        }
+        if (anyWithoutSemitone)
+        {
+            std::vector<ScoredCandidate> filtered;
+            for (const auto& sc : valid)
+            {
+                if (! hasAdjacentSemitoneCluster (sc.upperNotes))
+                    filtered.push_back (sc);
+            }
+            valid = std::move (filtered);
         }
     }
 
