@@ -14,7 +14,7 @@ prompt for the phase you are about to run in `docs/phase-prompts/`.
 | P3 Voicing engine | ✅ merged | `core/include/chordslots/Voicing.h`: 7 styles (Close, Piano default, Spread, Drop2, Drop3, Rootless, Stacked), omission rules, low-interval rule, gap rule, semitone avoidance, assignment voice-leading distance, per-variation VOICING menu |
 | P4 Real corpus prior | ✅ local | `phase/p4`; Billboard and RS200 counts, verified with corpus data (section 5). Tense follow-up in section 7. |
 | P5 Exact inference | ✅ local | `phase/p5` builds on local P4. Joint chord and bass sampling, Variety per variation, and a new evaluation baseline. |
-| P6 Contextual tension | ⏳ local preview | `phase/p6`; **awaiting 20 blind ratings before accepting the new model** |
+| P6 Contextual tension | ✅ local | `phase/p6`; contextual model retained after the 20-clip blind trial (Spearman 0.493 vs −0.137 for static). |
 | P7 Producer features | ⏳ ready | `docs/phase-prompts/P7.md` |
 | P8 Formats & CI | ⏳ ready | `docs/phase-prompts/P8.md`; **needs a Mac + Logic for the AU MIDI FX check**; GitHub CI is outward-facing, so confirm with the user before enabling it |
 
