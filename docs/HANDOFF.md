@@ -12,8 +12,8 @@ prompt for the phase you are about to run in `docs/phase-prompts/`.
 | P1 Correctness fixes | ✅ merged | prior scoring (backoff instead of PMI), style cluster by tonality + working Style menu, `bVII` weight, bass always present, targeted rolls via `slotCost`, AA′ as tied variables, live comping with export parity, bounded event list, tempo re-publish on the message thread |
 | P2 Chord model | ✅ merged | properties derived from interval sets (golden fixture `tests/p2_golden_fixture.h`), 11 new chord types, no dropped chord tones |
 | P3 Voicing engine | ✅ merged | `core/include/chordslots/Voicing.h`: 7 styles (Close, Piano default, Spread, Drop2, Drop3, Rootless, Stacked), omission rules, low-interval rule, gap rule, semitone avoidance, assignment voice-leading distance, per-variation VOICING menu |
-| P4 Real corpus prior | ⏳ ready | prompt `docs/phase-prompts/P4.md`; data must be downloaded first (section 5) |
-| P5 Exact inference | ⏳ ready | `docs/phase-prompts/P5.md` |
+| P4 Real corpus prior | ✅ local | `phase/p4`; Billboard and RS200 counts, verified with corpus data (section 5). Tense follow-up in section 7. |
+| P5 Exact inference | ✅ local | `phase/p5` builds on local P4. Joint chord and bass sampling, Variety per variation, and a new evaluation baseline. |
 | P6 Contextual tension | ⏳ ready | `docs/phase-prompts/P6.md`; **needs the user's blind listening test** |
 | P7 Producer features | ⏳ ready | `docs/phase-prompts/P7.md` |
 | P8 Formats & CI | ⏳ ready | `docs/phase-prompts/P8.md`; **needs a Mac + Logic for the AU MIDI FX check**; GitHub CI is outward-facing, so confirm with the user before enabling it |
@@ -33,6 +33,8 @@ prompt for the phase you are about to run in `docs/phase-prompts/`.
   across the phase's commits with a small probe if needed: that is how P1's Fit drop was
   traced to the prior, not to the `bVII` change the executor blamed). Then regenerate:
   `eval 1000 --out tests/eval_baseline.json --bigrams tests/eval_bigrams_baseline.json`.
+  Regenerate the seed-matched CTest reference with
+  `eval 60 --out tests/eval_smoke_baseline.json`.
 - **Refactors must be byte-identical:** build the CLI at `main` and at the refactor commit
   (`git archive <rev> core tools | tar -x -C /tmp/x`), run `eval 200 --out`, and compare sha256.
 - **Listen with a probe.** Metrics do not catch bad voicings. Print voicings for
@@ -113,9 +115,8 @@ re-check it.
 
 - **Tense tonic presence (revisit after P5).** P4's 1,000-loop evaluation dropped from
   62.3% to 54.7% at 4 slots and from 73.9% to 65.9% at 8 slots versus P3.
-  Keep the P3 comparison as a reference. After P5's sampler change, rerun both
-  configurations and listen to whether the loops still establish a clear tonal
-  center before deciding whether to adjust Tense.
+  P5's 1,000-loop rerun measured 54.8% and 64.5%. The listening check at both
+  lengths is pending. Use it to decide whether Tense needs a tonal adjustment.
 
 - `voiceLeadingDistance` DP table is sized for ≤ 8 voices; add a guard/clamp.
 - GCC 15 false-positive `-Warray-bounds` around `std::sort` in `violatesLowIntervalLimit`.

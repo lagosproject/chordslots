@@ -13,9 +13,9 @@ finds chords whose *measured* properties follow those curves.
 - **Bass Inversions & Slash Chords** – right-click any slot to select chord-tone
   bass notes (root position, 1st, 2nd, 3rd inversions, slash chords like `Am7/G`).
   Roman numerals display figured-bass notation (`I6`, `V65`, `ii42`).
-- **Bass Motion Engine** – circular Viterbi dynamic programming minimizes bass leaps
-  and generates smooth, walking basslines ($C_3 \to B_2 \to A_2$) governed by the
-  **Bass Motion** knob.
+- **Bass Motion Engine** – Roll chooses chords and bass inversions together.
+  **Bass Motion** controls the preference for root position versus smoother
+  bass motion across the loop.
 - **Phase 2 Groove & Performance** – transform clean voicings into human performances
   with **Strum** (bidirectional timing spread, with pinned bass), **Accent** (boosts
   top melody notes, softens inner voices), and **Humanize** (deterministic microtiming
@@ -26,7 +26,7 @@ finds chords whose *measured* properties follow those curves.
   Melancholic, Dark, Tense, Dreamy, Hard). A mood is a starting shape for the
   lanes, not a database of canned progressions.
 - **Dedicated 3-Panel Workflow** – clearly divided into `1. HARMONY GENERATOR`
-  (Locks, Adventure, Syncopation, Bass Motion, Roll), `2. GROOVE & FEEL` (Strum,
+  (Locks, Adventure, Variety, Syncopation, Bass Motion, Roll), `2. GROOVE & FEEL` (Strum,
   Accent, Humanize, Re-Feel), and `OUTPUT & EXPORT` (Gate, Synth Vol, Play, Save,
   Drag MIDI).
 - **4-Variation Bank (A/B/C/D)** – switch between 4 independent musical progressions
@@ -61,10 +61,11 @@ Everything is computed from the notes. Nothing is hand-tagged.
 
 The generator builds every chord available in the key at the current
 **Adventure** level (0 = diatonic triads, 1 = borrowed chords and extensions),
-scores each against the slot's targets plus a light prior on chord-to-chord
-motion, and Gibbs-samples the loop so that each chord fits its neighbours on
-both sides (the last chord leads back into the first). Voicings are then chosen
-for smooth voice leading.
+scores chords and inversions against the slot targets, and keeps up to 64 states
+per slot. It samples the first-order distribution over the loop, including the
+transition from the last chord to the first. A correction discourages A–B–A
+patterns. **Variety** sets the sampling temperature for each variation.
+Voicings are chosen after sampling.
 
 The calibration constants live in `core/include/chordslots/Metrics.h`. They were
 set by inspection and are the most obvious thing to improve with listening
@@ -156,7 +157,7 @@ plugin host, and could be wrapped for CLAP, a web UI or a hardware sequencer.
 ## Roadmap & Upcoming Sections
 
 - [x] **Bass Inversions & Slash Chords**: User-selectable chord-tone bass notes with figured-bass Roman numerals (`I6`, `V65`, etc.).
-- [x] **Bass Motion Engine**: Circular DP bassline generator for smooth walking bass movement.
+- [x] **Bass Motion Engine**: Joint chord and inversion sampling for smooth circular bass motion.
 - [x] **Phase 2 Performance & Groove Transform**: Bidirectional strum, melody accent, deterministic humanization, and cross-block audio-thread scheduling.
 - [x] **3-Panel Workflow Interface**: Dedicated visual sections for `HARMONY`, `GROOVE`, and `OUTPUT`.
 - [x] **Section 3: Incoming MIDI Trigger Mode**: Play and trigger chord slots live from a MIDI keyboard or pad controller (White Keys $C_3 \dots B_3$, Chromatic $C_3$, or Pads $C_1$), with last-note priority held-key stack, sustain pedal (CC64) support, live velocity scaling, and real-time timeline glow.

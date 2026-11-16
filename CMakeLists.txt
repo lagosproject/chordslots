@@ -35,8 +35,9 @@ add_executable(chordslots_trigger_tests tests/trigger_tests.cpp)
 target_link_libraries(chordslots_trigger_tests PRIVATE chordslots_core)
 add_test(NAME trigger COMMAND chordslots_trigger_tests)
 
-# Musical evaluation harness guard test (N=60 keeps test under 20s while guard tolerances absorb sampling noise)
-add_test(NAME eval COMMAND chordslots-cli eval 60 --compare "${CMAKE_CURRENT_SOURCE_DIR}/tests/eval_baseline.json")
+# Compare identical seed sets in the fast guard. The 1,000-roll reference is
+# kept separately for phase-to-phase evaluation.
+add_test(NAME eval COMMAND chordslots-cli eval 60 --compare "${CMAKE_CURRENT_SOURCE_DIR}/tests/eval_smoke_baseline.json")
 
 if(NOT CHORDSLOTS_BUILD_PLUGIN)
     return()
