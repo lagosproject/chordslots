@@ -398,16 +398,24 @@ void TimelineView::showSlotMenu (int slot, int step)
         const int notePc = cs::mod12 (curChord.root + ivNorm);
         const juce::String noteName = utf8 (cs::pitchClassName (notePc, prog.tonic, prog.scale));
         juce::String desc;
-        if (ivNorm == 3 || ivNorm == 4)
+        if (ivNorm == 4 || (ivNorm == 3 && ! cs::hasMajorThird (curChord.type)))
             desc = "3rd (1st inv)";
-        else if (ivNorm == 6 || ivNorm == 7 || ivNorm == 8)
+        else if (ivNorm == 7 || (ivNorm == 6 && ! cs::hasPerfectFifth (curChord.type)) || ivNorm == 8)
             desc = "5th (2nd inv)";
-        else if (ivNorm == 9 || ivNorm == 10 || ivNorm == 11)
+        else if (ivNorm == 10 || ivNorm == 11 || (ivNorm == 9 && cs::seventhKind (curChord.type) == cs::SeventhKind::Diminished7))
             desc = "7th (3rd inv)";
         else if (ivNorm == 2)
             desc = "9th";
+        else if (ivNorm == 1)
+            desc = "b9th";
+        else if (ivNorm == 3)
+            desc = "#9th";
         else if (ivNorm == 5)
             desc = "4th/11th";
+        else if (ivNorm == 6)
+            desc = "#11th";
+        else if (ivNorm == 9)
+            desc = "6th/13th";
         else
             desc = juce::String (ivNorm) + " semitones";
 

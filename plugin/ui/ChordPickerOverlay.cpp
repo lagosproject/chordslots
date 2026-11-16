@@ -86,11 +86,11 @@ void ChordPickerOverlay::setSlot (int slotIndex)
             juce::String name;
             if (ivNorm == 0)
                 name = "Root";
-            else if (ivNorm == 3 || ivNorm == 4)
+            else if (ivNorm == 4 || (ivNorm == 3 && ! cs::hasMajorThird (activeChord.type)))
                 name = "1st Inv (3rd)";
-            else if (ivNorm == 6 || ivNorm == 7 || ivNorm == 8)
+            else if (ivNorm == 7 || (ivNorm == 6 && ! cs::hasPerfectFifth (activeChord.type)) || ivNorm == 8)
                 name = "2nd Inv (5th)";
-            else if (ivNorm == 9 || ivNorm == 10 || ivNorm == 11)
+            else if (ivNorm == 10 || ivNorm == 11 || (ivNorm == 9 && cs::seventhKind (activeChord.type) == cs::SeventhKind::Diminished7))
                 name = "3rd Inv (7th)";
             else
                 name = "/" + utf8 (cs::pitchClassName (cs::mod12 (activeChord.root + ivNorm), prog.tonic, prog.scale));
@@ -218,27 +218,31 @@ void ChordPickerOverlay::resized()
                                             26);
     }
 
-    area.removeFromTop (20);
+    area.removeFromTop (16);
 
-    // Quality area (2 rows)
-    qualityArea = area.removeFromTop (58);
+    // Quality area (4 rows of 8 for 32 chord types)
     const int qCount = (int) qualityButtons.size();
+    const int cols = 8;
+    const int rows = (qCount + cols - 1) / cols;
+    const int qRowH = 22;
+    const int qGap = 4;
+    const int qTotalH = rows * qRowH + (rows - 1) * qGap;
+    qualityArea = area.removeFromTop (qTotalH);
     if (qCount > 0)
     {
-        const int cols = (qCount + 1) / 2;
-        const int qBtnW = (qualityArea.getWidth() - (cols - 1) * 4) / cols;
+        const int qBtnW = (qualityArea.getWidth() - (cols - 1) * qGap) / cols;
         for (int i = 0; i < qCount; ++i)
         {
             const int r = i / cols;
             const int c = i % cols;
-            qualityButtons[(size_t) i].btn->setBounds (qualityArea.getX() + c * (qBtnW + 4),
-                                                       qualityArea.getY() + r * 28,
-                                                       qBtnW,
-                                                       24);
+            const int x = qualityArea.getX() + c * (qBtnW + qGap);
+            const int y = qualityArea.getY() + r * (qRowH + qGap);
+            const int w = (c == cols - 1) ? (qualityArea.getRight() - x) : qBtnW;
+            qualityButtons[(size_t) i].btn->setBounds (x, y, w, qRowH);
         }
     }
 
-    area.removeFromTop (20);
+    area.removeFromTop (16);
 
     // Bass / Inversion row
     bassArea = area.removeFromTop (28);

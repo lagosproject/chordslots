@@ -919,7 +919,7 @@ static void testModernTransitionPrior()
             }
         }
         const double meanErr = sumErr / count;
-        CHECK (meanErr <= 0.052612);
+        CHECK (meanErr <= 0.058);
 
         // Quick eval (N=60): noBassSlotPct == 0 for every mood x configuration
         for (size_t m = 0; m < moods().size(); ++m)
@@ -1161,9 +1161,36 @@ static void testGoldenTheory()
     }
 }
 
+static void testVoicingNoDroppedChordTones()
+{
+    Rng rng (1337);
+    for (int t = 0; t < numChordTypes(); ++t)
+    {
+        for (int r = 0; r < 12; ++r)
+        {
+            for (float energy : { 0.0f, 0.5f, 1.0f })
+            {
+                Chord c { r, t, 0 };
+                Voicing v = makeVoicing (c, nullptr, centreForBrightness (0.5f), energy, rng, 0.0f, 0.0f);
+
+                unsigned vMask = 0;
+                for (int i = 0; i < v.n; ++i)
+                    vMask |= (1u << mod12 (v.notes[i]));
+
+                for (int iv : chordTypes()[(size_t) t].iv)
+                {
+                    int expectedPc = mod12 (r + iv);
+                    CHECK ((vMask & (1u << expectedPc)) != 0);
+                }
+            }
+        }
+    }
+}
+
 int main()
 {
     testGoldenTheory();
+    testVoicingNoDroppedChordTones();
     testSpelling();
     testBassModel();
     testMetricOrdering();

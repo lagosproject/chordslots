@@ -145,7 +145,7 @@ inline int numDistinctPitchClasses (const std::vector<int>& iv) noexcept
     int count = 0;
     while (m > 0)
     {
-        count += (m & 1u);
+        count += (int) (m & 1u);
         m >>= 1;
     }
     return count;
@@ -217,7 +217,18 @@ inline const std::vector<ChordTypeDef>& chordTypes()
         { "maj9",  "maj9",  { 0, 4, 7, 11, 14 }, 2, false },
         { "m9",    "9",     { 0, 3, 7, 10, 14 }, 2, true  },
         { "9",     "9",     { 0, 4, 7, 10, 14 }, 2, false },
-        { "7sus4", "7sus4", { 0, 5, 7, 10 },     2, false },
+        { "7sus4",   "7sus4",   { 0, 5, 7, 10 },          2, false },
+        { "m11",     "11",      { 0, 3, 10, 14, 17 },     2, true  },
+        { "maj7#11", "maj7#11", { 0, 4, 7, 11, 18 },     2, false },
+        { "13",      "13",      { 0, 4, 10, 14, 21 },     2, false },
+        { "m13",     "13",      { 0, 3, 10, 14, 21 },     2, true  },
+        { "6/9",     "6/9",     { 0, 4, 7, 9, 14 },       1, false },
+        { "m6/9",    "6/9",     { 0, 3, 7, 9, 14 },       2, true  },
+        { "7b9",     "7b9",     { 0, 4, 7, 10, 13 },      2, false },
+        { "7#9",     "7#9",     { 0, 4, 7, 10, 15 },      2, false },
+        { "add11",   "add11",   { 0, 4, 7, 17 },          1, false },
+        { "9sus4",   "9sus4",   { 0, 5, 7, 10, 14 },      2, false },
+        { "quartal", "q",       { 0, 5, 10, 15 },         2, false },
     };
     return t;
 }

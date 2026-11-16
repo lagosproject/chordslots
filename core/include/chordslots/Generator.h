@@ -733,19 +733,43 @@ inline Voicing makeVoicing (Chord c, const Voicing* ref, float centre, float ene
     const int refBass = ref != nullptr ? primaryBassNote (*ref) : -1;
     const int bass = pickBassRegister (c.bassPc(), refBass, best.front());
     all.push_back (bass);
+
+    int subBass = -1;
     if (energy > 0.85f && bass - 12 >= 24)
-        all.push_back (bass - 12);
+        subBass = bass - 12;
+
+    int top = -1;
     if (energy > 0.6f)
     {
-        int top = 60 + c.root;
-        while (top <= best.back())
-            top += 12;
-        if (top <= 100)
-            all.push_back (top);
+        int candTop = 60 + c.root;
+        while (candTop <= best.back())
+            candTop += 12;
+        if (candTop <= 100)
+            top = candTop;
     }
+
+    if (top >= 0)
+        all.push_back (top);
+    if (subBass >= 0)
+        all.push_back (subBass);
 
     std::sort (all.begin(), all.end());
     all.erase (std::unique (all.begin(), all.end()), all.end());
+
+    // If total notes exceed kMaxNotes, drop doublings before any chord tone:
+    // Drop sub-octave bass first, then top doubling.
+    if ((int) all.size() > kMaxNotes && subBass >= 0)
+    {
+        auto it = std::find (all.begin(), all.end(), subBass);
+        if (it != all.end())
+            all.erase (it);
+    }
+    if ((int) all.size() > kMaxNotes && top >= 0)
+    {
+        auto it = std::find (all.begin(), all.end(), top);
+        if (it != all.end())
+            all.erase (it);
+    }
 
     Voicing v;
     v.n = std::min ((int) all.size(), kMaxNotes);

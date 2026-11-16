@@ -1158,8 +1158,7 @@ void ChordSlotsEditor::resized()
 
     if (pickerOverlay.isVisible())
     {
-        pickerOverlay.setBounds (timeline.getBounds().expanded (20, 70)
-                                     .withWidth (juce::jmin (600, getWidth() - 40))
+        pickerOverlay.setBounds (juce::Rectangle<int> (juce::jmin (680, getWidth() - 40), 320)
                                      .withCentre ({ getWidth() / 2, getHeight() / 2 }));
     }
 }

@@ -927,6 +927,40 @@ void testVariationBankAndHistory()
     CHECK (h2.processor.getProgression (0).slots[0].chord.root == 5);
 }
 
+void testExtendedChordTypesStateRoundTrip()
+{
+    Host a;
+    a.processor.edit ([] (cs::Progression& p, cs::Rng& rng)
+    {
+        cs::setNumSlots (p, 3);
+        int idx_m11 = -1, idx_7sharp9 = -1, idx_69 = -1;
+        for (int i = 0; i < cs::numChordTypes(); ++i)
+        {
+            if (std::string (cs::chordTypes()[(size_t) i].suffix) == "m11") idx_m11 = i;
+            if (std::string (cs::chordTypes()[(size_t) i].suffix) == "7#9") idx_7sharp9 = i;
+            if (std::string (cs::chordTypes()[(size_t) i].suffix) == "6/9") idx_69 = i;
+        }
+        CHECK (idx_m11 >= 0 && idx_7sharp9 >= 0 && idx_69 >= 0);
+
+        p.slots[0].chord = { 0, idx_m11, 0 };      // Cm11
+        p.slots[1].chord = { 4, idx_7sharp9, 0 };  // E7#9
+        p.slots[2].chord = { 7, idx_69, 0 };       // G6/9
+        cs::voiceAll (p, rng);
+    });
+
+    juce::MemoryBlock state;
+    a.processor.getStateInformation (state);
+
+    Host b;
+    b.processor.setStateInformation (state.getData(), (int) state.getSize());
+
+    const cs::Progression pb = b.processor.getProgression();
+    CHECK (pb.numSlots == 3);
+    CHECK (std::string (cs::chordTypes()[(size_t) pb.slots[0].chord.type].suffix) == "m11");
+    CHECK (std::string (cs::chordTypes()[(size_t) pb.slots[1].chord.type].suffix) == "7#9");
+    CHECK (std::string (cs::chordTypes()[(size_t) pb.slots[2].chord.type].suffix) == "6/9");
+}
+
 void testMeterAndTripletGrid()
 {
     // 1. Playback in 3/4 meter
@@ -1406,6 +1440,7 @@ int main (int argc, char** argv)
     testLargeBlockDenseCompingSafety();
     testHostTempoChangeRepublish();
     testVariationBankAndHistory();
+    testExtendedChordTypesStateRoundTrip();
     testMeterAndTripletGrid();
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
