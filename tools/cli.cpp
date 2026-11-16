@@ -5,6 +5,7 @@
 //   chordslots-cli roll [mood] [count] [seed]   generate progressions for a mood
 //   chordslots-cli eval [N] [--out file] [--bigrams file] [--adventure value] [--compare baseline]
 
+#include "ListeningTest.h"
 #include "chordslots/Generator.h"
 
 #include <algorithm>
@@ -597,9 +598,10 @@ int main (int argc, char** argv)
     const char* cmd = argc > 1 ? argv[1] : "roll";
 
     if (std::strcmp (cmd, "eval") == 0)
-    {
         return runEval (argc, argv);
-    }
+
+    if (std::strcmp (cmd, "listening-test") == 0)
+        return listening::run (argc, argv);
 
     if (std::strcmp (cmd, "table") == 0)
     {
@@ -655,6 +657,6 @@ int main (int argc, char** argv)
         return 0;
     }
 
-    std::fprintf (stderr, "usage: chordslots-cli table [scaleIndex] | roll [mood|all] [count] [seed] [--voicing style] | eval [N] [--voicing style] [--out file] [--bigrams file] [--adventure value] [--compare baseline] | voicings\n");
+    std::fprintf (stderr, "usage: chordslots-cli table [scaleIndex] | roll [mood|all] [count] [seed] [--voicing style] | eval [N] [--voicing style] [--out file] [--bigrams file] [--adventure value] [--compare baseline] | voicings | listening-test --out dir [--key file]\n");
     return 1;
 }
