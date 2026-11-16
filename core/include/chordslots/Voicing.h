@@ -800,6 +800,52 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
 }
 
 //==============================================================================
+/** Assembles full voicing with bass, doublings, and velocity according to style and energy. */
+inline Voicing assembleVoicing (Chord c, const std::vector<int>& upper, float energy,
+                                VoicingStyle style, int refBassNote = -1)
+{
+    const int bass = pickBassRegister (c.bassPc(), refBassNote, upper.front());
+    std::vector<int> all = upper;
+    all.push_back (bass);
+
+    int subBass = -1;
+    if (energy > 0.85f && bass - 12 >= 24)
+        subBass = bass - 12;
+
+    int top = -1;
+    if (energy > 0.6f && style != VoicingStyle::Stacked && style != VoicingStyle::Rootless)
+    {
+        int candTop = 60 + c.root;
+        while (candTop <= upper.back()) candTop += 12;
+        if (candTop <= 96) top = candTop;
+    }
+
+    if (top >= 0) all.push_back (top);
+    if (subBass >= 0) all.push_back (subBass);
+
+    std::sort (all.begin(), all.end());
+    all.erase (std::unique (all.begin(), all.end()), all.end());
+
+    if ((int) all.size() > kMaxNotes && subBass >= 0)
+    {
+        auto it = std::find (all.begin(), all.end(), subBass);
+        if (it != all.end()) all.erase (it);
+    }
+    if ((int) all.size() > kMaxNotes && top >= 0)
+    {
+        auto it = std::find (all.begin(), all.end(), top);
+        if (it != all.end()) all.erase (it);
+    }
+
+    Voicing v;
+    v.n = std::min ((int) all.size(), kMaxNotes);
+    for (int i = 0; i < v.n; ++i)
+        v.notes[(size_t) i] = std::clamp (all[(size_t) i], 0, 127);
+    v.bassCount = v.computeBassCount (kUpperFloor);
+    v.velocity = std::clamp ((int) std::lround (45.0f + 75.0f * energy), 1, 127);
+    return v;
+}
+
 /** Builds a playable voicing using the specified style, omission rules and hard filter. */
 inline Voicing makeVoicing (Chord c, const Voicing* ref, float centre, float energy,
                             Rng& rng, float refWeight = 1.0f, float jitter = 0.7f,
@@ -821,41 +867,10 @@ inline Voicing makeVoicing (Chord c, const Voicing* ref, float centre, float ene
         ScoredCandidate sc;
         sc.upperNotes = upper;
         const int refBass = ref != nullptr ? primaryBassNote (*ref) : -1;
-        const int bass = pickBassRegister (c.bassPc(), refBass, upper.front());
-        std::vector<int> all = upper;
-        all.push_back (bass);
+        Voicing v = assembleVoicing (c, upper, energy, style, refBass);
 
-        int subBass = -1;
-        if (energy > 0.85f && bass - 12 >= 24)
-            subBass = bass - 12;
-
-        int top = -1;
-        if (energy > 0.6f && style != VoicingStyle::Stacked && style != VoicingStyle::Rootless)
-        {
-            int candTop = 60 + c.root;
-            while (candTop <= upper.back()) candTop += 12;
-            if (candTop <= 96) top = candTop;
-        }
-
-        if (top >= 0) all.push_back (top);
-        if (subBass >= 0) all.push_back (subBass);
-
-        std::sort (all.begin(), all.end());
-        all.erase (std::unique (all.begin(), all.end()), all.end());
-
-        if ((int) all.size() > kMaxNotes && subBass >= 0)
-        {
-            auto it = std::find (all.begin(), all.end(), subBass);
-            if (it != all.end()) all.erase (it);
-        }
-        if ((int) all.size() > kMaxNotes && top >= 0)
-        {
-            auto it = std::find (all.begin(), all.end(), top);
-            if (it != all.end()) all.erase (it);
-        }
-
-        sc.allNotes = all;
-        sc.violations = countLowIntervalViolations (all);
+        sc.allNotes.assign (v.notes.begin(), v.notes.begin() + v.n);
+        sc.violations = countLowIntervalViolations (sc.allNotes);
 
         float mean = 0.0f;
         for (int x : upper) mean += (float) x;
@@ -927,14 +942,8 @@ inline Voicing makeVoicing (Chord c, const Voicing* ref, float centre, float ene
 
     std::sort (valid.begin(), valid.end(), [] (const auto& x, const auto& y) { return x.cost < y.cost; });
     const auto& best = valid.front();
-
-    Voicing v;
-    v.n = std::min ((int) best.allNotes.size(), kMaxNotes);
-    for (int i = 0; i < v.n; ++i)
-        v.notes[(size_t) i] = best.allNotes[(size_t) i];
-    v.bassCount = v.computeBassCount (kUpperFloor);
-    v.velocity = std::clamp ((int) std::lround (45.0f + 75.0f * energy), 1, 127);
-    return v;
+    const int refBass = ref != nullptr ? primaryBassNote (*ref) : -1;
+    return assembleVoicing (c, best.upperNotes, energy, style, refBass);
 }
 
 } // namespace cs

@@ -962,7 +962,7 @@ static void testModernTransitionPrior()
             }
         }
         const double meanErr = sumErr / count;
-        CHECK (meanErr <= 0.058);
+        CHECK (meanErr <= 0.0526);
 
         // Quick eval (N=60): noBassSlotPct == 0 for every mood x configuration
         for (size_t m = 0; m < moods().size(); ++m)

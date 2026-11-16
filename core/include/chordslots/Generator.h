@@ -558,7 +558,7 @@ inline void updateActuals (Progression& p, int i)
 
     // Energy is a performance property (loudness and density), not a harmonic one.
     const float vel = clamp01 (((float) s.voicing.velocity - 45.0f) / 75.0f);
-    const float density = clamp01 (((float) s.voicing.n - 2.0f) / 4.5f);
+    const float density = clamp01 (((float) s.voicing.n - 3.0f) / 5.0f);
     s.energy = clamp01 (0.6f * vel + 0.4f * density);
 }
 
@@ -764,66 +764,45 @@ inline float fitScore (const Progression& p)
 inline std::vector<Voicing> candidateVoicingsForSlot (const Progression& p, int slot)
 {
     const Slot& s = p.slots[(size_t) slot];
-    std::vector<int> pcs;
-    for (int iv : chordTypes()[(size_t) s.chord.type].iv)
-    {
-        const int pc = mod12 (s.chord.root + iv);
-        if (std::find (pcs.begin(), pcs.end(), pc) == pcs.end())
-            pcs.push_back (pc);
-    }
-    std::sort (pcs.begin(), pcs.end());
-    const int k = (int) pcs.size();
-    if (k == 0)
+    VoicingStyle style = (VoicingStyle) p.voicingStyle;
+    auto uppers = generateUpperCandidates (s.chord, style);
+    if (uppers.empty())
         return { s.voicing };
 
     const float centre = centreForBrightness (s.targetB);
-    std::vector<Voicing> candidates;
-
-    for (int inv = 0; inv < k; ++inv)
+    struct Scored
     {
-        for (int base : { 48, 60, 72 })
-        {
-            std::vector<int> notes;
-            int note = base + pcs[(size_t) inv];
-            notes.push_back (note);
-            for (int j = 1; j < k; ++j)
-            {
-                note += mod12 (pcs[(size_t) ((inv + j) % k)] - pcs[(size_t) ((inv + j - 1) % k)]);
-                notes.push_back (note);
-            }
-            if (notes.front() < kUpperFloor || notes.back() > 96)
-                continue;
+        Voicing v;
+        float dist;
+    };
+    std::vector<Scored> scored;
 
-            float mean = 0.0f;
-            for (int x : notes) mean += (float) x;
-            mean /= (float) k;
+    for (const auto& notes : uppers)
+    {
+        float mean = 0.0f;
+        for (int x : notes) mean += (float) x;
+        mean /= (float) notes.size();
 
-            if (std::abs (mean - centre) > 14.0f)
-                continue;
+        const float dist = std::abs (mean - centre);
+        if (dist > 14.0f)
+            continue;
 
-            std::vector<int> all = notes;
-            const int bass = pickBassRegister (s.chord.bassPc(), -1, notes.front());
-            all.push_back (bass);
-            if (s.targetE > 0.85f && bass - 12 >= 24)
-                all.push_back (bass - 12);
-            if (s.targetE > 0.6f)
-            {
-                int top = 60 + s.chord.root;
-                while (top <= notes.back()) top += 12;
-                if (top <= 100) all.push_back (top);
-            }
-            std::sort (all.begin(), all.end());
-            all.erase (std::unique (all.begin(), all.end()), all.end());
+        Voicing v = assembleVoicing (s.chord, notes, s.targetE, style, -1);
+        if (style != VoicingStyle::Close && violatesLowIntervalLimit (v))
+            continue;
 
-            Voicing v;
-            v.n = std::min ((int) all.size(), kMaxNotes);
-            for (int idx = 0; idx < v.n; ++idx)
-                v.notes[(size_t) idx] = std::clamp (all[(size_t) idx], 0, 127);
-            v.bassCount = v.computeBassCount (kUpperFloor);
-            v.velocity = std::clamp ((int) std::lround (45.0f + 75.0f * s.targetE), 1, 127);
-            candidates.push_back (v);
-        }
+        scored.push_back ({ v, dist });
     }
+
+    std::sort (scored.begin(), scored.end(), [] (const Scored& a, const Scored& b) {
+        return a.dist < b.dist;
+    });
+
+    std::vector<Voicing> candidates;
+    constexpr size_t kMaxCands = 8;
+    for (size_t i = 0; i < scored.size() && i < kMaxCands; ++i)
+        candidates.push_back (scored[i].v);
+
     if (candidates.empty())
         candidates.push_back (s.voicing);
     return candidates;
