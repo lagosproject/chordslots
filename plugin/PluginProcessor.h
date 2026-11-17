@@ -208,6 +208,19 @@ private:
     PendingNote pendingNotes[kMaxPendingNotes] = {};
     int pendingCount = 0;
 
+    // Event scheduling can cover several loops in a large host block. Keep its
+    // fixed buffer in processor storage instead of consuming audio-thread stack.
+    enum class BlockEventType { SlotStart, SlotOff, HitStart, HitOff, BassStart, BassOff };
+    struct BlockEvent
+    {
+        int sample = 0;
+        BlockEventType type = BlockEventType::SlotStart;
+        int slot = 0;
+        int hitIdx = 0;
+    };
+    static constexpr int kMaxBlockEvents = 4096;
+    BlockEvent blockEvents[kMaxBlockEvents] = {};
+
     std::atomic<float>* gateParam = nullptr;
     std::atomic<float>* synthOnParam = nullptr;
     std::atomic<float>* synthVolParam = nullptr;

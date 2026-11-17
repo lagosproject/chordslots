@@ -273,6 +273,19 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     shapeBox.addItem ("Pop Build (Step up)", 5);
     shapeBox.addItem ("Valley (Dip center)", 6);
     shapeBox.setSelectedId (1, juce::dontSendNotification);
+
+    setupCombo (bassPatternBox, bassPatternLabel, "BASS PATTERN");
+    bassPatternBox.addItem ("Sustain", (int) cs::BassStyle::Sustain + 1);
+    bassPatternBox.addItem ("Octave pump", (int) cs::BassStyle::OctavePump + 1);
+    bassPatternBox.addItem ("Offbeat 8ths", (int) cs::BassStyle::OffbeatEighths + 1);
+    bassPatternBox.addItem ("808 legato", (int) cs::BassStyle::Legato808 + 1);
+    bassPatternBox.addItem ("Walking", (int) cs::BassStyle::Walking + 1);
+    bassPatternBox.onChange = [this]
+    {
+        if (refreshing || bassPatternBox.getSelectedId() == 0) return;
+        const auto bassStyle = (cs::BassStyle) (bassPatternBox.getSelectedId() - 1);
+        processor.edit ([bassStyle] (cs::Progression& pr, cs::Rng&) { pr.bassStyle = bassStyle; });
+    };
     shapeBox.onChange = [this]
     {
         const int id = shapeBox.getSelectedId();
@@ -665,6 +678,7 @@ void ChordSlotsEditor::refresh()
     moodBox.setSelectedId (p.mood + 1, juce::dontSendNotification);
     styleBox.setSelectedId (p.style == -1 ? 1 : p.style + 2, juce::dontSendNotification);
     voicingBox.setSelectedId (p.voicingStyle + 1, juce::dontSendNotification);
+    bassPatternBox.setSelectedId ((int) p.bassStyle + 1, juce::dontSendNotification);
 
     lockRhythm.setToggleState (p.locks.rhythm, juce::dontSendNotification);
     lockRoots.setToggleState (p.locks.roots, juce::dontSendNotification);
@@ -796,7 +810,10 @@ void ChordSlotsEditor::saveMidi()
         file.deleteFile();
         juce::FileOutputStream out (file);
         if (out.openedOk())
-            processor.createMidiFile().writeTo (out);
+        {
+            const auto midi = processor.createMidiFile();
+            midi.writeTo (out, midi.getNumTracks() == 1 ? 0 : 1);
+        }
     });
 }
 
@@ -1221,6 +1238,7 @@ void ChordSlotsEditor::resized()
     placeLaneBarCombo (styleBox, styleLabel, 130);
     placeLaneBarCombo (voicingBox, voicingLabel, 110);
     placeLaneBarCombo (shapeBox, shapeLabel, 120);
+    placeLaneBarCombo (bassPatternBox, bassPatternLabel, 104);
 
     resetCurvesBtn.setBounds (laneBar.removeFromRight (58).withSizeKeepingCentre (56, 24));
     laneBar.removeFromRight (6);

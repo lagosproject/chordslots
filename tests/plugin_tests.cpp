@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <map>
+#include <memory>
 
 static int failures = 0;
 static int checks = 0;
@@ -46,7 +47,9 @@ struct NoteEvent
 
 struct Host
 {
-    explicit Host (double sr = 48000.0, int bs = 512) : sampleRate (sr), blockSize (bs)
+    explicit Host (double sr = 48000.0, int bs = 512)
+        : sampleRate (sr), blockSize (bs), processorStorage (std::make_unique<ChordSlotsProcessor>()),
+          processor (*processorStorage)
     {
         processor.setPlayHead (&playHead);
         processor.setRateAndBufferSizeDetails (sr, bs);
@@ -147,7 +150,8 @@ struct Host
     double sampleRate;
     int blockSize;
     FakePlayHead playHead;
-    ChordSlotsProcessor processor;
+    std::unique_ptr<ChordSlotsProcessor> processorStorage;
+    ChordSlotsProcessor& processor;
     std::vector<NoteEvent> events;
     juce::MidiBuffer injectedMidi;
     juce::int64 position = 0;
@@ -1351,6 +1355,79 @@ void testExportPlaybackParity()
     }
 }
 
+void testBassPatternExportPlaybackParity()
+{
+    for (double bpm : { 60.0, 120.0, 200.0 })
+        for (int style = (int) cs::BassStyle::Sustain; style <= (int) cs::BassStyle::Walking; ++style)
+            for (bool split : { false, true })
+            {
+                Host h (48000.0, 256);
+                h.setBpm (bpm);
+                h.processor.edit ([style] (cs::Progression& p, cs::Rng&)
+                {
+                    p.bars = 1;
+                    p.numSlots = 4;
+                    cs::layoutEven (p);
+                    p.bassStyle = (cs::BassStyle) style;
+                });
+                if (auto* param = h.processor.apvts.getParameter ("splitMidi"))
+                    param->setValueNotifyingHost (split ? 1.0f : 0.0f);
+
+                const auto progression = h.processor.getProgression();
+                const int blocks = (int) std::ceil (progression.lengthSteps() * samplesPerStep (h) / h.blockSize);
+                const auto exported = h.processor.createMidiFile();
+                struct MidiKey { int channel, note, velocity; bool on; double tick; };
+                std::vector<MidiKey> expected;
+                for (int t = 0; t < exported.getNumTracks(); ++t)
+                    for (int e = 0; e < exported.getTrack (t)->getNumEvents(); ++e)
+                    {
+                        const auto& msg = exported.getTrack (t)->getEventPointer (e)->message;
+                        if (msg.isNoteOn() || msg.isNoteOff())
+                            expected.push_back ({ msg.getChannel(), msg.getNoteNumber(), msg.isNoteOn() ? (int) msg.getVelocity() : 0,
+                                                  msg.isNoteOn(), msg.getTimeStamp() });
+                    }
+
+                h.playHead.playing = true;
+                h.playHead.ppq = 0.0;
+                h.run (blocks);
+                h.playHead.playing = false;
+                h.run (1);
+                CHECK (h.heldAfterReplay() == 0);
+
+                std::vector<MidiKey> rendered;
+                const double ticksPerSample = bpm * 480.0 / (60.0 * h.sampleRate);
+                const double loopEnd = progression.lengthSteps() * 20.0;
+                for (const auto& event : h.events)
+                {
+                    const double tick = event.sample * ticksPerSample;
+                    if (tick <= loopEnd + 1.0)
+                        rendered.push_back ({ event.channel, event.note, event.on ? event.velocity : 0, event.on, tick });
+                }
+                if (rendered.size() != expected.size())
+                    std::printf ("Bass parity count mismatch: style=%d bpm=%.0f split=%d rendered=%zu expected=%zu\n",
+                                 style, bpm, (int) split, rendered.size(), expected.size());
+                CHECK (rendered.size() == expected.size());
+                std::vector<bool> matched (rendered.size(), false);
+                int matches = 0;
+                for (const auto& exp : expected)
+                    for (size_t i = 0; i < rendered.size(); ++i)
+                    {
+                        const auto& live = rendered[i];
+                        if (! matched[i] && live.channel == exp.channel && live.note == exp.note && live.on == exp.on
+                            && live.velocity == exp.velocity && std::abs (live.tick - exp.tick) <= 2.0)
+                        {
+                            matched[i] = true;
+                            ++matches;
+                            break;
+                        }
+                    }
+                if (matches != (int) expected.size())
+                    std::printf ("Bass parity match mismatch: style=%d bpm=%.0f split=%d matched=%d expected=%zu\n",
+                                 style, bpm, (int) split, matches, expected.size());
+                CHECK (matches == (int) expected.size());
+            }
+}
+
 // P1.9: Safe event buffering under extreme block size and tempo
 void testLargeBlockDenseCompingSafety()
 {
@@ -1403,6 +1480,43 @@ void testLargeBlockDenseCompingSafety()
     }
     for (const auto& kv : sounding)
         CHECK (kv.second == 0);
+}
+
+void testBassPatternBlockSpanningManyLoops()
+{
+    Host h (48000.0, 65536);
+    h.setBpm (999.0);
+    h.processor.edit ([] (cs::Progression& p, cs::Rng&)
+    {
+        p.bars = 1;
+        p.numSlots = 2;
+        cs::layoutEven (p);
+        p.bassStyle = cs::BassStyle::OctavePump;
+    });
+    if (auto* param = h.processor.apvts.getParameter ("splitMidi"))
+        param->setValueNotifyingHost (1.0f);
+
+    const auto progression = h.processor.getProgression();
+    CHECK (samplesPerStep (h) * h.blockSize / progression.lengthSteps() > 5.0);
+    h.playHead.ppq = 0.0;
+    h.playHead.playing = true;
+    h.run (1);
+    const double stepPerSample = h.playHead.bpm * 24.0 / (60.0 * h.sampleRate);
+    bool bassBeyondThirdLoop = false;
+    int bassStarts = 0;
+    for (const auto& event : h.events)
+    {
+        if (event.channel == 2 && event.on)
+        {
+            ++bassStarts;
+            bassBeyondThirdLoop = bassBeyondThirdLoop || event.sample * stepPerSample >= 2.0 * progression.lengthSteps();
+        }
+    }
+    CHECK (bassStarts >= 20);
+    CHECK (bassBeyondThirdLoop);
+    h.playHead.playing = false;
+    h.run (1);
+    CHECK (h.heldAfterReplay() == 0);
 }
 
 // P1.10: Thread safety of tempo reads — host tempo change detected on audio thread and re-published
@@ -1477,17 +1591,17 @@ int main (int argc, char** argv)
     // `--snapshot out.png [mood]` renders the editor off-screen instead of running the tests.
     if (argc > 2 && juce::String (argv[1]) == "--snapshot")
     {
-        ChordSlotsProcessor processor;
+        auto processor = std::make_unique<ChordSlotsProcessor>();
         if (argc > 3)
         {
             const int mood = juce::jlimit (0, (int) cs::moods().size() - 1, juce::String (argv[3]).getIntValue());
-            processor.edit ([mood] (cs::Progression& p, cs::Rng& rng)
+            processor->edit ([mood] (cs::Progression& p, cs::Rng& rng)
             {
                 cs::applyMood (p, mood);
                 cs::roll (p, rng);
             });
         }
-        std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+        std::unique_ptr<juce::AudioProcessorEditor> editor (processor->createEditor());
         const juce::Image image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
         juce::File file = juce::File::getCurrentWorkingDirectory().getChildFile (juce::String (argv[2]));
         file.deleteFile();
@@ -1509,6 +1623,8 @@ int main (int argc, char** argv)
     testIncomingMidiTriggerIntegration();
     testSplitMidiOutput();
     testExportPlaybackParity();
+    testBassPatternExportPlaybackParity();
+    testBassPatternBlockSpanningManyLoops();
     testLargeBlockDenseCompingSafety();
     testHostTempoChangeRepublish();
     testVariationBankAndHistory();

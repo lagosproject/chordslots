@@ -29,6 +29,56 @@ static Chord ch (int root, const char* suffix)
     return {};
 }
 
+static void testBassPatterns()
+{
+    BassHit hits[kMaxBassHitsPerSlot] {};
+    int n = getBassHits (BassStyle::Sustain, 36, 43, 96, hits, kMaxBassHitsPerSlot);
+    CHECK (n == 1 && hits[0].stepOffset == 0 && hits[0].durationSteps == 96 && hits[0].pitch == 36);
+    n = getBassHits (BassStyle::OctavePump, 36, 43, 48, hits, kMaxBassHitsPerSlot);
+    CHECK (n == 4 && hits[0].pitch == 36 && hits[1].pitch == 48 && hits[3].stepOffset == 36);
+    n = getBassHits (BassStyle::OffbeatEighths, 36, 43, 48, hits, kMaxBassHitsPerSlot);
+    CHECK (n == 2 && hits[0].stepOffset == 12 && hits[1].stepOffset == 36);
+    n = getBassHits (BassStyle::Legato808, 36, 43, 48, hits, kMaxBassHitsPerSlot);
+    CHECK (n == 1 && hits[0].durationSteps == 49 && hits[0].glide);
+    n = getBassHits (BassStyle::Legato808, 36, 36, 48, hits, kMaxBassHitsPerSlot);
+    CHECK (n == 1 && hits[0].durationSteps == 48 && ! hits[0].glide);
+    n = getBassHits (BassStyle::Walking, 36, 43, 96, hits, kMaxBassHitsPerSlot);
+    CHECK (n == 4 && hits[0].pitch == 36 && hits[3].stepOffset == 72 && hits[3].pitch == 42);
+    constexpr uint16_t gMajor = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 6) |
+                                (1u << 7) | (1u << 9) | (1u << 11);
+    n = getBassHits (BassStyle::Walking, 36, 43, 96, hits, kMaxBassHitsPerSlot, gMajor);
+    CHECK (n == 4 && hits[3].pitch == 42);
+    for (int style = (int) BassStyle::Sustain; style <= (int) BassStyle::Walking; ++style)
+    {
+        BassHit tiny[2] {};
+        CHECK (getBassHits ((BassStyle) style, 36, 43, 1536, tiny, 2) <= 2);
+        for (const auto& hit : tiny)
+            CHECK (hit.pitch >= 0 && hit.pitch <= 127);
+    }
+
+    // C2 octave-pump hits would collide with a sustained C3 chord tone on Ch 1.
+    Rng rng (1);
+    Progression p = makeDefaultProgression (rng);
+    p.bars = 1;
+    p.numSlots = 1;
+    p.slots[0].start = 0;
+    p.slots[0].chord = ch (0, "maj7");
+    p.slots[0].voicing.n = 5;
+    p.slots[0].voicing.notes[0] = 36;
+    p.slots[0].voicing.notes[1] = 48;
+    p.slots[0].voicing.notes[2] = 52;
+    p.slots[0].voicing.notes[3] = 55;
+    p.slots[0].voicing.notes[4] = 59;
+    p.slots[0].voicing.bassCount = 1;
+    p.bassStyle = BassStyle::OctavePump;
+    const PlayData play = toPlayData (p);
+    CHECK (play.slots[0].numBassHits > 1);
+    CHECK (play.slots[0].bassHits[1].pitch == 36);
+    for (int h = 0; h < play.slots[0].numBassHits; ++h)
+        for (int j = play.slots[0].bassCount; j < play.slots[0].n; ++j)
+            CHECK (play.slots[0].bassHits[h].pitch != play.slots[0].notes[j]);
+}
+
 static void testSpelling()
 {
     CHECK (pitchClassName (1, 1, 0) == "Db");  // Db major, not C# major
@@ -1574,6 +1624,7 @@ static void testMelodyHarmonization()
 
 int main()
 {
+    testBassPatterns();
     testGoldenTheory();
     testVoicedTension();
     testSpiralTension();

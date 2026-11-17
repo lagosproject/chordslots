@@ -56,8 +56,8 @@ private:
 
     // Lane Toolbar controls
     juce::Label laneToolbarLabel;
-    juce::ComboBox moodBox, styleBox, voicingBox, shapeBox;
-    juce::Label moodLabel, styleLabel, voicingLabel, shapeLabel;
+    juce::ComboBox moodBox, styleBox, voicingBox, shapeBox, bassPatternBox;
+    juce::Label moodLabel, styleLabel, voicingLabel, shapeLabel, bassPatternLabel;
     juce::TextButton resetCurvesBtn { "Reset" };
     juce::TextButton analyzeMidiBtn;
     juce::Slider melodyFit;

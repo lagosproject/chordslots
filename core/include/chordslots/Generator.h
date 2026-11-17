@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Corpus.h"
+#include "BassPatterns.h"
 #include "Metrics.h"
 #include "Performance.h"
 #include "RingInference.h"
@@ -110,6 +111,7 @@ struct Progression
     float variety = 0.5f;     // sampling temperature for a full Roll
     float adventure = 0.3f;   // 0 = diatonic triads, 1 = borrowed chords and extensions
     float syncopation = 0.3f; // how irregular randomised cuts are
+    BassStyle bassStyle = BassStyle::Sustain;
     float bassMotion = 0.0f;  // 0 = keep root in bass, 1 = smooth walking bass / pedal inversions
     float voiceLeading = 0.5f; // 0 = free voicings, 1 = smooth minimal displacement
     bool phraseRepeat = false; // generates 4-slot phrase AA' with cadence variation
@@ -1723,6 +1725,8 @@ struct PlaySlot
     int primaryBass = -1;
     int numHits = 0;
     CompHit hits[kMaxCompHitsPerSlot] = {};
+    int numBassHits = 0;
+    BassHit bassHits[kMaxBassHitsPerSlot] = {};
 };
 
 static_assert (kMaxBars * kStepsPerBar / 12 <= kMaxCompHitsPerSlot,
@@ -1734,6 +1738,7 @@ struct PlayData
 {
     int lengthSteps = 4 * kStepsPerBar;
     int stepsPerBar = kStepsPerBar;
+    BassStyle bassStyle = BassStyle::Sustain;
     int numSlots = 0;
     PlaySlot slots[kMaxSlots];
 
@@ -1754,6 +1759,7 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
     d.lengthSteps = p.lengthSteps();
     d.stepsPerBar = p.stepsPerBar();
     d.numSlots = p.numSlots;
+    d.bassStyle = p.bassStyle;
     const double msPerBeat = 60000.0 / std::max (20.0, bpm);
     const double msPerStep = msPerBeat / (double) kStepsPerQuarter;
 
@@ -1772,6 +1778,14 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
         if (pb < 0)
             pb = pickBassRegister (s.chord.bassPc(), -1, kUpperFloor);
         o.primaryBass = pb;
+        if (p.bassStyle != BassStyle::Sustain)
+        {
+            const auto& next = p.slots[(size_t) ((i + 1) % p.numSlots)];
+            int nextBass = primaryBassNote (next.voicing);
+            if (nextBass < 0)
+                nextBass = pickBassRegister (next.chord.bassPc(), -1, kUpperFloor);
+            o.numBassHits = getBassHits (p.bassStyle, pb, nextBass, o.end - o.start, o.bassHits, kMaxBassHitsPerSlot);
+        }
 
         o.numHits = getCompHits (perf.compStyle, o.end - o.start, o.hits, kMaxCompHitsPerSlot, p.timeSigNum, p.timeSigDen);
 
@@ -1786,6 +1800,19 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
 
         const double slotLenMs = (double) (o.end - o.start) * msPerStep;
         const PerfOutput out = applyPerformance (in, perf, slotLenMs, i, pass);
+
+        // In combined-channel mode a bass octave that lands on a sustained
+        // upper chord pitch would send a same-pitch note-off into that voice.
+        // Keep the pump in the root octave for only those colliding hits; split
+        // Ch 1/2 routing remains unchanged and collision-free by channel.
+        if (p.bassStyle == BassStyle::OctavePump)
+            for (int h = 0; h < o.numBassHits; ++h)
+                for (int j = bCount; j < out.n; ++j)
+                    if (o.bassHits[h].pitch == out.notes[(size_t) j].pitch)
+                    {
+                        o.bassHits[h].pitch = pb;
+                        break;
+                    }
 
         o.n = std::min (out.n, kMaxNotes);
         for (int j = 0; j < o.n; ++j)
