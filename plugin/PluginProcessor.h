@@ -194,12 +194,17 @@ private:
 
     std::atomic<bool> previewOn { false };
     std::atomic<int> auditionRequest { -1 };
+    // Packed MIDI variation request: (previous APVTS selection << 2) | target.
+    // The previous value lets message-thread service discard a keyswitch made
+    // stale by newer host/user automation.
+    std::atomic<int> pendingMidiVariation { -1 };
     std::atomic<double> uiStep { -1.0 };
     std::atomic<double> lastBpm { 120.0 };
     std::atomic<double> publishedBpm { 120.0 };
     std::atomic<bool> tempoDirty { false };
 
     void parameterChanged (const juce::String&, float) override;
+    void requestMidiPlayingVariation (int index) noexcept;
 
     struct PendingNote
     {

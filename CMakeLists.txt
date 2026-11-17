@@ -9,6 +9,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(CHORDSLOTS_BUILD_PLUGIN "Build the JUCE plugin (VST3 / LV2 / AU / Standalone)" ON)
+option(CHORDSLOTS_BUILD_CLAP "Build the CLAP plugin using clap-juce-extensions" OFF)
 option(CHORDSLOTS_COPY_AFTER_BUILD "Install the plugin into the user plugin folders after building" OFF)
 option(CHORDSLOTS_LTO "Link-time optimisation (slower builds, slightly smaller/faster binaries)" OFF)
 
@@ -66,6 +67,12 @@ else()
     FetchContent_MakeAvailable(JUCE)
 endif()
 
+# CLAP is intentionally opt-in. Load its adapter after JUCE so its CMake
+# integration can inspect the JUCE plugin configuration.
+if(CHORDSLOTS_BUILD_CLAP)
+    include(cmake/ClapSupport.cmake)
+endif()
+
 set(CS_FORMATS VST3 Standalone)
 if(APPLE)
     list(APPEND CS_FORMATS AU)
@@ -118,6 +125,24 @@ target_link_libraries(ChordSlots
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+if(CHORDSLOTS_BUILD_CLAP)
+    clap_juce_extensions_plugin(TARGET ChordSlots
+        CLAP_ID "org.chordslots.ChordSlots"
+        CLAP_FEATURES instrument)
+
+    # Small host-side smoke that dynamically loads the actual CLAP artifact,
+    # verifies its MIDI note ports, and exercises MIDI input/output events.
+    add_executable(chordslots_clap_midi_smoke tools/clap_midi_smoke.cpp)
+    target_include_directories(chordslots_clap_midi_smoke PRIVATE
+        "${clap_juce_extensions_SOURCE_DIR}/clap-libs/clap/include")
+    if(CMAKE_DL_LIBS)
+        target_link_libraries(chordslots_clap_midi_smoke PRIVATE ${CMAKE_DL_LIBS})
+    endif()
+    add_dependencies(chordslots_clap_midi_smoke ChordSlots_CLAP)
+    add_test(NAME clap_midi_smoke
+        COMMAND chordslots_clap_midi_smoke "$<TARGET_FILE:ChordSlots_CLAP>")
+endif()
 if(CHORDSLOTS_LTO)
     target_link_libraries(ChordSlots PUBLIC juce::juce_recommended_lto_flags)
 endif()

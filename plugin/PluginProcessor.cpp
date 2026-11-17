@@ -524,18 +524,32 @@ void ChordSlotsProcessor::refeel() noexcept
 //==============================================================================
 int ChordSlotsProcessor::getPlayingVariation() const noexcept
 {
-    if (variationParam != nullptr)
-        return juce::jlimit (0, cs::kNumVariations - 1, juce::roundToInt (variationParam->load()));
-    return 0;
+    const int request = pendingMidiVariation.load();
+    const int parameterValue = variationParam != nullptr
+        ? juce::jlimit (0, cs::kNumVariations - 1, juce::roundToInt (variationParam->load()))
+        : 0;
+    if (request >= 0 && (request >> 2) == parameterValue)
+        return request & 0x3;
+    return parameterValue;
 }
 
 void ChordSlotsProcessor::setPlayingVariation (int index)
 {
     index = juce::jlimit (0, cs::kNumVariations - 1, index);
+    pendingMidiVariation.store (-1);
     if (followPlayback.load())
         setEditVariation (index);
     if (auto* param = apvts.getParameter ("variation"))
         param->setValueNotifyingHost (param->convertTo0to1 ((float) index));
+}
+
+void ChordSlotsProcessor::requestMidiPlayingVariation (int index) noexcept
+{
+    const int target = juce::jlimit (0, cs::kNumVariations - 1, index);
+    const int base = variationParam != nullptr
+        ? juce::jlimit (0, cs::kNumVariations - 1, juce::roundToInt (variationParam->load()))
+        : 0;
+    pendingMidiVariation.store ((base << 2) | target);
 }
 
 void ChordSlotsProcessor::setFollowPlayback (bool follow) noexcept
@@ -626,6 +640,30 @@ void ChordSlotsProcessor::copyVariation (int src, int dst)
 
 void ChordSlotsProcessor::timerCallback()
 {
+    // MIDI keyswitches arrive on the audio thread. Defer host notification and
+    // follow-playback UI updates here so the CLAP/VST/AU host APIs are never
+    // called from processBlock. Compare-exchange preserves any newer request
+    // which arrived while this update was being applied.
+    const int request = pendingMidiVariation.load();
+    if (request >= 0)
+    {
+        const int base = request >> 2;
+        const int requestedVariation = request & 0x3;
+        const int currentVariation = variationParam != nullptr
+            ? juce::jlimit (0, cs::kNumVariations - 1, juce::roundToInt (variationParam->load()))
+            : 0;
+        if (base == currentVariation && pendingMidiVariation.load() == request)
+        {
+            if (followPlayback.load())
+                setEditVariation (requestedVariation);
+            if (auto* param = apvts.getParameter ("variation"))
+                param->setValueNotifyingHost (param->convertTo0to1 ((float) requestedVariation));
+        }
+
+        int expected = request;
+        pendingMidiVariation.compare_exchange_strong (expected, -1);
+    }
+
     if (tempoDirty.exchange (false))
         publish();
 }
@@ -712,9 +750,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         }
     }
 
-    const int targetVar = variationParam != nullptr
-        ? juce::jlimit (0, cs::kNumVariations - 1, juce::roundToInt (variationParam->load()))
-        : 0;
+    const int targetVar = getPlayingVariation();
     const auto quantize = quantizeSwitchParam != nullptr
         ? (cs::SwitchQuantize) juce::jlimit (0, 2, juce::roundToInt (quantizeSwitchParam->load()))
         : cs::SwitchQuantize::NextBar;
@@ -1088,7 +1124,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             const int noteNum = m.getNoteNumber();
             if (noteNum >= 24 && noteNum <= 27)
             {
-                setPlayingVariation (noteNum - 24);
+                requestMidiPlayingVariation (noteNum - 24);
                 continue;
             }
 
@@ -1830,6 +1866,8 @@ void ChordSlotsProcessor::setStateInformation (const void* data, int size)
     if (! root.hasType ("ChordSlotsState"))
         return;
 
+    pendingMidiVariation.store (-1);
+
     const int ver = (int) root.getProperty ("version", 1);
     const char* varNames[cs::kNumVariations] = { "ProgressionA", "ProgressionB", "ProgressionC", "ProgressionD" };
 
@@ -1888,6 +1926,7 @@ void ChordSlotsProcessor::setStateInformation (const void* data, int size)
     const auto params = root.getChildWithName (apvts.state.getType());
     if (params.isValid())
         apvts.replaceState (params.createCopy());
+    pendingMidiVariation.store (-1);
 
     if (synthModelParam != nullptr)
         setSynthModel (static_cast<PreviewSoundModel> (juce::roundToInt (synthModelParam->load())));

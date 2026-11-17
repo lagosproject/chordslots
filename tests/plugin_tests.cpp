@@ -1186,6 +1186,49 @@ void testVariationBankAndHistory()
     CHECK (h2.processor.getProgression (0).slots[0].chord.root == 5);
 }
 
+void testMidiVariationSwitchIsDeferredToMessageThread()
+{
+    Host h (48000.0, 256);
+    h.processor.stopTimer(); // Drive timer service explicitly for a deterministic handoff test.
+    auto* variation = h.processor.apvts.getRawParameterValue ("variation");
+    CHECK (variation != nullptr);
+    if (variation == nullptr)
+        return;
+
+    h.injectNoteOn (26); // MIDI keyswitch note 26 selects Variation C (index 2).
+    h.run (1);
+
+    // The audio callback exposes the new target immediately, but must not
+    // change APVTS or call setValueNotifyingHost on the real-time thread.
+    CHECK (h.processor.getPlayingVariation() == 2);
+    CHECK (juce::roundToInt (variation->load()) == 0);
+
+    // A later keyswitch supersedes the pending one before the message-thread
+    // timer runs; only the latest selection is reflected to the host/UI.
+    h.injectNoteOn (27);
+    h.run (1);
+    CHECK (h.processor.getPlayingVariation() == 3);
+    CHECK (juce::roundToInt (variation->load()) == 0);
+
+    // If host automation changes the APVTS value before deferred notification,
+    // that newer host choice wins and the old keyswitch request is discarded.
+    auto* variationParameter = h.processor.apvts.getParameter ("variation");
+    variationParameter->setValueNotifyingHost (variationParameter->convertTo0to1 (1.0f));
+    CHECK (h.processor.getPlayingVariation() == 1);
+    h.processor.timerCallback();
+    CHECK (juce::roundToInt (variation->load()) == 1);
+    CHECK (h.processor.getPlayingVariation() == 1);
+
+    h.processor.setPlayingVariation (3);
+    h.processor.setFollowPlayback (true);
+    h.injectNoteOn (25);
+    h.run (1);
+    CHECK (h.processor.getEditVariation() == 3);
+    h.processor.timerCallback();
+    CHECK (h.processor.getEditVariation() == 1);
+    CHECK (h.processor.getPlayingVariation() == 1);
+}
+
 void testExtendedChordTypesStateRoundTrip()
 {
     Host a;
@@ -1814,6 +1857,7 @@ int main (int argc, char** argv)
     testLargeBlockDenseCompingSafety();
     testHostTempoChangeRepublish();
     testVariationBankAndHistory();
+    testMidiVariationSwitchIsDeferredToMessageThread();
     testExtendedChordTypesStateRoundTrip();
     testMeterAndTripletGrid();
     std::printf ("%d checks, %d failures\n", checks, failures);

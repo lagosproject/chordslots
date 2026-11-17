@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.22)
+project(chordslots_clap_midi_smoke LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CLAP_INCLUDE_DIR "" CACHE PATH "CLAP SDK include directory")
+if(NOT EXISTS "${CLAP_INCLUDE_DIR}/clap/clap.h")
+    message(FATAL_ERROR "Set CLAP_INCLUDE_DIR to the CLAP SDK include directory")
+endif()
+
+add_executable(chordslots_clap_midi_smoke ../clap_midi_smoke.cpp)
+target_include_directories(chordslots_clap_midi_smoke PRIVATE "${CLAP_INCLUDE_DIR}")
+if(CMAKE_DL_LIBS)
+    target_link_libraries(chordslots_clap_midi_smoke PRIVATE ${CMAKE_DL_LIBS})
+endif()
