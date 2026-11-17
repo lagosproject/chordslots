@@ -12,6 +12,7 @@ public:
 
     void setProgression (const cs::Progression&);
     void setPlayhead (double step);
+    void setMidiVisible (bool show);
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -27,6 +28,7 @@ public:
     bool keyPressed (const juce::KeyPress& key) override;
 
     std::function<void(int)> onSlotSelected;
+    std::function<void(int)> onOpenAlternatives;
 
 private:
     float xForStep (double step) const;
@@ -37,6 +39,20 @@ private:
     juce::Rectangle<float> lockBounds (int i) const;
     juce::Rectangle<float> optionsBounds (int i) const;
     void showSlotMenu (int slot, int step);
+
+    void showCutMenu (int cut);
+    void updateMidiNotes();
+    void paintMidi (juce::Graphics&);
+
+    struct MidiNote
+    {
+        double start, end;
+        int pitch, velocity;
+        bool bass;
+    };
+    std::vector<MidiNote> midiNotes;
+    bool midiVisible = false;
+    int dragStep = -1;
 
     ChordSlotsProcessor& processor;
     cs::Progression prog;

@@ -86,6 +86,7 @@ public:
     void setPreviewPlaying (bool shouldPlay) noexcept { previewOn.store (shouldPlay); }
     bool isPreviewPlaying() const noexcept { return previewOn.load(); }
     void auditionSlot (int slot) noexcept { auditionRequest.store (slot); }
+    void auditionAlternative (int slot, cs::Chord chord, bool inContext);
     /** Loop position in sixteenth steps, or a negative value when stopped. */
     double getPlayPosition() const noexcept { return uiStep.load(); }
 
@@ -215,6 +216,18 @@ private:
 
     std::atomic<bool> previewOn { false };
     std::atomic<int> auditionRequest { -1 };
+    struct AlternativePreview
+    {
+        juce::MidiMessageSequence notes;
+        double secondsPerTick = 0.0;
+        bool inContext = false;
+    };
+    juce::SpinLock alternativeLock;
+    std::unique_ptr<AlternativePreview> pendingAlternative, activeAlternative;
+    bool alternativeReady = false;
+    int alternativeEvent = -1;
+    int64_t alternativeSample = 0;
+    std::array<std::array<bool, 128>, 2> alternativeHeld {};
     // Packed MIDI variation request: (previous APVTS selection << 2) | target.
     // The previous value lets message-thread service discard a keyswitch made
     // stale by newer host/user automation.

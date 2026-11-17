@@ -300,6 +300,53 @@ void testPreviewAndAudition()
     CHECK (h.heldAfterReplay() == 0);
 }
 
+void testSeparatorLocksAndAlternativeAudition()
+{
+    Host host;
+    host.processor.edit ([] (cs::Progression& p, cs::Rng& rng)
+    {
+        const int original = p.slots[1].start;
+        cs::moveCut (p, 1, original - p.snap);
+        p.slots[1].cutLocked = true;
+        p.slots[1].locked = false;
+        const int pinned = p.slots[1].start;
+        CHECK (pinned != original);
+        cs::moveCut (p, 1, original);
+        CHECK (! cs::removeSlot (p, 1));
+        cs::roll (p, rng);
+        CHECK (p.slots[1].start == pinned);
+        CHECK (! p.slots[1].locked);
+    });
+
+    juce::MemoryBlock saved;
+    host.processor.getStateInformation (saved);
+    Host restored;
+    restored.processor.setStateInformation (saved.getData(), (int) saved.getSize());
+    const auto before = restored.processor.getProgression();
+    CHECK (before.slots[1].cutLocked);
+    CHECK (before.slots[1].start == host.processor.getProgression().slots[1].start);
+
+    const auto alternatives = cs::alternatives (before, 1, 1);
+    CHECK (! alternatives.empty());
+    if (alternatives.empty())
+        return;
+
+    restored.processor.auditionAlternative (1, alternatives.front(), false);
+    restored.run (1);
+    const auto isolated = restored.events;
+    CHECK (! isolated.empty());
+    CHECK (std::all_of (isolated.begin(), isolated.end(), [] (const auto& e) { return e.on && e.sample == 0; }));
+
+    restored.processor.auditionAlternative (1, alternatives.front(), true);
+    const int loopBlocks = (int) std::ceil (before.lengthSteps() * samplesPerStep (restored) / restored.blockSize);
+    restored.run (loopBlocks + 4);
+    CHECK (restored.events.size() > isolated.size() * 2);
+    CHECK (restored.heldAfterReplay() == 0);
+    const auto after = restored.processor.getProgression();
+    for (int i = 0; i < before.numSlots; ++i)
+        CHECK (before.slots[(size_t) i].chord == after.slots[(size_t) i].chord);
+}
+
 void testEditWhilePlaying()
 {
     Host h;
@@ -1815,7 +1862,7 @@ int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
 
-    // `--snapshot out.png [mood]` renders the editor off-screen instead of running the tests.
+    // `--snapshot out.png [mood] [--groove]` renders the editor off-screen instead of running the tests.
     if (argc > 2 && juce::String (argv[1]) == "--snapshot")
     {
         auto processor = std::make_unique<ChordSlotsProcessor>();
@@ -1829,6 +1876,25 @@ int main (int argc, char** argv)
             });
         }
         std::unique_ptr<juce::AudioProcessorEditor> editor (processor->createEditor());
+        if (argc > 4 && juce::String (argv[4]) == "--groove")
+        {
+            bool opened = false;
+            for (auto* child : editor->getChildren())
+            {
+                auto* button = dynamic_cast<juce::TextButton*> (child);
+                if (button != nullptr && button->getButtonText() == "Groove & Feel" && button->onClick)
+                {
+                    button->onClick();
+                    opened = true;
+                    break;
+                }
+            }
+            if (! opened)
+            {
+                std::fprintf (stderr, "Could not open the Groove & Feel tab\n");
+                return 1;
+            }
+        }
         const juce::Image image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
         juce::File file = juce::File::getCurrentWorkingDirectory().getChildFile (juce::String (argv[2]));
         file.deleteFile();
@@ -1842,6 +1908,7 @@ int main (int argc, char** argv)
     testHostSyncedPlayback();
     testGateAndRelocation();
     testPreviewAndAudition();
+    testSeparatorLocksAndAlternativeAudition();
     testEditWhilePlaying();
     testStateRoundTrip();
     testHarmonizeMelody();

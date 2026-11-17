@@ -41,7 +41,7 @@ void LanesView::paint (juce::Graphics& g)
             const float x1 = (float) (prog.slotEnd (i) / len) * lb.getWidth();
             const juce::Rectangle<float> col (x0 + 1.5f, lb.getY(), juce::jmax (2.0f, x1 - x0 - 3.0f), lb.getHeight());
 
-            g.setColour (ui::panel);
+            g.setColour (ui::background);
             g.fillRoundedRectangle (col, 4.0f);
 
             const float target = targetOf (s, lane);

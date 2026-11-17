@@ -18,6 +18,8 @@ const juce::Colour brightness { 0xfff3b743 };
 const juce::Colour tension    { 0xffef5d6e };
 const juce::Colour energy     { 0xff3ec9bf };
 
+enum class ButtonIcon { None, Transport, Save, Undo };
+
 juce::Font font (float height, bool bold = false);
 /** Slot colour: deep blue for dark chords, warm gold for bright ones. */
 juce::Colour colourForBrightness (float b);
@@ -31,6 +33,7 @@ public:
     ChordSlotsLookAndFeel();
 
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool, bool) override;
+    void drawButtonText (juce::Graphics&, juce::TextButton&, bool, bool) override;
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
     void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
                            float startAngle, float endAngle, juce::Slider&) override;

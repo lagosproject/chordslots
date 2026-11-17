@@ -31,6 +31,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     setupCombo (barsBox, barsLabel, "BARS");
     setupCombo (meterBox, meterLabel, "METER");
     setupCombo (slotsBox, slotsLabel, "SLOTS");
+    slotsBox.setTooltip ("Set the total slot count. Add or remove individual cuts on the timeline.");
     setupCombo (snapBox, snapLabel, "GRID");
 
     for (int pc = 0; pc < 12; ++pc)
@@ -40,14 +41,14 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         scaleBox.addItem (cs::scales()[(size_t) i].name, i + 1);
 
     for (int b : { 1, 2, 4, 8 })
-        barsBox.addItem (juce::String (b) + (b == 1 ? " bar" : " bars"), b);
+        barsBox.addItem (juce::String (b), b);
 
     meterBox.addItem ("4/4", 1);
     meterBox.addItem ("3/4", 2);
     meterBox.addItem ("6/8", 3);
     meterBox.addItem ("Host", 4);
 
-    for (int n : { 2, 3, 4, 5, 6, 7, 8, 12, 16 })
+    for (int n = 1; n <= cs::kMaxSlots; ++n)
         slotsBox.addItem (juce::String (n), n);
 
     snapBox.addItem ("1/4", 24);
@@ -57,10 +58,6 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     snapBox.addItem ("1/16", 6);
     snapBox.addItem ("1/16 T", 4);
     snapBox.addItem ("1/32", 3);
-
-    const auto& m = cs::moods();
-    for (int i = 0; i < (int) m.size(); ++i)
-        moodBox.addItem (m[(size_t) i].name, i + 1);
 
     // Input / Trigger popover button
     inputButton.setTooltip ("Configure incoming MIDI trigger mode and note mapping");
@@ -123,7 +120,10 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         const int n = slotsBox.getSelectedId();
         processor.edit ([n] (cs::Progression& pr, cs::Rng& rng)
         {
+            const int previousCount = pr.numSlots;
             cs::setNumSlots (pr, n);
+            if (pr.numSlots == previousCount)
+                return;
             if (pr.mood >= 0)
             {
                 const int scale = pr.scale;
@@ -242,22 +242,37 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 
     // Views
     addAndMakeVisible (timeline);
-
-    // Lane Toolbar controls
-    laneToolbarLabel.setText ("TARGET CURVES", juce::dontSendNotification);
-    laneToolbarLabel.setFont (ui::font (10.0f, true));
-    laneToolbarLabel.setColour (juce::Label::textColourId, ui::textDim);
-    addAndMakeVisible (laneToolbarLabel);
+    addAndMakeVisible (harmonyViewButton);
+    addAndMakeVisible (grooveViewButton);
+    harmonyViewButton.onClick = [this] { showGrooveView (false); };
+    grooveViewButton.onClick = [this] { showGrooveView (true); };
+    addAndMakeVisible (midiViewBtn);
+    midiViewBtn.setClickingTogglesState (true);
+    midiViewBtn.setTooltip ("Show the generated notes, including velocity, gate and strum");
+    midiViewBtn.onClick = [this]
+    {
+        timeline.setMidiVisible (midiViewBtn.getToggleState());
+        midiViewBtn.setButtonText (midiViewBtn.getToggleState() ? "Chords" : "MIDI view");
+        resized();
+    };
+    timeline.onOpenAlternatives = [this] (int slot)
+    {
+        pickerOverlay.open (slot, true);
+        pickerOverlay.setVisible (true);
+        pickerOverlay.toFront (true);
+    };
 
     setupCombo (moodBox, moodLabel, "MOOD PRESET");
+    const auto& m = cs::moods();
     for (int i = 0; i < (int) m.size(); ++i)
         moodBox.addItem (m[(size_t) i].name, i + 1);
 
-    setupCombo (styleBox, styleLabel, "STYLE PRIOR");
-    styleBox.addItem ("Auto (from scale)", 1);
-    styleBox.addItem ("Major (Billboard + RS200)", 2);
-    styleBox.addItem ("Minor (Billboard + RS200)", 3);
-    styleBox.addItem ("Extended harmony (7ths/9ths)", 4);
+    setupCombo (styleBox, styleLabel, "CHORD TRANSITIONS");
+    styleBox.setTooltip ("Biases which chord changes Roll favors. Auto follows the mood and scale. Free removes the learned bias.");
+    styleBox.addItem ("Auto", 1);
+    styleBox.addItem ("Major", 2);
+    styleBox.addItem ("Minor", 3);
+    styleBox.addItem ("Extended harmony", 4);
     styleBox.addItem ("Free", 5);
     styleBox.setSelectedId (1, juce::dontSendNotification);
 
@@ -491,6 +506,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     refeelButton.onClick = [this] { processor.refeel(); };
     addAndMakeVisible (refeelButton);
 
+    undoButton.getProperties().set ("icon", (int) ui::ButtonIcon::Undo);
     undoButton.onClick = [this] { processor.undo(); };
     addAndMakeVisible (undoButton);
 
@@ -502,10 +518,12 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     };
     addAndMakeVisible (rollButton);
 
+    playButton.getProperties().set ("icon", (int) ui::ButtonIcon::Transport);
     playButton.setTooltip ("Toggle built-in preview synth playback");
     playButton.onClick = [this] { processor.setPreviewPlaying (! processor.isPreviewPlaying()); };
     addAndMakeVisible (playButton);
 
+    saveButton.getProperties().set ("icon", (int) ui::ButtonIcon::Save);
     saveButton.setTooltip ("Export progression as standard MIDI file");
     saveButton.onClick = [this] { saveMidi(); };
     addAndMakeVisible (saveButton);
@@ -557,7 +575,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         const int s = timeline.getSelectedSlot();
         if (s >= 0)
         {
-            pickerOverlay.setSlot (s);
+            pickerOverlay.open (s, false);
             pickerOverlay.setVisible (true);
             pickerOverlay.toFront (true);
         }
@@ -581,8 +599,9 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 
     setWantsKeyboardFocus (true);
     setResizable (true, true);
-    setResizeLimits (900, 540, 1920, 1200);
-    setSize (1040, 620);
+    showGrooveView (false);
+    setResizeLimits (900, 570, 1920, 1200);
+    setSize (1040, 650);
     startTimerHz (30);
 }
 
@@ -825,7 +844,7 @@ void ChordSlotsEditor::refresh()
     bassMotion.setValue (p.bassMotion, juce::dontSendNotification);
     melodyFit.setValue (p.melodyFit, juce::dontSendNotification);
     melodyFit.setEnabled (! p.melody.empty());
-    analyzeMidiBtn.setButtonText (juce::String::fromUTF8 (p.melody.empty() ? "MIDI ▾" : "MIDI: Melody ▾"));
+    analyzeMidiBtn.setButtonText (juce::String::fromUTF8 (p.melody.empty() ? "Import MIDI ▾" : "MIDI: Melody ▾"));
 
     const cs::TriggerConfig tc = processor.getTriggerConfig();
     const char* modeNames[] = { "Auto", "Trig", "Loop" };
@@ -842,7 +861,44 @@ void ChordSlotsEditor::refresh()
 
     timeline.setProgression (p);
     lanes.setProgression (p);
+    if (pickerOverlay.isVisible())
+    {
+        const int slot = timeline.getSelectedSlot();
+        if (slot >= 0)
+            pickerOverlay.setSlot (slot);
+        else
+            pickerOverlay.setVisible (false);
+    }
     updateContextBar (timeline.getSelectedSlot());
+}
+
+void ChordSlotsEditor::showGrooveView (bool show)
+{
+    grooveView = show;
+    harmonyViewButton.setToggleState (! show, juce::dontSendNotification);
+    grooveViewButton.setToggleState (show, juce::dontSendNotification);
+
+    for (juce::Component* control : std::initializer_list<juce::Component*> {
+             &keyBox, &keyLabel, &scaleBox, &scaleLabel, &barsBox, &barsLabel,
+             &meterBox, &meterLabel, &slotsBox, &slotsLabel, &snapBox, &snapLabel,
+             &fitLabel, &fitCaption, &midiViewBtn, &lanes,
+             &moodBox, &moodLabel, &styleBox, &styleLabel, &voicingBox, &voicingLabel,
+             &shapeBox, &shapeLabel, &resetCurvesBtn, &analyzeMidiBtn, &melodyFit,
+             &melodyFitLabel, &lockCaption, &lockRhythm, &lockRoots, &lockColors,
+             &lockVoicing, &adventure, &adventureLabel, &variety, &varietyLabel,
+             &syncopation, &syncopationLabel, &bassMotion, &bassMotionLabel, &rollButton })
+        control->setVisible (! show);
+
+    for (juce::Component* control : std::initializer_list<juce::Component*> {
+             &compBox, &compLabel, &bassPatternBox, &bassPatternLabel, &refeelButton,
+             &strum, &strumLabel, &accent, &accentLabel, &humanize, &humanizeLabel,
+             &gate, &gateLabel })
+        control->setVisible (show);
+
+    pickerOverlay.setVisible (false);
+    timeline.setMidiVisible (show || midiViewBtn.getToggleState());
+    updateContextBar (timeline.getSelectedSlot());
+    repaint();
 }
 
 void ChordSlotsEditor::updateContextBar (int slot)
@@ -861,15 +917,14 @@ void ChordSlotsEditor::updateContextBar (int slot)
         }
         hint.setText (text, juce::dontSendNotification);
         hint.setJustificationType (juce::Justification::centredLeft);
-        rollRootBtn.setVisible (true);
-        rollColorBtn.setVisible (true);
-        rollBassBtn.setVisible (true);
-        inspectBtn.setVisible (true);
+        rollRootBtn.setVisible (! grooveView);
+        rollColorBtn.setVisible (! grooveView);
+        rollBassBtn.setVisible (! grooveView);
+        inspectBtn.setVisible (! grooveView);
     }
     else
     {
-        hint.setText (juce::String::fromUTF8 ("Card Fill: Brightness  \xc2\xb7  Red Strip: Tension  \xc2\xb7  "
-                                              "Click slot to select/audition  \xc2\xb7  Press 'L' to pin  \xc2\xb7  'R' to roll"),
+        hint.setText ("Separator strip: click to add, drag to move, right-click to lock or remove. Shift-click a chord to listen.",
                       juce::dontSendNotification);
         hint.setJustificationType (juce::Justification::centred);
         rollRootBtn.setVisible (false);
@@ -1091,7 +1146,8 @@ bool ChordSlotsEditor::keyPressed (const juce::KeyPress& key)
     }
 
     // R: Targeted roll on selected slot or full roll
-    if ((key.getKeyCode() == 'R' || key.getKeyCode() == 'r') && ! key.getModifiers().isAnyModifierKeyDown())
+    if (! grooveView && (key.getKeyCode() == 'R' || key.getKeyCode() == 'r')
+        && ! key.getModifiers().isAnyModifierKeyDown())
     {
         const int sel = timeline.getSelectedSlot();
         if (sel >= 0)
@@ -1128,12 +1184,6 @@ bool ChordSlotsEditor::keyPressed (const juce::KeyPress& key)
 void ChordSlotsEditor::paint (juce::Graphics& g)
 {
     g.fillAll (ui::background);
-    g.setColour (ui::text);
-    g.setFont (ui::font (20.0f, true));
-    g.drawText ("ChordSlots", 16, 14, 130, 26, juce::Justification::centredLeft);
-    g.setColour (ui::textDim);
-    g.setFont (ui::font (10.0f));
-    g.drawText ("target-driven harmony", 17, 38, 130, 14, juce::Justification::centredLeft);
 
     auto drawPanel = [&g] (juce::Rectangle<int> r, const juce::String& title, const juce::Colour& titleColour)
     {
@@ -1149,72 +1199,69 @@ void ChordSlotsEditor::paint (juce::Graphics& g)
         g.drawText (title, r.getX() + 10, r.getY() + 4, r.getWidth() - 20, 14, juce::Justification::centredLeft);
     };
 
-    drawPanel (harmonyPanelBounds, "1. HARMONY GENERATOR", ui::accent);
-    drawPanel (groovePanelBounds, "2. GROOVE & FEEL", ui::energy);
-    drawPanel (outputPanelBounds, "OUTPUT & EXPORT", ui::textDim);
+    drawPanel (targetCurvesBounds, "TARGET CURVES", ui::accent);
+    drawPanel (harmonyPanelBounds, "GENERATION", ui::accent);
+    drawPanel (groovePanelBounds, "PERFORMANCE", ui::energy);
+    drawPanel (previewPanelBounds, "SYNTH PREVIEW", ui::textDim);
+    drawPanel (outputPanelBounds, "MIDI OUTPUT & EXPORT", ui::textDim);
 }
 
 void ChordSlotsEditor::resized()
 {
     auto area = getLocalBounds().reduced (14, 10);
 
-    // =========================================================================
-    // Header Row (~54px)
-    // =========================================================================
-    auto header = area.removeFromTop (54);
-    header.removeFromLeft (136); // logo area
+    auto tabRow = area.removeFromTop (32);
+    harmonyViewButton.setBounds (tabRow.removeFromLeft (106));
+    tabRow.removeFromLeft (4);
+    grooveViewButton.setBounds (tabRow.removeFromLeft (132));
+    tabRow.removeFromLeft (12);
+    undoButton.setBounds (tabRow.removeFromLeft (72).reduced (0, 2));
 
-    // Right side: Fit score badge
-    auto fitArea = header.removeFromRight (56);
-    fitCaption.setBounds (fitArea.removeFromTop (14));
-    fitLabel.setBounds (fitArea);
-
-    header.removeFromRight (10);
-
-    // Variation bank area
-    auto varArea = header.removeFromRight (186);
-    auto varTop = varArea.removeFromTop (16);
-    variationLabel.setBounds (varTop.removeFromLeft (74));
-    followButton.setBounds (varTop);
-
-    varArea.removeFromTop (2);
-    auto varBottom = varArea.removeFromTop (28);
-    const int btnW = 28;
-    for (int i = 0; i < cs::kNumVariations; ++i)
+    auto sharedControls = tabRow.reduced (0, 2);
+    inputButton.setBounds (sharedControls.removeFromRight (92));
+    sharedControls.removeFromRight (14);
+    auto variations = sharedControls.removeFromRight (326);
+    variationLabel.setBounds (variations.removeFromLeft (70));
+    for (auto& button : varButtons)
     {
-        varButtons[i].setBounds (varBottom.removeFromLeft (btnW));
-        varBottom.removeFromLeft (3);
+        button.setBounds (variations.removeFromLeft (28));
+        variations.removeFromLeft (3);
     }
-    varBottom.removeFromLeft (4);
-    copyVarButton.setBounds (varBottom);
+    variations.removeFromLeft (4);
+    followButton.setBounds (variations.removeFromLeft (60));
+    variations.removeFromLeft (4);
+    copyVarButton.setBounds (variations);
 
-    header.removeFromRight (12);
-
-    // Left combos: KEY, SCALE, BARS, METER, SLOTS, GRID, INPUT
-    auto place = [&header] (juce::ComboBox& box, juce::Label& label, int width)
+    area.removeFromTop (8);
+    if (! grooveView)
     {
-        auto cell = header.removeFromLeft (width);
-        header.removeFromLeft (8);
-        label.setBounds (cell.removeFromTop (15));
-        box.setBounds (cell.removeFromTop (28));
-    };
+        midiViewBtn.setBounds (sharedControls.removeFromRight (94).withTrimmedRight (4));
+        auto loopRow = area.removeFromTop (43);
+        auto place = [&loopRow] (juce::ComboBox& box, juce::Label& label, int width)
+        {
+            auto cell = loopRow.removeFromLeft (width);
+            loopRow.removeFromLeft (8);
+            label.setBounds (cell.removeFromTop (15));
+            box.setBounds (cell);
+        };
 
-    place (keyBox, keyLabel, 56);
-    place (scaleBox, scaleLabel, 110);
-    place (barsBox, barsLabel, 66);
-    place (meterBox, meterLabel, 66);
-    place (slotsBox, slotsLabel, 60);
-    place (snapBox, snapLabel, 76);
+        place (keyBox, keyLabel, 50);
+        place (scaleBox, scaleLabel, 96);
+        place (barsBox, barsLabel, 60);
+        place (meterBox, meterLabel, 60);
+        place (slotsBox, slotsLabel, 54);
+        place (snapBox, snapLabel, 66);
 
-    // Input/Trigger button in remaining header width
-    if (header.getWidth() > 60)
-    {
-        auto inCell = header.removeFromLeft (juce::jmin (92, header.getWidth()));
-        inCell.removeFromTop (15);
-        inputButton.setBounds (inCell.removeFromTop (28));
+        loopRow.removeFromLeft (10);
+        place (moodBox, moodLabel, 100);
+        place (styleBox, styleLabel, 132);
+        place (voicingBox, voicingLabel, 106);
+
+        auto fitArea = loopRow.removeFromRight (60);
+        fitCaption.setBounds (fitArea.removeFromTop (14));
+        fitLabel.setBounds (fitArea);
+        area.removeFromTop (6);
     }
-
-    area.removeFromTop (10);
 
     // =========================================================================
     // Footer & Context Bar
@@ -1240,31 +1287,25 @@ void ChordSlotsEditor::resized()
     auto footer = area.removeFromBottom (104);
     area.removeFromBottom (10);
 
-    const int totalWidth = footer.getWidth();
     const int gap = 8;
-    // Output needs room for two readable 56px value boxes, the split/song buttons,
-    // synth selector and drag tiles. Groove knobs share the lower row below Comp.
-    const int available = totalWidth - 2 * gap;
-    const int harmWidth = juce::roundToInt (available * 0.35f);
-    const int grooWidth = juce::roundToInt (available * 0.23f);
-
-    harmonyPanelBounds = footer.removeFromLeft (harmWidth);
+    const auto stagePanel = footer.removeFromLeft (juce::roundToInt ((footer.getWidth() - gap) * 0.56f));
+    harmonyPanelBounds = grooveView ? juce::Rectangle<int>{} : stagePanel;
+    groovePanelBounds = grooveView ? stagePanel : juce::Rectangle<int>{};
     footer.removeFromLeft (gap);
-    groovePanelBounds = footer.removeFromLeft (grooWidth);
+    previewPanelBounds = footer.removeFromLeft (170);
     footer.removeFromLeft (gap);
     outputPanelBounds = footer;
 
     struct Knob { juce::Slider* s; juce::Label* l; };
 
     // --- Panel 1: Harmony Generator ---
+    if (! grooveView)
     {
         auto hInner = harmonyPanelBounds.reduced (8, 4);
         hInner.removeFromTop (16);
 
         auto harmActions = hInner.removeFromRight (74);
-        undoButton.setBounds (harmActions.removeFromTop (26));
-        harmActions.removeFromTop (4);
-        rollButton.setBounds (harmActions.removeFromTop (36));
+        rollButton.setBounds (harmActions.withSizeKeepingCentre (74, 36));
         hInner.removeFromRight (6);
 
         auto lockButtons = hInner.removeFromTop (20);
@@ -1290,6 +1331,8 @@ void ChordSlotsEditor::resized()
     }
 
     // --- Panel 2: Groove & Feel ---
+    targetCurvesBounds = {};
+    if (grooveView)
     {
         auto gInner = groovePanelBounds.reduced (8, 4);
         gInner.removeFromTop (16);
@@ -1298,13 +1341,18 @@ void ChordSlotsEditor::resized()
         auto compCell = controlRow.removeFromLeft (128);
         compLabel.setBounds (compCell.removeFromTop (12));
         compBox.setBounds (compCell.removeFromTop (19));
+        controlRow.removeFromLeft (8);
+        auto bassCell = controlRow.removeFromLeft (136);
+        bassPatternLabel.setBounds (bassCell.removeFromTop (12));
+        bassPatternBox.setBounds (bassCell.removeFromTop (19));
         auto refeelArea = controlRow.removeFromRight (62);
         refeelButton.setBounds (refeelArea.withSizeKeepingCentre (60, 28));
 
         gInner.removeFromTop (2);
         auto grooveKnobs = gInner;
-        const int gkw = grooveKnobs.getWidth() / 3;
-        for (const Knob& k : { Knob { &strum, &strumLabel }, Knob { &accent, &accentLabel }, Knob { &humanize, &humanizeLabel } })
+        const int gkw = grooveKnobs.getWidth() / 4;
+        for (const Knob& k : { Knob { &strum, &strumLabel }, Knob { &accent, &accentLabel },
+                               Knob { &humanize, &humanizeLabel }, Knob { &gate, &gateLabel } })
         {
             auto cell = grooveKnobs.removeFromLeft (gkw);
             k.l->setBounds (cell.removeFromTop (13));
@@ -1312,15 +1360,24 @@ void ChordSlotsEditor::resized()
         }
     }
 
-    // --- Panel 3: Output & Export ---
+    // Synth preview
+    {
+        auto preview = previewPanelBounds.reduced (8, 4).withTrimmedTop (16);
+        auto sound = preview.removeFromLeft (84);
+        synthModelLabel.setBounds (sound.removeFromTop (13));
+        synthModelBox.setBounds (sound.removeFromTop (26));
+        sound.removeFromTop (5);
+        playButton.setBounds (sound.removeFromTop (28));
+
+        preview.removeFromLeft (6);
+        volumeLabel.setBounds (preview.removeFromTop (13));
+        volume.setBounds (preview.reduced (1, 0));
+    }
+
+    // MIDI output and export
     {
         auto oInner = outputPanelBounds.reduced (8, 4);
         oInner.removeFromTop (16);
-
-        auto synthCell = oInner.removeFromLeft (86);
-        synthModelLabel.setBounds (synthCell.removeFromTop (13));
-        synthModelBox.setBounds (synthCell.removeFromTop (28));
-        oInner.removeFromLeft (6);
 
         auto dragArea = oInner.removeFromRight (92).reduced (0, 2);
         dragTile.setBounds (dragArea);
@@ -1331,69 +1388,47 @@ void ChordSlotsEditor::resized()
 
         updateDragTileVisibility();
 
-        oInner.removeFromRight (8);
-
-        auto btnArea = oInner.removeFromRight (88).reduced (0, 2);
-        auto topBtns = btnArea.removeFromTop (btnArea.getHeight() / 2).withTrimmedBottom (1);
-        playButton.setBounds (topBtns.removeFromLeft (topBtns.getWidth() / 2).withTrimmedRight (1));
-        saveButton.setBounds (topBtns.withTrimmedLeft (1));
-        auto bottomBtns = btnArea.withTrimmedTop (1);
-        splitMidiButton.setBounds (bottomBtns.removeFromLeft (bottomBtns.getWidth() / 2).withTrimmedRight (1));
-        songButton.setBounds (bottomBtns.withTrimmedLeft (1));
-
-        oInner.removeFromRight (6);
-
-        auto outKnobs = oInner;
-        const int okw = outKnobs.getWidth() / 2;
-        for (const Knob& k : { Knob { &gate, &gateLabel }, Knob { &volume, &volumeLabel } })
+        auto buttons = oInner.withTrimmedRight (6).reduced (0, 2);
+        const int buttonHeight = (buttons.getHeight() - 4) / 3;
+        for (auto* button : { &saveButton, &splitMidiButton, &songButton })
         {
-            auto cell = outKnobs.removeFromLeft (okw);
-            k.l->setBounds (cell.removeFromTop (13));
-            k.s->setBounds (cell.reduced (1, 0));
+            button->setBounds (buttons.removeFromTop (buttonHeight));
+            buttons.removeFromTop (2);
         }
     }
 
     // =========================================================================
     // Main Area: Timeline Cards & Lanes & Lane Toolbar
     // =========================================================================
-    const int timelineH = 135;
+    pickerOverlay.setBounds (juce::Rectangle<int> (juce::jmin (680, getWidth() - 40), 350)
+                                 .withCentre ({ getWidth() / 2, getHeight() / 2 }));
+
+    if (grooveView)
+    {
+        timeline.setBounds (area);
+        return;
+    }
+
+    const int timelineH = midiViewBtn.getToggleState() ? 188 : 152;
     timeline.setBounds (area.removeFromTop (timelineH));
 
     area.removeFromTop (6);
 
-    // Lane Toolbar (~26px)
-    auto laneBar = area.removeFromTop (26);
-    laneToolbarLabel.setBounds (laneBar.removeFromLeft (88).withTrimmedTop (4));
-    laneBar.removeFromLeft (6);
-
-    auto placeLaneBarCombo = [&laneBar] (juce::ComboBox& box, juce::Label& label, int width)
-    {
-        auto cell = laneBar.removeFromLeft (width);
-        laneBar.removeFromLeft (6);
-        label.setBounds (cell.removeFromTop (12));
-        box.setBounds (cell.removeFromTop (24));
-    };
-
-    placeLaneBarCombo (moodBox, moodLabel, 120);
-    placeLaneBarCombo (styleBox, styleLabel, 130);
-    placeLaneBarCombo (voicingBox, voicingLabel, 110);
-    placeLaneBarCombo (shapeBox, shapeLabel, 120);
-    placeLaneBarCombo (bassPatternBox, bassPatternLabel, 104);
-
-    resetCurvesBtn.setBounds (laneBar.removeFromRight (58).withSizeKeepingCentre (56, 24));
-    laneBar.removeFromRight (6);
-    analyzeMidiBtn.setBounds (laneBar.removeFromRight (112).withSizeKeepingCentre (110, 24));
-    laneBar.removeFromRight (8);
-    auto melodyControl = laneBar.removeFromRight (105);
-    melodyFit.setBounds (melodyControl.removeFromRight (34).withSizeKeepingCentre (32, 28));
-    melodyFitLabel.setBounds (melodyControl);
-
-    area.removeFromTop (4);
+    targetCurvesBounds = area;
+    area.removeFromTop (20);
+    area.removeFromBottom (4);
+    auto curveTools = area.removeFromBottom (31).reduced (8, 0);
+    area.removeFromBottom (4);
     lanes.setBounds (area);
 
-    if (pickerOverlay.isVisible())
-    {
-        pickerOverlay.setBounds (juce::Rectangle<int> (juce::jmin (680, getWidth() - 40), 320)
-                                     .withCentre ({ getWidth() / 2, getHeight() / 2 }));
-    }
+    shapeLabel.setBounds (curveTools.removeFromLeft (52));
+    shapeBox.setBounds (curveTools.removeFromLeft (133).withSizeKeepingCentre (133, 24));
+    curveTools.removeFromLeft (6);
+    resetCurvesBtn.setBounds (curveTools.removeFromLeft (72).withSizeKeepingCentre (72, 24));
+
+    auto melodyControl = curveTools.removeFromRight (112);
+    melodyFit.setBounds (melodyControl.removeFromRight (34).withSizeKeepingCentre (32, 28));
+    melodyFitLabel.setBounds (melodyControl);
+    curveTools.removeFromRight (8);
+    analyzeMidiBtn.setBounds (curveTools.removeFromRight (120).withSizeKeepingCentre (120, 24));
 }

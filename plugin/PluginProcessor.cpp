@@ -74,6 +74,7 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
         st.setProperty ("type", juce::String (cs::chordTypes()[(size_t) s.chord.type].suffix), nullptr);
         st.setProperty ("bassInt", s.chord.bassInt, nullptr);
         st.setProperty ("locked", s.locked, nullptr);
+        st.setProperty ("cutLocked", s.cutLocked, nullptr);
         st.setProperty ("targetB", s.targetB, nullptr);
         st.setProperty ("targetT", s.targetT, nullptr);
         st.setProperty ("targetE", s.targetE, nullptr);
@@ -186,6 +187,7 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p, int stat
         s.chord.bassInt = juce::jlimit (0, 11, (int) st.getProperty ("bassInt", 0));
         cs::sanitizeBass (s.chord);
         s.locked = (bool) st.getProperty ("locked", false);
+        s.cutLocked = i > 0 && (bool) st.getProperty ("cutLocked", false);
         s.targetB = juce::jlimit (0.0f, 1.0f, (float) st.getProperty ("targetB", 0.5f));
         s.targetT = juce::jlimit (0.0f, 1.0f, (float) st.getProperty ("targetT", 0.4f));
         s.targetE = juce::jlimit (0.0f, 1.0f, (float) st.getProperty ("targetE", 0.6f));
@@ -270,6 +272,7 @@ ChordSlotsProcessor::ChordSlotsProcessor()
     compStyleParam = apvts.getRawParameterValue ("compStyle");
     synthModelParam = apvts.getRawParameterValue ("synthModel");
 
+    apvts.addParameterListener ("gate", this);
     apvts.addParameterListener ("strum", this);
     apvts.addParameterListener ("accent", this);
     apvts.addParameterListener ("humanize", this);
@@ -290,6 +293,7 @@ ChordSlotsProcessor::ChordSlotsProcessor()
 ChordSlotsProcessor::~ChordSlotsProcessor()
 {
     stopTimer();
+    apvts.removeParameterListener ("gate", this);
     apvts.removeParameterListener ("strum", this);
     apvts.removeParameterListener ("accent", this);
     apvts.removeParameterListener ("humanize", this);
@@ -301,6 +305,11 @@ ChordSlotsProcessor::~ChordSlotsProcessor()
 
 void ChordSlotsProcessor::parameterChanged (const juce::String& paramID, float val)
 {
+    if (paramID == "gate")
+    {
+        sendChangeMessage();
+        return;
+    }
     if (paramID == "triggerMode" || paramID == "splitMidi")
         resetTrigger();
     else if (paramID == "synthModel")
@@ -670,7 +679,10 @@ void ChordSlotsProcessor::timerCallback()
     }
 
     if (tempoDirty.exchange (false))
+    {
         publish();
+        sendChangeMessage();
+    }
 }
 
 void ChordSlotsProcessor::publish()
@@ -718,6 +730,8 @@ void ChordSlotsProcessor::prepareToPlay (double newSampleRate, int)
     heldCount = 0;
     heldSlot = currentSlot = -1;
     auditionCount = 0;
+    alternativeEvent = -1;
+    alternativeHeld = {};
     pendingCount = 0;
     wasPlaying = false;
     resetTrigger();
@@ -844,6 +858,38 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             midi.addEvent (juce::MidiMessage::noteOff (auditionNotes[i].channel, auditionNotes[i].note), sample);
         auditionCount = 0;
     };
+
+    auto releaseAlternative = [&]
+    {
+        if (alternativeEvent < 0)
+            return;
+        for (int ch = 0; ch < 2; ++ch)
+            for (int note = 0; note < 128; ++note)
+                if (alternativeHeld[(size_t) ch][(size_t) note])
+                    midi.addEvent (juce::MidiMessage::noteOff (ch == 0 ? kMidiChannelChords : kMidiChannelBass, note), 0);
+        alternativeHeld = {};
+        alternativeEvent = -1;
+    };
+    if (numSamples > 0)
+    {
+        const bool available = ! playing && ! triggerEngine.isTriggerActive() && incomingMidi.isEmpty();
+        if (! available)
+            releaseAlternative();
+        const juce::SpinLock::ScopedTryLockType lock (alternativeLock);
+        if (lock.isLocked() && alternativeReady)
+        {
+            alternativeReady = false;
+            if (available)
+            {
+                releaseAlternative();
+                releaseAudition (0);
+                auditionRequest.store (-1);
+                activeAlternative.swap (pendingAlternative);
+                alternativeEvent = 0;
+                alternativeSample = 0;
+            }
+        }
+    }
 
     auto triggerNote = [&] (int note, int vel, int sample, int channel = kMidiChannelChords, bool isBass = false)
     {
@@ -1611,6 +1657,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         const int request = auditionRequest.exchange (-1);
         if (request >= 0 && request < play.numSlots && numSamples > 0 && ! triggerEngine.isTriggerActive())
         {
+            releaseAlternative();
             releaseAudition (0);
             const cs::PlaySlot& s = play.slots[request];
             if (split)
@@ -1640,6 +1687,33 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                 releaseAudition (juce::jlimit (0, juce::jmax (0, numSamples - 1), auditionSamplesLeft));
             else
                 auditionSamplesLeft -= numSamples;
+        }
+    }
+
+    if (alternativeEvent >= 0 && numSamples > 0)
+    {
+        const auto& preview = *activeAlternative;
+        const double samplesPerTick = preview.secondsPerTick * sampleRate;
+        while (alternativeEvent < preview.notes.getNumEvents())
+        {
+            const auto& msg = preview.notes.getEventPointer (alternativeEvent)->message;
+            const auto offset = (int64_t) std::llround (msg.getTimeStamp() * samplesPerTick) - alternativeSample;
+            if (offset >= numSamples)
+                break;
+            if (msg.isNoteOnOrOff())
+            {
+                midi.addEvent (msg, (int) std::max (int64_t { 0 }, offset));
+                alternativeHeld[msg.getChannel() == kMidiChannelBass ? 1 : 0][(size_t) msg.getNoteNumber()] = msg.isNoteOn();
+            }
+            ++alternativeEvent;
+        }
+        if (alternativeEvent >= preview.notes.getNumEvents())
+            alternativeEvent = -1;
+        else
+        {
+            alternativeSample += numSamples;
+            if (preview.inContext)
+                uiStep.store (alternativeSample / (samplesPerTick * kTicksPerStep));
         }
     }
 
@@ -1756,6 +1830,53 @@ void closeMidiTrack (juce::MidiFile& file, juce::MidiMessageSequence& sequence, 
     file.addTrack (sequence);
 }
 } // namespace
+
+void ChordSlotsProcessor::auditionAlternative (int slot, cs::Chord chord, bool inContext)
+{
+    auto p = getProgression();
+    if (slot < 0 || slot >= p.numSlots)
+        return;
+
+    // Audition the same voicing a subsequent swap would produce.
+    auto previewRng = [&]
+    {
+        const juce::ScopedLock lock (modelLock);
+        return rng;
+    }();
+    cs::setChord (p, slot, chord, previewRng);
+    auto preview = std::make_unique<AlternativePreview>();
+    const auto bpm = lastBpm.load();
+    const bool split = isSplitMidi();
+    preview->secondsPerTick = 60.0 / (bpm * kTicksPerQuarter);
+    preview->inContext = inContext;
+
+    auto& notes = preview->notes;
+    if (inContext)
+    {
+        juce::MidiMessageSequence bass;
+        const auto end = p.lengthSteps() * (double) kTicksPerStep;
+        const auto gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
+        appendMidiSection (p, getPerformanceParams(), bpm, gate, 0.0, end, 0, &notes, split ? &bass : &notes);
+        notes.addSequence (bass, 0.0);
+        notes.addEvent (juce::MidiMessage::endOfTrack(), end);
+    }
+    else
+    {
+        const auto& v = p.slots[(size_t) slot].voicing;
+        for (int i = 0; i < v.n; ++i)
+        {
+            const int channel = split && i < v.bassCount ? kMidiChannelBass : kMidiChannelChords;
+            const int note = v.notes[(size_t) i];
+            notes.addEvent (juce::MidiMessage::noteOn (channel, note, (juce::uint8) v.velocity), 0.0);
+            notes.addEvent (juce::MidiMessage::noteOff (channel, note), 0.9 / preview->secondsPerTick);
+        }
+    }
+    notes.updateMatchedPairs();
+
+    const juce::SpinLock::ScopedLockType lock (alternativeLock);
+    pendingAlternative.swap (preview);
+    alternativeReady = true;
+}
 
 juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
 {

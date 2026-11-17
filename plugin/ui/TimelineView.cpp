@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TimelineView.h"
+#include <numeric>
 
 namespace
 {
+constexpr int separatorTop = 17;
+constexpr int contentTop = 35;
 inline juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 }
 
@@ -14,6 +17,7 @@ TimelineView::TimelineView (ChordSlotsProcessor& p) : processor (p)
 void TimelineView::setProgression (const cs::Progression& p)
 {
     prog = p;
+    updateMidiNotes();
     if (selected >= prog.numSlots)
         selected = -1;
     repaint();
@@ -40,10 +44,18 @@ int TimelineView::stepForX (float x) const
 
 int TimelineView::cutAt (float x) const
 {
+    int closest = -1;
+    float distance = 5.0f;
     for (int i = 1; i < prog.numSlots; ++i)
-        if (std::abs (x - xForStep (prog.slots[(size_t) i].start)) <= 5.0f)
-            return i;
-    return -1;
+    {
+        const float candidate = std::abs (x - xForStep (prog.slots[(size_t) i].start));
+        if (candidate <= distance)
+        {
+            closest = i;
+            distance = candidate;
+        }
+    }
+    return closest;
 }
 
 int TimelineView::slotAt (float x) const
@@ -59,7 +71,7 @@ juce::Rectangle<float> TimelineView::slotBounds (int i) const
 {
     const float x0 = xForStep (prog.slots[(size_t) i].start);
     const float x1 = xForStep (prog.slotEnd (i));
-    return { x0 + 1.5f, 18.0f, juce::jmax (2.0f, x1 - x0 - 3.0f), (float) getHeight() - 18.0f };
+    return { x0 + 1.5f, (float) contentTop, juce::jmax (2.0f, x1 - x0 - 3.0f), (float) getHeight() - contentTop };
 }
 
 juce::Rectangle<float> TimelineView::lockBounds (int i) const
@@ -72,6 +84,83 @@ juce::Rectangle<float> TimelineView::optionsBounds (int i) const
 {
     const auto r = slotBounds (i);
     return { r.getRight() - 20.0f, r.getBottom() - 20.0f, 15.0f, 14.0f };
+}
+
+void TimelineView::setMidiVisible (bool show)
+{
+    midiVisible = show;
+    updateMidiNotes();
+    repaint();
+}
+
+void TimelineView::updateMidiNotes()
+{
+    midiNotes.clear();
+    if (! midiVisible)
+        return;
+
+    const auto file = processor.createMidiFile();
+    const double scale = (double) cs::kStepsPerQuarter / file.getTimeFormat();
+    for (int track = 0; track < file.getNumTracks(); ++track)
+        for (const auto* event : *file.getTrack (track))
+            if (event->message.isNoteOn() && event->noteOffObject != nullptr)
+                midiNotes.push_back ({ event->message.getTimeStamp() * scale,
+                                       event->noteOffObject->message.getTimeStamp() * scale,
+                                       event->message.getNoteNumber(), event->message.getVelocity(), track == 1 });
+}
+
+void TimelineView::paintMidi (juce::Graphics& g)
+{
+    const auto area = getLocalBounds().toFloat().withTrimmedTop ((float) contentTop);
+    g.setColour (ui::panel);
+    g.fillRect (area);
+    if (midiNotes.empty())
+        return;
+
+    int low = 127, high = 0;
+    for (const auto& note : midiNotes)
+    {
+        low = std::min (low, note.pitch);
+        high = std::max (high, note.pitch);
+    }
+    const float rowH = area.getHeight() / (high - low + 1);
+    auto yForNote = [&] (int pitch) { return area.getY() + (high - pitch) * rowH; };
+    for (int pitch = low; pitch <= high; ++pitch)
+    {
+        const int pc = pitch % 12;
+        if (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10)
+        {
+            g.setColour (ui::background.withAlpha (0.6f));
+            g.fillRect (0.0f, yForNote (pitch), area.getWidth(), rowH);
+        }
+    }
+    const auto meter = prog.meter();
+    const int beat = meter.num == 6 && meter.den == 8 ? 36 : cs::kStepsPerQuarter;
+    const int grid = std::gcd (beat, prog.snap);
+    for (int step = 0; step < prog.lengthSteps(); step += grid)
+    {
+        const float alpha = step % meter.stepsPerBar == 0 ? 0.95f : (step % beat == 0 ? 0.6f : 0.22f);
+        g.setColour (ui::outline.brighter (0.4f).withAlpha (alpha));
+        g.drawVerticalLine ((int) xForStep (step), area.getY(), area.getBottom());
+    }
+    if (selected >= 0 && selected < prog.numSlots)
+    {
+        g.setColour (ui::accent.withAlpha (0.15f));
+        g.fillRect (slotBounds (selected));
+    }
+    for (const auto& note : midiNotes)
+    {
+        const float x = xForStep (note.start);
+        g.setColour ((note.bass ? ui::energy : ui::brightness).withAlpha (0.4f + 0.6f * note.velocity / 127.0f));
+        g.fillRect (x, yForNote (note.pitch), std::max (1.0f, xForStep (note.end) - x),
+                    juce::jmax (1.0f, rowH * 0.82f));
+    }
+    g.setFont (ui::font (10.0f));
+    g.setColour (ui::text.withAlpha (0.85f));
+    for (int pitch = ((low + 11) / 12) * 12; pitch <= high; pitch += 12)
+        g.drawText ("C" + juce::String (pitch / 12 - 1), 3,
+                    juce::jmin ((int) area.getBottom() - 10, (int) yForNote (pitch)),
+                    24, 10, juce::Justification::centredLeft);
 }
 
 void TimelineView::paint (juce::Graphics& g)
@@ -113,8 +202,10 @@ void TimelineView::paint (juce::Graphics& g)
         }
     }
 
-    // Slots
-    for (int i = 0; i < prog.numSlots; ++i)
+    if (midiVisible)
+        paintMidi (g);
+
+    for (int i = 0; ! midiVisible && i < prog.numSlots; ++i)
     {
         const cs::Slot& s = prog.slots[(size_t) i];
         const auto r = slotBounds (i);
@@ -231,15 +322,22 @@ void TimelineView::paint (juce::Graphics& g)
         }
     }
 
-    // Cut drag indicator
-    if (hoverCut > 0 || dragCut > 0)
+    g.setColour (ui::panel);
+    g.fillRect (0, separatorTop, getWidth(), contentTop - separatorTop);
+    for (int i = 1; i < prog.numSlots; ++i)
     {
-        const int c = dragCut > 0 ? dragCut : hoverCut;
-        if (c < prog.numSlots)
+        const auto& s = prog.slots[(size_t) i];
+        const float x = xForStep (i == dragCut && dragStep >= 0 ? dragStep : s.start);
+        const bool highlighted = i == hoverCut || i == dragCut;
+        const auto colour = s.cutLocked ? ui::accent.brighter (0.55f) : (highlighted ? ui::text : ui::textDim);
+        g.setColour (colour.withAlpha (highlighted ? 0.9f : 0.4f));
+        g.drawVerticalLine ((int) x, (float) contentTop, (float) getHeight());
+        if (s.cutLocked)
+            ui::drawPadlock (g, { x - 5.0f, 20.0f, 10.0f, 12.0f }, colour, true);
+        else
         {
-            const float x = xForStep (prog.slots[(size_t) c].start);
-            g.setColour (juce::Colours::white);
-            g.fillRoundedRectangle (x - 1.5f, 20.0f, 3.0f, (float) getHeight() - 24.0f, 1.5f);
+            g.setColour (colour);
+            g.fillRoundedRectangle (x - 3.0f, 21.0f, 6.0f, 10.0f, 2.0f);
         }
     }
 
@@ -254,21 +352,16 @@ void TimelineView::paint (juce::Graphics& g)
 
 void TimelineView::mouseMove (const juce::MouseEvent& e)
 {
-    const int cut = cutAt ((float) e.x);
-    const int slot = slotAt ((float) e.x);
-    const bool lock = cut < 0 && lockBounds (slot).expanded (4.0f).contains (e.position);
-    const bool opts = cut < 0 && optionsBounds (slot).expanded (4.0f).contains (e.position);
-
-    if (cut != hoverCut || slot != hoverSlot || lock != hoverLock || opts != hoverOptions)
-    {
-        hoverCut = cut;
-        hoverSlot = slot;
-        hoverLock = lock;
-        hoverOptions = opts;
-        setMouseCursor (cut > 0 ? juce::MouseCursor::LeftRightResizeCursor
-                                : (lock || opts ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor));
-        repaint();
-    }
+    const bool inStrip = e.y >= separatorTop && e.y < contentTop;
+    hoverCut = inStrip ? cutAt ((float) e.x) : -1;
+    hoverSlot = e.y >= contentTop ? slotAt ((float) e.x) : -1;
+    hoverLock = ! midiVisible && hoverSlot >= 0 && lockBounds (hoverSlot).expanded (4.0f).contains (e.position);
+    hoverOptions = ! midiVisible && hoverSlot >= 0 && optionsBounds (hoverSlot).expanded (4.0f).contains (e.position);
+    setMouseCursor (hoverCut > 0 && ! prog.slots[(size_t) hoverCut].cutLocked
+                        ? juce::MouseCursor::LeftRightResizeCursor
+                        : (inStrip || hoverSlot >= 0 ? juce::MouseCursor::PointingHandCursor
+                                                    : juce::MouseCursor::NormalCursor));
+    repaint();
 }
 
 void TimelineView::mouseExit (const juce::MouseEvent&)
@@ -280,23 +373,44 @@ void TimelineView::mouseExit (const juce::MouseEvent&)
 
 void TimelineView::mouseDown (const juce::MouseEvent& e)
 {
-    const int cut = cutAt ((float) e.x);
+    if (e.y < separatorTop)
+        return;
+
+    const int step = stepForX ((float) e.x);
     const int slot = slotAt ((float) e.x);
-
-    if (e.mods.isPopupMenu() || optionsBounds (slot).expanded (4.0f).contains (e.position))
+    if (e.y < contentTop)
     {
-        showSlotMenu (slot, stepForX ((float) e.x));
+        const int cut = cutAt ((float) e.x);
+        if (cut > 0)
+        {
+            if (e.mods.isPopupMenu())
+                showCutMenu (cut);
+            else if (! prog.slots[(size_t) cut].cutLocked)
+                dragCut = cut;
+        }
+        else if (e.mods.isLeftButtonDown() && e.getNumberOfClicks() == 1)
+        {
+            auto trial = prog;
+            if (cs::splitSlot (trial, slot, step))
+            {
+                if (selected > slot)
+                    ++selected;
+                processor.edit ([slot, step] (cs::Progression& p, cs::Rng&) { cs::splitSlot (p, slot, step); });
+                setProgression (processor.getProgression());
+            }
+        }
         return;
     }
 
-    if (cut > 0)
+    const float width = slotBounds (slot).getWidth();
+    if (e.mods.isPopupMenu()
+        || (! midiVisible && width > 45.0f && optionsBounds (slot).expanded (4.0f).contains (e.position)))
     {
-        dragCut = cut;
-        processor.beginGesture();
+        showSlotMenu (slot, step);
         return;
     }
 
-    if (lockBounds (slot).expanded (4.0f).contains (e.position))
+    if (! midiVisible && width > 38.0f && lockBounds (slot).expanded (4.0f).contains (e.position))
     {
         processor.edit ([slot] (cs::Progression& p, cs::Rng&)
         {
@@ -307,38 +421,71 @@ void TimelineView::mouseDown (const juce::MouseEvent& e)
     }
 
     selected = slot;
-    processor.auditionSlot (slot);
     if (onSlotSelected)
         onSlotSelected (selected);
+    if (midiVisible || e.mods.isShiftDown())
+        processor.auditionSlot (slot);
+    else if (onOpenAlternatives)
+        onOpenAlternatives (slot);
     repaint();
 }
 
 void TimelineView::mouseDrag (const juce::MouseEvent& e)
 {
-    if (dragCut <= 0)
+    if (dragCut <= 0 || dragCut >= prog.numSlots)
         return;
-    const int cut = dragCut;
-    const int step = stepForX ((float) e.x);
-    processor.edit ([cut, step] (cs::Progression& p, cs::Rng&) { cs::moveCut (p, cut, step); }, false);
+
+    auto trial = prog;
+    cs::moveCut (trial, dragCut, stepForX ((float) e.x));
+    dragStep = trial.slots[(size_t) dragCut].start;
+    repaint();
 }
 
 void TimelineView::mouseUp (const juce::MouseEvent&)
 {
-    dragCut = -1;
+    if (dragCut > 0 && dragCut < prog.numSlots && dragStep >= 0
+        && dragStep != prog.slots[(size_t) dragCut].start)
+        processor.edit ([cut = dragCut, step = dragStep] (cs::Progression& p, cs::Rng&) { cs::moveCut (p, cut, step); });
+    dragCut = dragStep = -1;
     repaint();
 }
 
 void TimelineView::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu() || e.mouseWasDraggedSinceMouseDown() || e.y < separatorTop || e.y >= contentTop)
+        return;
+
     const int cut = cutAt ((float) e.x);
     if (cut > 0)
+        processor.edit ([cut] (cs::Progression& p, cs::Rng&)
+        {
+            if (cut < p.numSlots)
+                p.slots[(size_t) cut].cutLocked = ! p.slots[(size_t) cut].cutLocked;
+        });
+}
+
+void TimelineView::showCutMenu (int cut)
+{
+    const bool locked = prog.slots[(size_t) cut].cutLocked;
+    juce::PopupMenu menu;
+    menu.addItem (1, locked ? "Unlock separator" : "Lock separator");
+    menu.addItem (2, "Remove separator", ! locked);
+    juce::Component::SafePointer<TimelineView> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(), [safe, cut] (int result)
     {
-        processor.edit ([cut] (cs::Progression& p, cs::Rng&) { cs::removeSlot (p, cut); });
-        return;
-    }
-    const int slot = slotAt ((float) e.x);
-    const int step = stepForX ((float) e.x);
-    processor.edit ([slot, step] (cs::Progression& p, cs::Rng&) { cs::splitSlot (p, slot, step); });
+        if (safe == nullptr || result == 0)
+            return;
+        auto trial = safe->processor.getProgression();
+        if (result == 2 && cs::removeSlot (trial, cut) && safe->selected >= cut)
+            --safe->selected;
+        safe->processor.edit ([cut, result] (cs::Progression& p, cs::Rng&)
+        {
+            if (result == 2)
+                cs::removeSlot (p, cut);
+            else if (cut < p.numSlots)
+                p.slots[(size_t) cut].cutLocked = ! p.slots[(size_t) cut].cutLocked;
+        });
+    });
 }
 
 bool TimelineView::keyPressed (const juce::KeyPress& key)
@@ -362,18 +509,8 @@ void TimelineView::showSlotMenu (int slot, int step)
     if (slot < 0 || slot >= prog.numSlots)
         return;
 
-    const auto alts = cs::alternatives (prog, slot, 10);
     juce::PopupMenu menu;
-    menu.addSectionHeader ("Replace with (best fit first)");
-    for (int i = 0; i < (int) alts.size(); ++i)
-    {
-        const auto m = cs::chordMetrics (alts[(size_t) i], prog.tonic, prog.scale);
-        const juce::String label = utf8 (cs::chordName (alts[(size_t) i], prog.tonic, prog.scale)) + "    "
-                                   + utf8 (cs::romanNumeral (alts[(size_t) i], prog.tonic))
-                                   + "    bright " + juce::String (juce::roundToInt (m.brightness * 100.0f))
-                                   + "  tense " + juce::String (juce::roundToInt (m.tension * 100.0f));
-        menu.addItem (100 + i, label);
-    }
+    menu.addItem (4, "Chord alternatives");
     menu.addSeparator();
 
     // Bass note submenu
@@ -426,20 +563,22 @@ void TimelineView::showSlotMenu (int slot, int step)
 
     menu.addItem (1, prog.slots[(size_t) slot].locked ? "Unlock slot (L)" : "Lock slot (L)");
     menu.addItem (2, "Split here", prog.numSlots < cs::kMaxSlots);
-    menu.addItem (3, "Merge with previous", slot > 0);
+    menu.addItem (3, "Merge with previous", slot > 0 && ! prog.slots[(size_t) slot].cutLocked);
 
     juce::Component::SafePointer<TimelineView> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withParentComponent (getTopLevelComponent()).withMousePosition(),
-                        [safe, slot, step, alts, bassOptions] (int result)
+                        [safe, slot, step, bassOptions] (int result)
     {
         if (safe == nullptr || result == 0)
             return;
         auto& proc = safe->processor;
-        if (result >= 100 && result - 100 < (int) alts.size())
+        if (result == 4)
         {
-            const cs::Chord c = alts[(size_t) (result - 100)];
-            proc.edit ([slot, c] (cs::Progression& p, cs::Rng& rng) { cs::setChord (p, slot, c, rng); });
-            proc.auditionSlot (slot);
+            safe->setSelectedSlot (slot);
+            if (safe->onSlotSelected)
+                safe->onSlotSelected (slot);
+            if (safe->onOpenAlternatives)
+                safe->onOpenAlternatives (slot);
         }
         else if (result == 200)
         {

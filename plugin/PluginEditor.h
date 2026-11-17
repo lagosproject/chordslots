@@ -26,6 +26,7 @@ private:
     void timerCallback() override;
     void refresh();
     void updateDragTileVisibility();
+    void showGrooveView (bool show);
     void rebuildKeyNames (int scale);
     void setupCombo (juce::ComboBox&, juce::Label&, const juce::String& caption);
     void setupKnob (juce::Slider&, juce::Label&, const juce::String& caption);
@@ -53,11 +54,14 @@ private:
     juce::TextButton copyVarButton { "Copy..." };
 
     // Views
+    juce::TextButton harmonyViewButton { "Harmony" }, grooveViewButton { "Groove & Feel" };
+    bool grooveView = false;
     TimelineView timeline;
+    juce::TextButton midiViewBtn { "MIDI view" };
+    juce::TooltipWindow tooltips { this };
     ChordPickerOverlay pickerOverlay;
 
     // Lane Toolbar controls
-    juce::Label laneToolbarLabel;
     juce::ComboBox moodBox, styleBox, voicingBox, shapeBox, bassPatternBox;
     juce::Label moodLabel, styleLabel, voicingLabel, shapeLabel, bassPatternLabel;
     juce::TextButton resetCurvesBtn { "Reset" };
@@ -86,7 +90,7 @@ private:
     juce::Label synthModelLabel;
     juce::Slider gate, volume;
     juce::Label gateLabel, volumeLabel;
-    juce::TextButton playButton { "Play" }, saveButton { "Save .mid" };
+    juce::TextButton playButton { "Play" }, saveButton { "Save MIDI" };
     juce::TextButton splitMidiButton { "Split Ch 1/2" };
     juce::TextButton songButton { "Song" };
     MidiDragTile dragTile;
@@ -96,7 +100,7 @@ private:
 
     // Context / Hint bar & Targeted Rolls
     juce::Label hint;
-    juce::TextButton rollRootBtn { "Roll Root" }, rollColorBtn { "Roll Color" }, rollBassBtn { "Roll Bass" }, inspectBtn { "Inspect ⋯" };
+    juce::TextButton rollRootBtn { "Roll Root" }, rollColorBtn { "Roll Color" }, rollBassBtn { "Roll Bass" }, inspectBtn { "Inspect" };
 
     void updateContextBar (int slot);
 
@@ -110,7 +114,7 @@ private:
     int keyNamesScale = -1;
     bool refreshing = false;
 
-    juce::Rectangle<int> harmonyPanelBounds, groovePanelBounds, outputPanelBounds;
+    juce::Rectangle<int> targetCurvesBounds, harmonyPanelBounds, groovePanelBounds, previewPanelBounds, outputPanelBounds;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordSlotsEditor)
 };

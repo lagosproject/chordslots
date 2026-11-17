@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 Test Release
+
+- Separated Harmony and Groove & Feel into tabs with a shared Undo button, synth preview, and MIDI output and export.
+- Placed the target curves directly below the chord timeline and grouped curve editing and import controls below the lanes.
+- Added a chord-alternative plot with audition and swap, plus expanded chord editing controls.
+
 ## 0.2.0 Draft
 
 This release takes ChordSlots from a chord sampler to a MIDI production tool, with more reliable harmony, editable performance parts, and additional plugin formats.

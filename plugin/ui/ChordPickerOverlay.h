@@ -10,6 +10,7 @@ class ChordPickerOverlay final : public juce::Component
 public:
     explicit ChordPickerOverlay (ChordSlotsProcessor& proc);
 
+    void open (int slotIndex, bool showPlot);
     void setSlot (int slotIndex);
     int getSlot() const noexcept { return currentSlot; }
 
@@ -21,6 +22,9 @@ public:
 
 private:
     void rebuildCandidates();
+    void selectCandidate (int index);
+    void paintPlot (juce::Graphics&);
+    void layoutPlot (juce::Rectangle<int>);
     void selectRoot (int rootPc);
     void selectQuality (int typeIdx);
     void selectBass (int bassInt);
@@ -31,7 +35,26 @@ private:
     cs::Progression prog;
     cs::Chord activeChord;
 
-    juce::TextButton closeBtn { "✕" };
+    class AuditionButton final : public juce::TextButton, private juce::Timer
+    {
+    public:
+        AuditionButton();
+        void mouseDown (const juce::MouseEvent&) override;
+        void mouseUp (const juce::MouseEvent&) override;
+        std::function<void(bool)> onAudition;
+
+    private:
+        void timerCallback() override;
+        bool fired = false;
+    };
+
+    juce::TextButton closeBtn { "Close" }, swapBtn { "Swap" }, inspectorBtn { "Inspect" };
+    AuditionButton auditionBtn;
+    juce::Label selectionLabel;
+    bool plotMode = false;
+    int selectedCandidate = -1;
+    juce::Rectangle<int> plotArea;
+    juce::Point<float> currentPoint;
     juce::Label titleLabel;
 
     // 12 Chromatic Roots
@@ -54,8 +77,9 @@ private:
     {
         std::unique_ptr<juce::TextButton> btn;
         cs::Chord chord;
-        float deltaFit = 0.0f;
-        CandidateItem (std::unique_ptr<juce::TextButton> b, cs::Chord c, float d) : btn (std::move (b)), chord (c), deltaFit (d) {}
+        juce::Point<float> metrics, point;
+        CandidateItem (std::unique_ptr<juce::TextButton> b, cs::Chord c, juce::Point<float> m)
+            : btn (std::move (b)), chord (c), metrics (m) {}
     };
     std::vector<CandidateItem> candidateButtons;
 

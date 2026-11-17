@@ -74,6 +74,76 @@ void ChordSlotsLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Butto
     g.drawRoundedRectangle (r, 5.0f, 1.0f);
 }
 
+void ChordSlotsLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool over, bool down)
+{
+    const auto icon = static_cast<ui::ButtonIcon> ((int) button.getProperties().getWithDefault ("icon", 0));
+    if (icon == ui::ButtonIcon::None)
+    {
+        juce::LookAndFeel_V4::drawButtonText (g, button, over, down);
+        return;
+    }
+
+    const auto font = getTextButtonFont (button, button.getHeight());
+    const int textWidth = juce::GlyphArrangement::getStringWidthInt (font, button.getButtonText());
+    constexpr int iconWidth = 12;
+    constexpr int gap = 5;
+    const int contentWidth = iconWidth + gap + textWidth;
+
+    if (contentWidth + 8 > button.getWidth())
+    {
+        juce::LookAndFeel_V4::drawButtonText (g, button, over, down);
+        return;
+    }
+
+    auto content = button.getLocalBounds().withSizeKeepingCentre (contentWidth, button.getHeight());
+    const auto box = content.removeFromLeft (iconWidth).withSizeKeepingCentre (iconWidth, iconWidth);
+    const auto position = juce::AffineTransform::translation ((float) box.getX(), (float) box.getY());
+    g.setColour (button.findColour (button.getToggleState() ? juce::TextButton::textColourOnId
+                                                           : juce::TextButton::textColourOffId)
+                     .withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f));
+
+    juce::Path shape;
+    switch (icon)
+    {
+        case ui::ButtonIcon::Transport:
+            if (button.getToggleState())
+                shape.addRoundedRectangle (2.0f, 2.0f, 8.0f, 8.0f, 1.0f);
+            else
+                shape.addTriangle (2.5f, 1.0f, 10.5f, 6.0f, 2.5f, 11.0f);
+            break;
+        case ui::ButtonIcon::Save:
+            shape.startNewSubPath (1.0f, 8.0f);
+            shape.lineTo (1.0f, 11.0f);
+            shape.lineTo (11.0f, 11.0f);
+            shape.lineTo (11.0f, 8.0f);
+            shape.startNewSubPath (6.0f, 1.0f);
+            shape.lineTo (6.0f, 7.5f);
+            shape.startNewSubPath (3.5f, 5.0f);
+            shape.lineTo (6.0f, 7.5f);
+            shape.lineTo (8.5f, 5.0f);
+            break;
+        case ui::ButtonIcon::Undo:
+            shape.startNewSubPath (4.5f, 1.0f);
+            shape.lineTo (1.0f, 4.5f);
+            shape.lineTo (4.5f, 8.0f);
+            shape.startNewSubPath (1.0f, 4.5f);
+            shape.lineTo (7.0f, 4.5f);
+            shape.cubicTo (12.0f, 4.5f, 12.0f, 11.0f, 7.0f, 11.0f);
+            break;
+        case ui::ButtonIcon::None:
+            break;
+    }
+
+    if (icon == ui::ButtonIcon::Transport)
+        g.fillPath (shape, position);
+    else
+        g.strokePath (shape, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
+                      position);
+
+    g.setFont (font);
+    g.drawText (button.getButtonText(), content.withTrimmedLeft (gap), juce::Justification::centred, false);
+}
+
 juce::Font ChordSlotsLookAndFeel::getTextButtonFont (juce::TextButton& b, int h)
 {
     const bool primary = b.getProperties().getWithDefault ("primary", false);

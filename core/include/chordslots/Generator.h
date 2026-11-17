@@ -73,6 +73,7 @@ struct Slot
     Chord chord;
     Voicing voicing;
     bool locked = false; // freezes this slot's chord and voicing
+    bool cutLocked = false;
 
     // What the user asks for (0..1)
     float targetB = 0.5f, targetT = 0.4f, targetE = 0.6f;
@@ -190,7 +191,28 @@ inline void setMeter (Progression& p, int newNum, int newDen)
 
 inline void randomizeRhythm (Progression& p, Rng& rng)
 {
-    layoutEven (p);
+    const bool pinned = std::any_of (p.slots.begin() + 1, p.slots.begin() + p.numSlots,
+                                    [] (const Slot& s) { return s.cutLocked; });
+    if (! pinned && p.numSlots <= p.maxSlots())
+        layoutEven (p);
+    else
+    {
+        for (int left = 0, right = 1; right <= p.numSlots; ++right)
+        {
+            if (right < p.numSlots && ! p.slots[(size_t) right].cutLocked)
+                continue;
+            const int start = p.slots[(size_t) left].start;
+            const int end = p.slotEnd (right - 1);
+            for (int i = left + 1; i < right; ++i)
+            {
+                const double even = start + (double) (end - start) * (i - left) / (right - left);
+                const int snapped = (int) std::lround (even / p.snap) * p.snap;
+                p.slots[(size_t) i].start = std::clamp (snapped, p.slots[(size_t) (i - 1)].start + 1,
+                                                       end - (right - i));
+            }
+            left = right;
+        }
+    }
     const int len = p.lengthSteps();
     const int unit = p.snap;
     const auto m = p.meter();
@@ -198,7 +220,7 @@ inline void randomizeRhythm (Progression& p, Rng& rng)
 
     for (int i = 1; i < p.numSlots; ++i)
     {
-        if (rand01 (rng) >= p.syncopation)
+        if (p.slots[(size_t) i].cutLocked || rand01 (rng) >= p.syncopation)
             continue;
 
         // Anticipations ("pushes") are the most idiomatic displacement.
@@ -232,7 +254,7 @@ inline void randomizeRhythm (Progression& p, Rng& rng)
 /** Drags cut i (the start of slot i, i >= 1) to a new step, snapped. */
 inline void moveCut (Progression& p, int i, int newStart)
 {
-    if (i < 1 || i >= p.numSlots)
+    if (i < 1 || i >= p.numSlots || p.slots[(size_t) i].cutLocked)
         return;
     const int len = p.lengthSteps();
     int s = (int) std::lround ((double) newStart / p.snap) * p.snap;
@@ -1543,6 +1565,9 @@ inline std::vector<int> safeMelodyNotes (Chord c, int tonic, int scaleIdx)
     return notes;
 }
 
+inline bool splitSlot (Progression&, int, int);
+inline bool removeSlot (Progression&, int);
+
 /** Changes the number of slots, keeping targets/chords by position. */
 inline void setNumSlots (Progression& p, int newCount)
 {
@@ -1550,6 +1575,32 @@ inline void setNumSlots (Progression& p, int newCount)
     const int old = std::max (1, p.numSlots);
     if (newCount == old)
         return;
+    if (std::any_of (p.slots.begin() + 1, p.slots.begin() + old,
+                     [] (const Slot& s) { return s.cutLocked; }))
+    {
+        for (int i = old - 1; i >= 1 && p.numSlots > newCount; --i)
+            removeSlot (p, i);
+
+        while (p.numSlots < newCount)
+        {
+            int bestSlot = -1, bestWidth = 0, split = 0;
+            for (int i = 0; i < p.numSlots; ++i)
+            {
+                const int start = p.slots[(size_t) i].start;
+                const int end = p.slotEnd (i);
+                const int first = (start / p.snap + 1) * p.snap;
+                if (first >= end || end - start <= bestWidth)
+                    continue;
+                bestSlot = i;
+                bestWidth = end - start;
+                split = std::clamp (((start + end) / 2 / p.snap) * p.snap, first,
+                                    ((end - 1) / p.snap) * p.snap);
+            }
+            if (bestSlot < 0 || ! splitSlot (p, bestSlot, split))
+                break;
+        }
+        return;
+    }
 
     const auto prev = p.slots;
     for (int i = 0; i < newCount; ++i)
@@ -1571,7 +1622,9 @@ inline void setBars (Progression& p, int newBars)
     const int oldCount = p.numSlots;
     const double ratio = (double) newBars / p.bars;
     p.bars = newBars;
-    p.numSlots = std::min (p.numSlots, p.maxSlots());
+    if (std::none_of (p.slots.begin() + 1, p.slots.begin() + p.numSlots,
+                      [] (const Slot& s) { return s.cutLocked; }))
+        p.numSlots = std::min (p.numSlots, p.maxSlots());
     for (int i = 0; i < p.numSlots; ++i)
         p.slots[(size_t) i].start = (int) std::lround (p.slots[(size_t) i].start * ratio / p.snap) * p.snap;
     sanitizeRhythm (p);
@@ -1595,6 +1648,7 @@ inline bool splitSlot (Progression& p, int i, int step)
     p.slots[(size_t) (i + 1)] = p.slots[(size_t) i];
     p.slots[(size_t) (i + 1)].start = step;
     p.slots[(size_t) (i + 1)].locked = false;
+    p.slots[(size_t) (i + 1)].cutLocked = false;
     ++p.numSlots;
     if constexpr (kUseContextualTension)
         updateActuals (p, i + 1);
@@ -1604,7 +1658,7 @@ inline bool splitSlot (Progression& p, int i, int step)
 /** Removes the cut at the start of slot i (i >= 1): the previous slot absorbs it. */
 inline bool removeSlot (Progression& p, int i)
 {
-    if (i < 1 || i >= p.numSlots)
+    if (i < 1 || i >= p.numSlots || p.slots[(size_t) i].cutLocked)
         return false;
     for (int j = i; j + 1 < p.numSlots; ++j)
         p.slots[(size_t) j] = p.slots[(size_t) (j + 1)];
