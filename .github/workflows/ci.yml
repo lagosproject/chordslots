@@ -4,23 +4,119 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  core-tests:
-    name: Core Tests (${{ matrix.os }})
+  build-and-validate:
+    name: Build and validate (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCHORDSLOTS_BUILD_PLUGIN=OFF
+      - name: Install Linux build and headless test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev libgtk-3-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev xvfb xauth
 
-      - name: Build
-        run: cmake --build build --config Release
+      - name: Configure Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCHORDSLOTS_BUILD_PLUGIN=ON
 
-      - name: Test
-        run: ctest --test-dir build --build-config Release --output-on-failure
+      - name: Build all formats and headless test targets
+        run: cmake --build build --config Release --parallel 4
+
+      # eval_smoke_baseline.json is a Linux-seeded reference; run it only on Linux.
+      - name: Run headless suites (Linux, including eval)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum ctest --test-dir build --build-config Release --output-on-failure
+
+      # Keep the core, performance, trigger, and plugin suites on every platform.
+      - name: Run headless suites (macOS and Windows)
+        if: runner.os != 'Linux'
+        run: ctest --test-dir build --build-config Release --output-on-failure -E eval
+
+      - name: Download pluginval 1.0.4
+        shell: bash
+        run: |
+          curl --fail --location --silent --show-error \
+            "https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_${{ runner.os }}.zip" \
+            --output pluginval.zip
+          mkdir pluginval-bin
+          unzip -q pluginval.zip -d pluginval-bin
+
+      - name: Validate VST3 with pluginval strictness 5 (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          chmod +x pluginval-bin/pluginval
+          mkdir -p pluginval-logs
+          xvfb-run --auto-servernum pluginval-bin/pluginval --strictness-level 5 --validate-in-process \
+            --output-dir pluginval-logs --validate \
+            "build/ChordSlots_artefacts/Release/VST3/ChordSlots.vst3"
+
+      - name: Validate VST3 with pluginval strictness 5 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $pluginval = Get-ChildItem -Path pluginval-bin -Filter pluginval.exe -Recurse | Select-Object -First 1
+          if ($null -eq $pluginval) { throw 'pluginval.exe was not found in the release archive.' }
+          $pluginPath = (Resolve-Path 'build/ChordSlots_artefacts/Release/VST3/ChordSlots.vst3').Path
+          New-Item -ItemType Directory -Path pluginval-logs -Force | Out-Null
+          $quotedPluginPath = '"' + $pluginPath + '"'
+          $process = Start-Process -FilePath $pluginval.FullName -WindowStyle Hidden -ArgumentList @('--strictness-level', '5', '--validate-in-process', '--output-dir', 'pluginval-logs', '--validate', $quotedPluginPath) -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "pluginval VST3 failed with exit code $($process.ExitCode)." }
+          $log = Get-ChildItem pluginval-logs -File | Select-Object -First 1
+          if ($null -eq $log -or -not (Select-String -Path $log.FullName -Pattern 'SUCCESS\s*$')) { throw 'pluginval did not report SUCCESS in its validation log.' }
+
+      - name: Validate VST3 with pluginval strictness 5 (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p pluginval-logs
+          pluginval-bin/pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --validate-in-process \
+            --output-dir pluginval-logs --validate \
+            "build/ChordSlots_artefacts/Release/VST3/ChordSlots.vst3"
+
+      - name: Register AU instrument and validate it with pluginval strictness 5
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          cp -R build/ChordSlots_artefacts/Release/AU/ChordSlots.component "$HOME/Library/Audio/Plug-Ins/Components/"
+          pluginval-bin/pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --validate-in-process \
+            --output-dir pluginval-logs --validate \
+            "$HOME/Library/Audio/Plug-Ins/Components/ChordSlots.component"
+
+      - name: Archive built plugin formats with bundle modes
+        if: always()
+        shell: bash
+        run: |
+          paths=()
+          for format in VST3 Standalone LV2 AU CLAP; do
+            path="ChordSlots_artefacts/Release/$format"
+            if [ -e "build/$path" ]; then paths+=("$path"); fi
+          done
+          midi_fx_au="ChordSlotsMidiFX_artefacts/Release/AU"
+          if [ -e "build/$midi_fx_au" ]; then paths+=("$midi_fx_au"); fi
+          if [ ${#paths[@]} -eq 0 ]; then echo 'No plugin format bundles were built.'; exit 1; fi
+          tar -czf "plugin-formats-${{ runner.os }}.tar.gz" -C build "${paths[@]}"
+      - name: Upload plugin format archive and pluginval logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ChordSlots-${{ runner.os }}
+          path: |
+            plugin-formats-${{ runner.os }}.tar.gz
+            pluginval-logs/
+          if-no-files-found: warn
+          retention-days: 14
