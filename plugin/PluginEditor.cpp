@@ -479,6 +479,12 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     synthModelBox.addItem ("Rhodes EP", 2);
     synthModelBox.addItem ("Felt Piano", 3);
     synthModelAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "synthModel", synthModelBox);
+#if defined (CHORDSLOTS_MIDI_FX) && CHORDSLOTS_MIDI_FX
+    synthModelLabel.setVisible (false);
+    synthModelBox.setVisible (false);
+    volumeLabel.setVisible (false);
+    volume.setVisible (false);
+#endif
 
     // Buttons
     refeelButton.setTooltip ("Re-humanize groove with a fresh timing and velocity seed");

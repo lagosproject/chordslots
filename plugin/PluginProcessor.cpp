@@ -246,7 +246,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout ChordSlotsProcessor::createL
 }
 
 ChordSlotsProcessor::ChordSlotsProcessor()
-    : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+    : AudioProcessor (
+#if defined(CHORDSLOTS_MIDI_FX)
+          BusesProperties()),
+#else
+          BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+#endif
       apvts (*this, nullptr, "Params", createLayout()),
       rng ((unsigned) juce::Random::getSystemRandom().nextInt())
 {
@@ -524,10 +529,10 @@ void ChordSlotsProcessor::refeel() noexcept
 //==============================================================================
 int ChordSlotsProcessor::getPlayingVariation() const noexcept
 {
-    const int request = pendingMidiVariation.load();
     const int parameterValue = variationParam != nullptr
         ? juce::jlimit (0, cs::kNumVariations - 1, juce::roundToInt (variationParam->load()))
         : 0;
+    const int request = pendingMidiVariation.load();
     if (request >= 0 && (request >> 2) == parameterValue)
         return request & 0x3;
     return parameterValue;
@@ -707,7 +712,9 @@ void ChordSlotsProcessor::setSong (const cs::Song& value)
 void ChordSlotsProcessor::prepareToPlay (double newSampleRate, int)
 {
     sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
+#if ! defined(CHORDSLOTS_MIDI_FX)
     synth.prepare (sampleRate);
+#endif
     heldCount = 0;
     heldSlot = currentSlot = -1;
     auditionCount = 0;
@@ -719,7 +726,9 @@ void ChordSlotsProcessor::prepareToPlay (double newSampleRate, int)
 
 void ChordSlotsProcessor::releaseResources()
 {
+#if ! defined(CHORDSLOTS_MIDI_FX)
     synth.allNotesOff();
+#endif
     pendingCount = 0;
     heldCount = 0;
     resetTrigger();
@@ -727,8 +736,12 @@ void ChordSlotsProcessor::releaseResources()
 
 bool ChordSlotsProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
+#if defined(CHORDSLOTS_MIDI_FX)
+    return layouts.inputBuses.isEmpty() && layouts.outputBuses.isEmpty();
+#else
     const auto out = layouts.getMainOutputChannelSet();
     return out == juce::AudioChannelSet::stereo() || out == juce::AudioChannelSet::mono();
+#endif
 }
 
 void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -1637,7 +1650,11 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     wasPlaying = playing && ! triggerEngine.isTriggerActive();
 
     const float gain = synthOnParam->load() > 0.5f ? synthVolParam->load() : 0.0f;
+#if ! defined(CHORDSLOTS_MIDI_FX)
     synth.render (buffer, midi, gain);
+#else
+    juce::ignoreUnused (gain);
+#endif
 }
 
 //==============================================================================

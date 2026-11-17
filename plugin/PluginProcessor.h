@@ -126,11 +126,32 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "ChordSlots"; }
+    const juce::String getName() const override
+    {
+#if defined(CHORDSLOTS_MIDI_FX)
+        return "ChordSlots MIDI FX";
+#else
+        return "ChordSlots";
+#endif
+    }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return true; }
-    bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.3; }
+    bool isMidiEffect() const override
+    {
+#if defined(CHORDSLOTS_MIDI_FX)
+        return true;
+#else
+        return false;
+#endif
+    }
+    double getTailLengthSeconds() const override
+    {
+#if defined(CHORDSLOTS_MIDI_FX)
+        return 0.0;
+#else
+        return 0.3;
+#endif
+    }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }

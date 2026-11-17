@@ -119,6 +119,16 @@ jobs:
             --output-dir pluginval-logs --validate \
             "$HOME/Library/Audio/Plug-Ins/Components/ChordSlots.component"
 
+      - name: Register AU MIDI FX and validate it with auval
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          component="build/ChordSlotsMidiFX_artefacts/Release/AU/ChordSlots MIDI FX.component"
+          test -d "$component"
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          ditto "$component" "$HOME/Library/Audio/Plug-Ins/Components/ChordSlots MIDI FX.component"
+          auval -v aumi ChsM Chsl
+
       - name: Archive built plugin formats with bundle modes
         if: always()
         shell: bash

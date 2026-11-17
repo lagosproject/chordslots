@@ -10,6 +10,8 @@ endif()
 
 option(CHORDSLOTS_BUILD_PLUGIN "Build the JUCE plugin (VST3 / LV2 / AU / Standalone)" ON)
 option(CHORDSLOTS_BUILD_CLAP "Build the CLAP plugin using clap-juce-extensions" OFF)
+set(CHORDSLOTS_CLAP_EXTENSIONS_SOURCE_DIR "" CACHE PATH
+    "Optional pre-fetched clap-juce-extensions checkout (including recursive submodules)")
 option(CHORDSLOTS_COPY_AFTER_BUILD "Install the plugin into the user plugin folders after building" OFF)
 option(CHORDSLOTS_LTO "Link-time optimisation (slower builds, slightly smaller/faster binaries)" OFF)
 
@@ -99,7 +101,7 @@ juce_add_plugin(ChordSlots
     LV2URI "https://chordslots.org/plugins/chordslots"
     COPY_PLUGIN_AFTER_BUILD ${CHORDSLOTS_COPY_AFTER_BUILD})
 
-target_sources(ChordSlots PRIVATE
+set(CS_PLUGIN_SOURCES
     plugin/PluginProcessor.cpp
     plugin/PluginEditor.cpp
     plugin/PreviewSynth.cpp
@@ -109,30 +111,31 @@ target_sources(ChordSlots PRIVATE
     plugin/ui/MidiDragTile.cpp
     plugin/ui/ChordPickerOverlay.cpp)
 
-target_include_directories(ChordSlots PRIVATE plugin)
+function(cs_configure_plugin_sources target)
+    target_sources(${target} PRIVATE ${CS_PLUGIN_SOURCES})
+    target_include_directories(${target} PRIVATE plugin)
+    target_compile_definitions(${target} PUBLIC
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_DISPLAY_SPLASH_SCREEN=0
+        JUCE_REPORT_APP_USAGE=0)
+    target_link_libraries(${target}
+        PRIVATE chordslots_core juce::juce_audio_utils
+        PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+    if(CHORDSLOTS_LTO)
+        target_link_libraries(${target} PUBLIC juce::juce_recommended_lto_flags)
+    endif()
+endfunction()
 
-target_compile_definitions(ChordSlots PUBLIC
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0
-    JUCE_REPORT_APP_USAGE=0)
-
-target_link_libraries(ChordSlots
-    PRIVATE
-        chordslots_core
-        juce::juce_audio_utils
-    PUBLIC
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_warning_flags)
+cs_configure_plugin_sources(ChordSlots)
 
 if(CHORDSLOTS_BUILD_CLAP)
     clap_juce_extensions_plugin(TARGET ChordSlots
         CLAP_ID "org.chordslots.ChordSlots"
         CLAP_FEATURES instrument)
 
-    # Small host-side smoke that dynamically loads the actual CLAP artifact,
-    # verifies its MIDI note ports, and exercises MIDI input/output events.
+    # Host-side smoke loads the built CLAP artifact and exercises its MIDI ports.
     add_executable(chordslots_clap_midi_smoke tools/clap_midi_smoke.cpp)
     target_include_directories(chordslots_clap_midi_smoke PRIVATE
         "${clap_juce_extensions_SOURCE_DIR}/clap-libs/clap/include")
@@ -143,8 +146,34 @@ if(CHORDSLOTS_BUILD_CLAP)
     add_test(NAME clap_midi_smoke
         COMMAND chordslots_clap_midi_smoke "$<TARGET_FILE:ChordSlots_CLAP>")
 endif()
-if(CHORDSLOTS_LTO)
-    target_link_libraries(ChordSlots PUBLIC juce::juce_recommended_lto_flags)
+
+# Logic's AU MIDI FX slot cannot use the MusicDevice AU's MIDI output routing.
+# Build a distinct AU identity while retaining the optional CLAP target above.
+if(APPLE)
+    juce_add_plugin(ChordSlotsMidiFX
+        PRODUCT_NAME "ChordSlots MIDI FX"
+        PLUGIN_NAME "ChordSlots MIDI FX"
+        COMPANY_NAME "ChordSlots"
+        BUNDLE_ID "org.chordslots.ChordSlotsMidiFX"
+        PLUGIN_MANUFACTURER_CODE Chsl
+        PLUGIN_CODE ChsM
+        FORMATS AU
+        IS_SYNTH FALSE
+        NEEDS_MIDI_INPUT TRUE
+        NEEDS_MIDI_OUTPUT TRUE
+        IS_MIDI_EFFECT TRUE
+        EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+        AU_MAIN_TYPE kAudioUnitType_MIDIProcessor
+        COPY_PLUGIN_AFTER_BUILD ${CHORDSLOTS_COPY_AFTER_BUILD})
+
+    target_compile_definitions(ChordSlotsMidiFX PUBLIC CHORDSLOTS_MIDI_FX=1)
+    cs_configure_plugin_sources(ChordSlotsMidiFX)
+
+    add_executable(chordslots_midi_fx_tests tests/midi_fx_tests.cpp)
+    target_include_directories(chordslots_midi_fx_tests PRIVATE $<TARGET_PROPERTY:ChordSlotsMidiFX,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(chordslots_midi_fx_tests PRIVATE $<TARGET_PROPERTY:ChordSlotsMidiFX,COMPILE_DEFINITIONS>)
+    target_link_libraries(chordslots_midi_fx_tests PRIVATE ChordSlotsMidiFX chordslots_core)
+    add_test(NAME midi_fx COMMAND chordslots_midi_fx_tests)
 endif()
 
 # ------------------------------------------------------------------------------
