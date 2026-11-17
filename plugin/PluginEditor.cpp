@@ -15,6 +15,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
       dragTile (p, ChordSlotsProcessor::MidiExportMode::Master, "Drag MIDI"),
       dragChordsTile (p, ChordSlotsProcessor::MidiExportMode::ChordsOnly, "Chords"),
       dragBassTile (p, ChordSlotsProcessor::MidiExportMode::BassOnly, "Bass"),
+      dragSongTile (p, ChordSlotsProcessor::MidiExportMode::Song, "Drag Song"),
       gateAttachment (p.apvts, "gate", gate),
       volumeAttachment (p.apvts, "volume", volume),
       strumAttachment (p.apvts, "strum", strum),
@@ -500,10 +501,15 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     splitMidiButton.setClickingTogglesState (true);
     splitMidiButton.setTooltip ("Route upper chords to MIDI Ch 1 and monophonic bass to MIDI Ch 2");
     addAndMakeVisible (splitMidiButton);
+    addAndMakeVisible (songButton);
+    songButton.setToggleState (p.isSongEnabled(), juce::dontSendNotification);
+    songButton.setTooltip ("Edit up to 16 song sections: choose variation and transpose, then enable Song playback");
+    songButton.onClick = [this] { showSongMenu(); };
 
     addAndMakeVisible (dragTile);
     addAndMakeVisible (dragChordsTile);
     addAndMakeVisible (dragBassTile);
+    addAndMakeVisible (dragSongTile);
 
     // Context / Hint Bar & Targeted Rolls
     rollRootBtn.setTooltip ("Reroll only the root of this slot");
@@ -598,6 +604,121 @@ void ChordSlotsEditor::setupKnob (juce::Slider& s, juce::Label& label, const juc
     addAndMakeVisible (label);
 }
 
+void ChordSlotsEditor::showSongMenu()
+{
+    const auto song = processor.getSong();
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("SONG CHAIN  " + juce::String (song.numEntries) + "/" + juce::String (cs::kMaxSongEntries));
+    menu.addItem (1, "Song playback", true, processor.isSongEnabled());
+    menu.addSeparator();
+
+    for (int index = 0; index < song.numEntries; ++index)
+    {
+        const auto entry = cs::sanitizeSongEntry (song.entries[index]);
+        const auto variationName = juce::String::charToString ((juce::juce_wchar) ('A' + entry.variation));
+        const auto transposeName = (entry.transpose > 0 ? "+" : "") + juce::String (entry.transpose) + " st";
+        auto entryNumber = juce::String (index + 1);
+        if (index < 9) entryNumber = "0" + entryNumber;
+        const auto title = entryNumber + "  " + variationName + "  " + transposeName;
+        juce::PopupMenu entryMenu;
+
+        juce::PopupMenu variationMenu;
+        for (int variation = 0; variation < cs::kNumVariations; ++variation)
+        {
+            const int command = 1000 + index * cs::kNumVariations + variation;
+            const auto name = juce::String::charToString ((juce::juce_wchar) ('A' + variation));
+            variationMenu.addItem (command, "Variation " + name, true, variation == entry.variation);
+        }
+        entryMenu.addSubMenu ("Variation", variationMenu);
+
+        juce::PopupMenu transposeMenu;
+        for (int first = cs::kMinSongTranspose; first <= cs::kMaxSongTranspose; first += 12)
+        {
+            const int last = juce::jmin (cs::kMaxSongTranspose, first + 11);
+            juce::PopupMenu groupMenu;
+            for (int semitones = first; semitones <= last; ++semitones)
+            {
+                const int command = 2000 + index * 100 + (semitones - cs::kMinSongTranspose);
+                const auto label = (semitones > 0 ? "+" : "") + juce::String (semitones) + " semitones";
+                groupMenu.addItem (command, label, true, semitones == entry.transpose);
+            }
+            const auto rangeLabel = juce::String (first) + " to " + juce::String (last);
+            transposeMenu.addSubMenu (rangeLabel, groupMenu);
+        }
+        entryMenu.addSubMenu ("Transpose", transposeMenu);
+        entryMenu.addSeparator();
+        entryMenu.addItem (1100 + index, "Remove section");
+        menu.addSubMenu (title, entryMenu);
+    }
+
+    menu.addSeparator();
+    juce::PopupMenu addMenu;
+    for (int variation = 0; variation < cs::kNumVariations; ++variation)
+    {
+        const auto name = juce::String::charToString ((juce::juce_wchar) ('A' + variation));
+        addMenu.addItem (10 + variation, "Add variation " + name, song.numEntries < cs::kMaxSongEntries);
+    }
+    menu.addSubMenu ("Add section", addMenu, song.numEntries < cs::kMaxSongEntries);
+    menu.addItem (2, "Clear chain", song.numEntries > 0);
+
+    juce::Component::SafePointer<ChordSlotsEditor> safeThis (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&songButton), [safeThis] (int result)
+    {
+        auto* editor = safeThis.getComponent();
+        if (editor == nullptr) return;
+        if (result == 1)
+        {
+            editor->processor.setSongEnabled (! editor->processor.isSongEnabled());
+            editor->songButton.setToggleState (editor->processor.isSongEnabled(), juce::dontSendNotification);
+            editor->resized();
+            return;
+        }
+
+        auto updated = editor->processor.getSong();
+        if (result == 2)
+        {
+            editor->processor.setSong ({});
+            return;
+        }
+        if (result >= 10 && result < 10 + cs::kNumVariations)
+        {
+            if (updated.numEntries < cs::kMaxSongEntries)
+                updated.entries[updated.numEntries++] = { result - 10, 0 };
+            editor->processor.setSong (updated);
+            return;
+        }
+        if (result >= 1000 && result < 1000 + cs::kMaxSongEntries * cs::kNumVariations)
+        {
+            const int index = (result - 1000) / cs::kNumVariations;
+            const int variation = (result - 1000) % cs::kNumVariations;
+            if (index < updated.numEntries)
+                updated.entries[index].variation = variation;
+            editor->processor.setSong (updated);
+            return;
+        }
+        if (result >= 1100 && result < 1100 + cs::kMaxSongEntries)
+        {
+            const int index = result - 1100;
+            if (index < updated.numEntries)
+            {
+                for (int i = index; i + 1 < updated.numEntries; ++i)
+                    updated.entries[i] = updated.entries[i + 1];
+                updated.entries[--updated.numEntries] = {};
+            }
+            editor->processor.setSong (updated);
+            return;
+        }
+        if (result >= 2000 && result < 2000 + cs::kMaxSongEntries * 100)
+        {
+            const int index = (result - 2000) / 100;
+            const int transpose = (result - 2000) % 100 + cs::kMinSongTranspose;
+            if (index < updated.numEntries && transpose <= cs::kMaxSongTranspose)
+                updated.entries[index].transpose = transpose;
+            editor->processor.setSong (updated);
+        }
+    });
+}
+
 void ChordSlotsEditor::showInputMenu()
 {
     const cs::TriggerConfig tc = processor.getTriggerConfig();
@@ -679,6 +800,7 @@ void ChordSlotsEditor::refresh()
     styleBox.setSelectedId (p.style == -1 ? 1 : p.style + 2, juce::dontSendNotification);
     voicingBox.setSelectedId (p.voicingStyle + 1, juce::dontSendNotification);
     bassPatternBox.setSelectedId ((int) p.bassStyle + 1, juce::dontSendNotification);
+    songButton.setToggleState (processor.isSongEnabled(), juce::dontSendNotification);
 
     lockRhythm.setToggleState (p.locks.rhythm, juce::dontSendNotification);
     lockRoots.setToggleState (p.locks.roots, juce::dontSendNotification);
@@ -748,6 +870,16 @@ void ChordSlotsEditor::updateContextBar (int slot)
 
 void ChordSlotsEditor::changeListenerCallback (juce::ChangeBroadcaster*) { refresh(); }
 
+void ChordSlotsEditor::updateDragTileVisibility()
+{
+    const bool song = processor.isSongEnabled();
+    const bool split = processor.isSplitMidi();
+    dragTile.setVisible (! song && ! split);
+    dragChordsTile.setVisible (! song && split);
+    dragBassTile.setVisible (! song && split);
+    dragSongTile.setVisible (song);
+}
+
 void ChordSlotsEditor::timerCallback()
 {
     if (processor.isFollowingPlayback())
@@ -786,13 +918,7 @@ void ChordSlotsEditor::timerCallback()
     if (processor.getTriggeredSlot() >= 0)
         timeline.repaint();
 
-    const bool isSplit = processor.isSplitMidi();
-    if (dragTile.isVisible() == isSplit)
-    {
-        dragTile.setVisible (! isSplit);
-        dragChordsTile.setVisible (isSplit);
-        dragBassTile.setVisible (isSplit);
-    }
+    updateDragTileVisibility();
 }
 
 void ChordSlotsEditor::saveMidi()
@@ -1187,11 +1313,9 @@ void ChordSlotsEditor::resized()
         auto splitDragTop = dragArea.removeFromTop (dragArea.getHeight() / 2).withTrimmedBottom (1);
         dragChordsTile.setBounds (splitDragTop);
         dragBassTile.setBounds (dragArea.withTrimmedTop (1));
+        dragSongTile.setBounds (dragArea);
 
-        const bool isSplit = processor.isSplitMidi();
-        dragTile.setVisible (! isSplit);
-        dragChordsTile.setVisible (isSplit);
-        dragBassTile.setVisible (isSplit);
+        updateDragTileVisibility();
 
         oInner.removeFromRight (8);
 
@@ -1199,7 +1323,9 @@ void ChordSlotsEditor::resized()
         auto topBtns = btnArea.removeFromTop (btnArea.getHeight() / 2).withTrimmedBottom (1);
         playButton.setBounds (topBtns.removeFromLeft (topBtns.getWidth() / 2).withTrimmedRight (1));
         saveButton.setBounds (topBtns.withTrimmedLeft (1));
-        splitMidiButton.setBounds (btnArea.withTrimmedTop (1));
+        auto bottomBtns = btnArea.withTrimmedTop (1);
+        splitMidiButton.setBounds (bottomBtns.removeFromLeft (bottomBtns.getWidth() / 2).withTrimmedRight (1));
+        songButton.setBounds (bottomBtns.withTrimmedLeft (1));
 
         oInner.removeFromRight (6);
 

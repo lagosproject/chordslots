@@ -639,6 +639,7 @@ void ChordSlotsProcessor::publish()
     cs::PlayBank pb;
     for (int i = 0; i < cs::kNumVariations; ++i)
         pb.variations[i] = cs::toPlayData (variations[(size_t) i], perf, bpm);
+    pb.song = cs::sanitizeSong (song);
 
     const juce::SpinLock::ScopedLockType psl (playLock);
     pendingPlayBank = pb;
@@ -649,6 +650,19 @@ cs::PlayData ChordSlotsProcessor::getPlayData (int variationIndex) const
 {
     const juce::SpinLock::ScopedLockType sl (playLock);
     return pendingPlayBank.variations[(size_t) juce::jlimit (0, cs::kNumVariations - 1, variationIndex)];
+}
+
+cs::Song ChordSlotsProcessor::getSong() const
+{
+    const juce::ScopedLock sl (modelLock);
+    return cs::sanitizeSong (song);
+}
+
+void ChordSlotsProcessor::setSong (const cs::Song& value)
+{
+    { const juce::ScopedLock sl (modelLock); song = cs::sanitizeSong (value); }
+    publish();
+    sendChangeMessage();
 }
 
 //==============================================================================
@@ -736,6 +750,30 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         tempoDirty.store (true);
 
     const bool playing = (hostPlaying || previewOn.load()) && numSamples > 0;
+    const bool songPlayback = playing && songEnabled.load() && playBank.song.numEntries > 0;
+    bool songStartDiscontinuity = songPlayback && ! songWasPlaying;
+    const int songTotalSteps = songPlayback
+        ? cs::songLengthSteps (playBank.song, playBank.variations, cs::kNumVariations) : 0;
+    double songStartStep = expectedSongStep;
+    cs::SongPosition songPosition;
+    if (songPlayback && songTotalSteps > 0)
+    {
+        songStartStep = hostPlaying && havePpq
+            ? std::fmod (ppq * (double) cs::kStepsPerQuarter, (double) songTotalSteps)
+            : std::fmod (songStartStep, (double) songTotalSteps);
+        if (songStartStep < 0.0)
+            songStartStep += songTotalSteps;
+        if (hostPlaying && havePpq)
+        {
+            double delta = songStartStep - expectedSongStep;
+            delta -= songTotalSteps * std::round (delta / songTotalSteps);
+            songStartDiscontinuity = songStartDiscontinuity || std::abs (delta) > 0.25;
+        }
+        songPosition = cs::songPositionAt (playBank.song, playBank.variations, cs::kNumVariations,
+                                            (int) std::floor (songStartStep));
+        if (songPosition.entry >= 0)
+            activePlayingVariation = songPosition.variation;
+    }
     if (! playing && activePlayingVariation != targetVar)
         activePlayingVariation = targetVar;
 
@@ -774,6 +812,20 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         heldCount = 0;
         heldSlot = -1;
     };
+
+    if (songPlayback != songWasPlaying)
+    {
+        releaseHeld (0);
+        pendingCount = 0;
+        currentSlot = -1;
+        songWasPlaying = songPlayback;
+    }
+    else if (songPlayback && songStartDiscontinuity)
+    {
+        releaseHeld (0);
+        pendingCount = 0;
+        currentSlot = -1;
+    }
 
     auto releaseBass = [&] (int sample)
     {
@@ -1105,7 +1157,137 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     const bool triggerSuppressesLoop = triggerEngine.isTriggerActive() || trigCfg.mode == cs::TriggerMode::TriggerOnly;
 
-    if (playing && ! triggerSuppressesLoop)
+    if (songPlayback && ! triggerSuppressesLoop && songTotalSteps > 0)
+    {
+        releaseAudition (0);
+        auditionRequest.store (-1);
+        const double songStart = songStartStep;
+        const double songEnd = songStart + numSamples * stepsPerSample;
+        int eventCount = 0;
+        auto addSongEvent = [&] (double absStep, int note, int velocity, int channel, bool isBass, SongEventKind kind)
+        {
+            if (absStep < songStart - 1.0e-8 || absStep >= songEnd || eventCount >= kMaxSongEvents)
+                return;
+            const int sample = juce::jlimit (0, juce::jmax (0, numSamples - 1),
+                (int) std::lround ((absStep - songStart) / stepsPerSample));
+            songEvents[eventCount++] = { sample, juce::jlimit (0, 127, note), juce::jlimit (1, 127, velocity), channel, isBass, kind };
+        };
+        auto addSongNote = [&] (double on, double off, int pitch, int velocity, int channel, bool isBass, int transpose)
+        {
+            if (off < songStart - 1.0e-8 || on >= songEnd || off <= on)
+                return;
+            if (on < songStart - 1.0e-8 && ! songStartDiscontinuity)
+            {
+                addSongEvent (off, juce::jlimit (0, 127, pitch + transpose), velocity, channel, isBass, SongEventKind::Off);
+                return;
+            }
+            const double clippedOn = std::max (on, songStart);
+            const int note = juce::jlimit (0, 127, pitch + transpose);
+            addSongEvent (clippedOn, note, velocity, channel, isBass, SongEventKind::On);
+            addSongEvent (off, note, velocity, channel, isBass, SongEventKind::Off);
+        };
+        const double stepsPerMs = bpm * (double) cs::kStepsPerQuarter / 60000.0;
+        const int firstCycle = (int) std::floor (songStart / songTotalSteps) - 1;
+        const int lastCycle = (int) std::floor (songEnd / songTotalSteps);
+        for (int cycle = firstCycle; cycle <= lastCycle; ++cycle)
+        {
+            const double cycleBase = (double) cycle * songTotalSteps;
+            double sectionStart = cycleBase;
+            for (int entry = 0; entry < playBank.song.numEntries; ++entry)
+            {
+                const auto songEntry = cs::sanitizeSongEntry (playBank.song.entries[entry]);
+                const auto& section = playBank.variations[songEntry.variation];
+                const double sectionEnd = sectionStart + section.lengthSteps;
+                if (sectionEnd >= songStart - 1.0e-8 && sectionStart < songEnd)
+                {
+                    const int bassChannelForSong = split ? kMidiChannelBass : kMidiChannelChords;
+                    for (int si = 0; si < section.numSlots; ++si)
+                    {
+                        const auto& slot = section.slots[si];
+                        const double slotStart = sectionStart + slot.start;
+                        const bool patterned = section.bassStyle != cs::BassStyle::Sustain;
+                        const bool separateBass = split || patterned || slot.numHits > 1;
+                        if (patterned)
+                        {
+                            for (int h = 0; h < slot.numBassHits; ++h)
+                            {
+                                const auto& hit = slot.bassHits[h];
+                                const double on = sectionStart + slot.start + hit.stepOffset;
+                                const double duration = bassDurationTicks (hit, gate) / (double) kTicksPerStep;
+                                addSongNote (on, std::min (on + duration, sectionEnd), hit.pitch, bassVelocity (slot, hit.velocityScale),
+                                             bassChannelForSong, true, songEntry.transpose);
+                            }
+                        }
+                        else
+                        {
+                            const double slotOff = slotStart + gatedDurationTicks (slot.end - slot.start, gate) / kTicksPerStep;
+                            if (split)
+                            {
+                                const int bassNote = slot.primaryBass >= 0 ? slot.primaryBass
+                                    : (slot.bassCount > 0 ? slot.notes[slot.bassCount - 1] : 36);
+                                const int bassVel = slot.bassCount > 0 && slot.velocities[slot.bassCount - 1] > 0
+                                    ? slot.velocities[slot.bassCount - 1] : slot.velocity;
+                                addSongNote (slotStart, slotOff, bassNote, bassVel, bassChannelForSong, true, songEntry.transpose);
+                            }
+                            else if (slot.numHits > 1)
+                                for (int n = 0; n < slot.bassCount && n < slot.n; ++n)
+                                {
+                                    const int vel = slot.velocities[n] > 0 ? slot.velocities[n] : slot.velocity;
+                                    addSongNote (slotStart, slotOff, slot.notes[n], vel, bassChannelForSong, true, songEntry.transpose);
+                                }
+                        }
+
+                        const int firstUpper = separateBass ? slot.bassCount : 0;
+                        for (int h = 0; h < slot.numHits; ++h)
+                        {
+                            const auto& hit = slot.hits[h];
+                            const double hitOn = sectionStart + slot.start + hit.stepOffset;
+                            const double hitOff = hitOn + gatedDurationTicks (hit.durationSteps, gate) / kTicksPerStep;
+                            const double hitMs = hit.durationSteps * (60000.0 / (bpm * cs::kStepsPerQuarter));
+                            double maxOffsetMs = 0.0;
+                            for (int n = firstUpper; n < slot.n; ++n)
+                                maxOffsetMs = std::max (maxOffsetMs, (double) slot.offsetMs[n]);
+                            const double hitScale = cs::compHitOffsetScale (hitMs, maxOffsetMs);
+                            for (int n = firstUpper; n < slot.n; ++n)
+                            {
+                                const double strum = std::min (hitOff - hitOn - 1.0 / kTicksPerStep,
+                                    (double) slot.offsetMs[n] * hitScale * stepsPerMs);
+                                const int vel = juce::jlimit (1, 127,
+                                    (int) std::lround ((slot.velocities[n] > 0 ? slot.velocities[n] : slot.velocity) * hit.velScale));
+                                addSongNote (hitOn + strum, hitOff, slot.notes[n], vel, kMidiChannelChords, false,
+                                             songEntry.transpose);
+                            }
+                        }
+                    }
+                }
+                sectionStart = sectionEnd;
+            }
+        }
+        std::sort (songEvents, songEvents + eventCount, [] (const SongEvent& a, const SongEvent& b)
+        {
+            if (a.sample != b.sample) return a.sample < b.sample;
+            return a.kind == SongEventKind::Off && b.kind == SongEventKind::On;
+        });
+        for (int i = 0; i < eventCount; ++i)
+        {
+            const auto& event = songEvents[i];
+            if (event.kind == SongEventKind::On)
+                triggerNote (event.note, event.velocity, event.sample, event.channel, event.bass);
+            else
+                for (int heldIndex = 0; heldIndex < heldCount; ++heldIndex)
+                    if (held[heldIndex].note == event.note && held[heldIndex].channel == event.channel)
+                    {
+                        midi.addEvent (juce::MidiMessage::noteOff (event.channel, event.note), event.sample);
+                        held[heldIndex] = held[--heldCount];
+                        break;
+                    }
+        }
+        expectedSongStep = std::fmod (songEnd, (double) songTotalSteps);
+        if (expectedSongStep < 0.0)
+            expectedSongStep += songTotalSteps;
+        uiStep.store (songPosition.localStep + (songEnd - songStart));
+    }
+    else if (playing && ! triggerSuppressesLoop)
     {
         releaseAudition (0);
         auditionRequest.store (-1);
@@ -1524,6 +1706,8 @@ void closeMidiTrack (juce::MidiFile& file, juce::MidiMessageSequence& sequence, 
 
 juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
 {
+    if (mode == MidiExportMode::Song)
+        return createSongMidiFile();
     const auto p = getProgression();
     const auto perf = getPerformanceParams();
     const double bpm = lastBpm.load();
@@ -1548,6 +1732,34 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
     return file;
 }
 
+juce::MidiFile ChordSlotsProcessor::createSongMidiFile() const
+{
+    const auto arrangement = getSong();
+    const auto perf = getPerformanceParams();
+    const double bpm = lastBpm.load();
+    const float gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
+    juce::MidiFile file;
+    file.setTicksPerQuarterNote (kTicksPerQuarter);
+    juce::MidiMessageSequence chords, bass;
+    chords.addEvent (juce::MidiMessage::textMetaEvent (3, "ChordSlots Song"), 0.0);
+    bass.addEvent (juce::MidiMessage::textMetaEvent (3, "Bass"), 0.0);
+    chords.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / bpm)), 0.0);
+    double offset = 0.0;
+    for (int i = 0; i < arrangement.numEntries; ++i)
+    {
+        const auto e = arrangement.entries[i];
+        const auto p = getProgression (e.variation);
+        const double length = p.lengthSteps() * (double) kTicksPerStep;
+        const juce::String marker = "Section " + juce::String::charToString ((juce::juce_wchar) ('A' + e.variation));
+        chords.addEvent (juce::MidiMessage::textMetaEvent (6, marker), offset);
+        appendMidiSection (p, perf, bpm, gate, offset, offset + length, e.transpose, &chords, &bass);
+        offset += length;
+    }
+    closeMidiTrack (file, chords, offset);
+    closeMidiTrack (file, bass, offset);
+    return file;
+}
+
 juce::File ChordSlotsProcessor::writeTempMidiFile (MidiExportMode mode) const
 {
     const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("ChordSlots");
@@ -1559,6 +1771,8 @@ juce::File ChordSlotsProcessor::writeTempMidiFile (MidiExportMode mode) const
         suffix = " Chords";
     else if (mode == MidiExportMode::BassOnly)
         suffix = " Bass";
+    else if (mode == MidiExportMode::Song)
+        suffix = " Song";
 
     const auto name = juce::File::createLegalFileName ("ChordSlots" + suffix + " " + describeProgression()).substring (0, 80);
     const auto file = dir.getChildFile (name + ".mid");
@@ -1576,10 +1790,22 @@ juce::File ChordSlotsProcessor::writeTempMidiFile (MidiExportMode mode) const
 void ChordSlotsProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::ValueTree root ("ChordSlotsState");
-    root.setProperty ("version", 3, nullptr);
+    root.setProperty ("version", 4, nullptr);
     root.setProperty ("editVariation", editVariation.load(), nullptr);
     root.setProperty ("followPlayback", followPlayback.load(), nullptr);
     root.appendChild (apvts.copyState(), nullptr);
+    juce::ValueTree songTree ("Song");
+    songTree.setProperty ("enabled", songEnabled.load(), nullptr);
+    const auto arrangement = getSong();
+    songTree.setProperty ("count", arrangement.numEntries, nullptr);
+    for (int i = 0; i < arrangement.numEntries; ++i)
+    {
+        juce::ValueTree entry ("Entry");
+        entry.setProperty ("variation", arrangement.entries[i].variation, nullptr);
+        entry.setProperty ("transpose", arrangement.entries[i].transpose, nullptr);
+        songTree.appendChild (entry, nullptr);
+    }
+    root.appendChild (songTree, nullptr);
 
     const char* varNames[cs::kNumVariations] = { "ProgressionA", "ProgressionB", "ProgressionC", "ProgressionD" };
     for (int i = 0; i < cs::kNumVariations; ++i)
@@ -1611,6 +1837,22 @@ void ChordSlotsProcessor::setStateInformation (const void* data, int size)
         const juce::ScopedLock sl (modelLock);
         for (int i = 0; i < cs::kNumVariations; ++i)
             histories[(size_t) i].clear();
+
+        song = {};
+        const auto songTree = root.getChildWithName ("Song");
+        songEnabled.store ((bool) songTree.getProperty ("enabled", false));
+        if (songTree.isValid())
+        {
+            cs::Song restored;
+            for (int i = 0; i < songTree.getNumChildren() && restored.numEntries < cs::kMaxSongEntries; ++i)
+            {
+                const auto item = songTree.getChild (i);
+                if (item.hasType ("Entry"))
+                    restored.entries[restored.numEntries++] = { (int) item.getProperty ("variation", 0),
+                                                                 (int) item.getProperty ("transpose", 0) };
+            }
+            song = cs::sanitizeSong (restored);
+        }
 
         if (ver >= 2)
         {

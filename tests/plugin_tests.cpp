@@ -511,6 +511,66 @@ void testMidiFile()
     tmp.deleteFile();
 }
 
+void testSongMode()
+{
+    Host h (48000.0, 512);
+    cs::Song chain;
+    chain.numEntries = 2;
+    chain.entries[0] = { 0, 0 };
+    chain.entries[1] = { 0, 7 };
+    h.processor.setSong (chain);
+    h.processor.setSongEnabled (true);
+
+    const auto progression = h.processor.getProgression (0);
+    const auto midi = h.processor.createSongMidiFile();
+    CHECK (midi.getNumTracks() == 2);
+    CHECK (std::abs (midi.getTrack (0)->getEndTime() - 2.0 * progression.lengthSteps() * 20.0) < 1.0);
+    bool foundSecondMarker = false;
+    for (int i = 0; i < midi.getTrack (0)->getNumEvents(); ++i)
+    {
+        const auto& message = midi.getTrack (0)->getEventPointer (i)->message;
+        foundSecondMarker = foundSecondMarker || (message.isMetaEvent() && message.getMetaEventType() == 6
+            && midi.getTrack (0)->getEventPointer (i)->message.getTimeStamp() >= progression.lengthSteps() * 20.0
+            && juce::String (message.getTextFromTextMetaEvent()).startsWith ("Section"));
+    }
+    CHECK (foundSecondMarker);
+
+    juce::MemoryBlock state;
+    h.processor.getStateInformation (state);
+    auto restored = std::make_unique<ChordSlotsProcessor>();
+    restored->setStateInformation (state.getData(), (int) state.getSize());
+    const auto roundTrip = restored->getSong();
+    CHECK (roundTrip.numEntries == 2 && roundTrip.entries[1].variation == 0 && roundTrip.entries[1].transpose == 7);
+    CHECK (restored->isSongEnabled());
+
+    const auto play = h.processor.getPlayData (0);
+    std::map<int, bool> expected;
+    for (int i = play.slots[0].bassCount; i < play.slots[0].n; ++i)
+        expected[(play.slots[0].notes[i] + 7) % 128] = true;
+    h.playHead.playing = true;
+    h.playHead.ppq = (progression.lengthSteps() - 0.2) / cs::kStepsPerQuarter;
+    h.run (1);
+    bool switchedWithinBlock = false;
+    for (const auto& event : h.events)
+        if (event.on && event.sample >= 180 && event.sample <= 230 && expected.count (event.note) > 0)
+            switchedWithinBlock = true;
+    CHECK (switchedWithinBlock);
+
+    const int seekSlot = juce::jlimit (0, play.numSlots - 1, 1);
+    expected.clear();
+    for (int i = play.slots[seekSlot].bassCount; i < play.slots[seekSlot].n; ++i)
+        expected[(play.slots[seekSlot].notes[i] + 7) % 128] = true;
+    h.events.clear();
+    h.playHead.ppq = (progression.lengthSteps() + play.slots[seekSlot].start + 0.2) / cs::kStepsPerQuarter;
+    const auto seekSample = h.position;
+    h.run (1);
+    bool chasedTransposedNotes = false;
+    for (const auto& event : h.events)
+        if (event.on && event.sample == seekSample && expected.count (event.note) > 0)
+            chasedTransposedNotes = true;
+    CHECK (chasedTransposedNotes);
+}
+
 void testPerformanceAndStrum()
 {
     Host h (48000.0, 128); // Small buffer to ensure offsets cross block boundaries
@@ -1619,6 +1679,7 @@ int main (int argc, char** argv)
     testStateRoundTrip();
     testHarmonizeMelody();
     testMidiFile();
+    testSongMode();
     testPerformanceAndStrum();
     testIncomingMidiTriggerIntegration();
     testSplitMidiOutput();

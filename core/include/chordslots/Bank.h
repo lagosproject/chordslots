@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Generator.h"
+#include "Song.h"
 
 namespace cs
 {
@@ -19,6 +20,7 @@ enum class SwitchQuantize : int
 struct PlayBank
 {
     PlayData variations[kNumVariations];
+    Song song;
 };
 
 } // namespace cs

@@ -25,10 +25,12 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
     void refresh();
+    void updateDragTileVisibility();
     void rebuildKeyNames (int scale);
     void setupCombo (juce::ComboBox&, juce::Label&, const juce::String& caption);
     void setupKnob (juce::Slider&, juce::Label&, const juce::String& caption);
     void showInputMenu();
+    void showSongMenu();
     void saveMidi();
     void showMidiImportMenu();
     void importMidi (bool harmonize);
@@ -86,9 +88,11 @@ private:
     juce::Label gateLabel, volumeLabel;
     juce::TextButton playButton { "Play" }, saveButton { "Save .mid" };
     juce::TextButton splitMidiButton { "Split Ch 1/2" };
+    juce::TextButton songButton { "Song" };
     MidiDragTile dragTile;
     MidiDragTile dragChordsTile;
     MidiDragTile dragBassTile;
+    MidiDragTile dragSongTile;
 
     // Context / Hint bar & Targeted Rolls
     juce::Label hint;

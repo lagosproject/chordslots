@@ -8,6 +8,7 @@
 #include <chordslots/Generator.h>
 #include <chordslots/Performance.h>
 #include <chordslots/Trigger.h>
+#include <chordslots/Song.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include <atomic>
@@ -93,10 +94,12 @@ public:
     {
         Master = 0,
         ChordsOnly = 1,
-        BassOnly = 2
+        BassOnly = 2,
+        Song = 3
     };
 
     juce::MidiFile createMidiFile (MidiExportMode mode = MidiExportMode::Master) const;
+    juce::MidiFile createSongMidiFile() const;
     /** Writes the progression to a temp .mid (for drag and drop). */
     juce::File writeTempMidiFile (MidiExportMode mode = MidiExportMode::Master) const;
     juce::String describeProgression() const;
@@ -106,6 +109,10 @@ public:
     bool harmonizeMidi (const juce::File& file);
     void setSynthModel (PreviewSoundModel model);
     bool isSplitMidi() const noexcept;
+    cs::Song getSong() const;
+    void setSong (const cs::Song&);
+    bool isSongEnabled() const noexcept { return songEnabled.load(); }
+    void setSongEnabled (bool enabled) noexcept { songEnabled.store (enabled); }
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -142,6 +149,8 @@ private:
     // Model (guarded by modelLock)
     juce::CriticalSection modelLock;
     std::array<cs::Progression, cs::kNumVariations> variations;
+    cs::Song song;
+    std::atomic<bool> songEnabled { false };
     cs::Rng rng;
     std::array<std::vector<cs::Progression>, cs::kNumVariations> histories;
     std::atomic<int> editVariation { 0 };
@@ -171,6 +180,8 @@ private:
     int currentSlot = -1;
     bool wasPlaying = false;
     double expectedStep = 0.0;
+    double expectedSongStep = 0.0;
+    bool songWasPlaying = false;
 
     struct AuditionVoice
     {
@@ -208,8 +219,16 @@ private:
     PendingNote pendingNotes[kMaxPendingNotes] = {};
     int pendingCount = 0;
 
-    // Event scheduling can cover several loops in a large host block. Keep its
-    // fixed buffer in processor storage instead of consuming audio-thread stack.
+    enum class SongEventKind { Off, On };
+    struct SongEvent
+    {
+        int sample = 0, note = 0, velocity = 0, channel = 1;
+        bool bass = false;
+        SongEventKind kind = SongEventKind::Off;
+    };
+    static constexpr int kMaxSongEvents = 2048;
+    SongEvent songEvents[kMaxSongEvents] = {};
+
     enum class BlockEventType { SlotStart, SlotOff, HitStart, HitOff, BassStart, BassOff };
     struct BlockEvent
     {

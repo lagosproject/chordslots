@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "chordslots/Generator.h"
+#include "chordslots/Song.h"
 #include "p2_golden_fixture.h"
 #include "p4_corpus_fixture.h"
 
@@ -18,6 +19,24 @@ static int checks = 0;
 
 #define CHECK(cond) \
     do { ++checks; if (! (cond)) { ++failures; std::printf ("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond); } } while (false)
+
+static void testSongPrimitives()
+{
+    PlayData vars[4] = {};
+    vars[0].lengthSteps = 16;
+    vars[1].lengthSteps = 32;
+    Song song; song.numEntries = 3;
+    song.entries[0] = { 0, 2 }; song.entries[1] = { 1, -5 }; song.entries[2] = { 0, 0 };
+    CHECK (songLengthSteps (song, vars) == 64);
+    const auto position = songPositionAt (song, vars, 4, 20);
+    CHECK (position.entry == 1 && position.variation == 1 && position.localStep == 4
+           && position.transpose == -5 && position.sectionStart == 16);
+    CHECK (songPositionAt (song, vars, 4, 64).entry == -1);
+    Song invalid; invalid.numEntries = 999; invalid.entries[0] = { 99, 99 };
+    const Song clean = sanitizeSong (invalid);
+    CHECK (clean.numEntries == kMaxSongEntries && clean.entries[0].variation == 3
+           && clean.entries[0].transpose == kMaxSongTranspose);
+}
 
 static Chord ch (int root, const char* suffix)
 {
@@ -1624,6 +1643,7 @@ static void testMelodyHarmonization()
 
 int main()
 {
+    testSongPrimitives();
     testBassPatterns();
     testGoldenTheory();
     testVoicedTension();
