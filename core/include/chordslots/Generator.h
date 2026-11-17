@@ -960,7 +960,7 @@ inline void updateActualsLocal (Progression& p, int i)
 
     // Energy is a performance property (loudness and density), not a harmonic one.
     const float vel = clamp01 (((float) s.voicing.velocity - 45.0f) / 75.0f);
-    const float density = clamp01 (((float) s.voicing.n - 3.0f) / 5.0f);
+    const float density = normalizedVoicingDensity (s.voicing.n, (VoicingStyle) p.voicingStyle);
     s.energy = clamp01 (0.6f * vel + 0.4f * density);
 }
 

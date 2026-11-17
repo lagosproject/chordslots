@@ -211,10 +211,9 @@ private:
     };
     // Worst case pending note analysis:
     // Strum/humanize timing delay max is 80ms + 6ms = 86ms. At 120 bpm, 86ms spans ~0.17 beats (~4 steps).
-    // The densest comp pattern (PulseEighth/TrapStabs) spaces hits by >= 12 steps (250ms at 120 bpm,
-    // or 100ms at 300 bpm). Across audio block boundaries, at most 2 hits can have strummed voices
-    // pending simultaneously. With at most 7 upper voices per chord, at most 14 notes can be pending
-    // concurrently. kMaxPendingNotes = 128 is therefore >4x the worst-case bound and completely safe.
+    // TrapStabs hits are 6 steps apart (about 15ms at the supported 999 bpm maximum). An 86ms
+    // maximum strum + humanize delay can span at most 6 starts, or 42 notes at 7 upper voices each.
+    // kMaxPendingNotes = 128 remains above that bound, including events crossing block boundaries.
     static constexpr int kMaxPendingNotes = 128;
     PendingNote pendingNotes[kMaxPendingNotes] = {};
     int pendingCount = 0;

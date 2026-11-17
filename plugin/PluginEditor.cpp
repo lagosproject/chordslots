@@ -17,7 +17,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
       dragBassTile (p, ChordSlotsProcessor::MidiExportMode::BassOnly, "Bass"),
       dragSongTile (p, ChordSlotsProcessor::MidiExportMode::Song, "Drag Song"),
       gateAttachment (p.apvts, "gate", gate),
-      volumeAttachment (p.apvts, "volume", volume),
+      volumeAttachment (p.apvts, "synthVol", volume),
       strumAttachment (p.apvts, "strum", strum),
       accentAttachment (p.apvts, "accent", accent),
       humanizeAttachment (p.apvts, "humanize", humanize),
@@ -178,13 +178,13 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     };
 
     // Fit score badge
-    fitCaption.setText ("FIT", juce::dontSendNotification);
-    fitCaption.setFont (ui::font (10.0f, true));
+    fitCaption.setText ("MATCH", juce::dontSendNotification);
+    fitCaption.setFont (ui::font (9.0f, true));
     fitCaption.setColour (juce::Label::textColourId, ui::textDim);
     fitCaption.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (fitCaption);
 
-    fitLabel.setFont (ui::font (24.0f, true));
+    fitLabel.setFont (ui::font (18.0f, true));
     fitLabel.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (fitLabel);
 
@@ -391,18 +391,18 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     accent.setRange (0.0, 1.0, 0.01);
     humanize.setRange (0.0, 1.0, 0.01);
 
-    adventure.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
-    variety.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
-    syncopation.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
-    bassMotion.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
+    adventure.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
+    variety.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
+    syncopation.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
+    bassMotion.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
     strum.textFromValueFunction = [] (double v)
     {
         const int ms = juce::roundToInt (v * 80.0);
         return (ms > 0 ? "+" : "") + juce::String (ms) + " ms";
     };
-    accent.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
-    humanize.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 20.0)) + " ms"; };
-    gate.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + " %"; };
+    accent.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
+    humanize.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 6.0)) + " ms"; };
+    gate.textFromValueFunction = [] (double v) { return juce::String (juce::roundToInt (v * 100.0)) + "%"; };
     volume.textFromValueFunction = [] (double v)
     {
         return juce::String (juce::Decibels::gainToDecibels ((float) v, -48.0f), 1) + " dB";
@@ -414,12 +414,18 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     bassMotion.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
     strum.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 80.0; };
     accent.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
-    humanize.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 20.0; };
+    humanize.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 6.0; };
     gate.valueFromTextFunction = [] (const juce::String& s) { return s.getDoubleValue() / 100.0; };
     volume.valueFromTextFunction = [] (const juce::String& s)
     {
         return (double) juce::Decibels::decibelsToGain ((float) s.getDoubleValue(), -48.0f);
     };
+
+    // APVTS attachments seed their sliders before these functions are installed;
+    // force the existing text boxes to pick up the unit-aware representations.
+    for (auto* slider : { &adventure, &variety, &syncopation, &bassMotion,
+                          &strum, &accent, &humanize, &gate, &volume })
+        slider->updateText();
 
     adventure.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
     variety.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
@@ -570,7 +576,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     setWantsKeyboardFocus (true);
     setResizable (true, true);
     setResizeLimits (900, 540, 1920, 1200);
-    setSize (1040, 650);
+    setSize (1040, 620);
     startTimerHz (30);
 }
 
@@ -598,7 +604,7 @@ void ChordSlotsEditor::setupKnob (juce::Slider& s, juce::Label& label, const juc
     addAndMakeVisible (s);
 
     label.setText (caption, juce::dontSendNotification);
-    label.setFont (ui::font (9.5f, true));
+    label.setFont (ui::font (8.5f, true));
     label.setColour (juce::Label::textColourId, ui::textDim);
     label.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (label);
@@ -1153,7 +1159,7 @@ void ChordSlotsEditor::resized()
     header.removeFromLeft (136); // logo area
 
     // Right side: Fit score badge
-    auto fitArea = header.removeFromRight (64);
+    auto fitArea = header.removeFromRight (56);
     fitCaption.setBounds (fitArea.removeFromTop (14));
     fitLabel.setBounds (fitArea);
 
@@ -1230,8 +1236,11 @@ void ChordSlotsEditor::resized()
 
     const int totalWidth = footer.getWidth();
     const int gap = 8;
-    const int harmWidth = juce::roundToInt ((totalWidth - 2 * gap) * 0.38f);
-    const int grooWidth = juce::roundToInt ((totalWidth - 2 * gap) * 0.31f);
+    // Output needs room for two readable 56px value boxes, the split/song buttons,
+    // synth selector and drag tiles. Groove knobs share the lower row below Comp.
+    const int available = totalWidth - 2 * gap;
+    const int harmWidth = juce::roundToInt (available * 0.35f);
+    const int grooWidth = juce::roundToInt (available * 0.23f);
 
     harmonyPanelBounds = footer.removeFromLeft (harmWidth);
     footer.removeFromLeft (gap);
@@ -1279,15 +1288,14 @@ void ChordSlotsEditor::resized()
         auto gInner = groovePanelBounds.reduced (8, 4);
         gInner.removeFromTop (16);
 
-        auto compCell = gInner.removeFromLeft (86);
-        compLabel.setBounds (compCell.removeFromTop (13));
-        compBox.setBounds (compCell.removeFromTop (28));
-        gInner.removeFromLeft (6);
+        auto controlRow = gInner.removeFromTop (31);
+        auto compCell = controlRow.removeFromLeft (128);
+        compLabel.setBounds (compCell.removeFromTop (12));
+        compBox.setBounds (compCell.removeFromTop (19));
+        auto refeelArea = controlRow.removeFromRight (62);
+        refeelButton.setBounds (refeelArea.withSizeKeepingCentre (60, 28));
 
-        auto refeelArea = gInner.removeFromRight (64);
-        refeelButton.setBounds (refeelArea.removeFromTop (32).withSizeKeepingCentre (60, 30));
-        gInner.removeFromRight (6);
-
+        gInner.removeFromTop (2);
         auto grooveKnobs = gInner;
         const int gkw = grooveKnobs.getWidth() / 3;
         for (const Knob& k : { Knob { &strum, &strumLabel }, Knob { &accent, &accentLabel }, Knob { &humanize, &humanizeLabel } })

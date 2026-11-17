@@ -1443,6 +1443,76 @@ static void testVoicingStylesAndEssentialTones()
     }
 }
 
+static void testP75StyleDensityAndVoicingBacklog()
+{
+    const int mins[] = { 2, 3, 3, 3, 3, 2, 3 };
+    const int maxs[] = { 6, 8, 7, 7, 7, 5, 7 };
+    for (int style = 0; style < kNumVoicingStyles; ++style)
+    {
+        const auto voicingStyle = (VoicingStyle) style;
+        CHECK (normalizedVoicingDensity (mins[style], voicingStyle) == 0.0f);
+        CHECK (normalizedVoicingDensity (maxs[style], voicingStyle) == 1.0f);
+        CHECK (normalizedVoicingDensity (mins[style] - 1, voicingStyle) == 0.0f);
+        CHECK (normalizedVoicingDensity (maxs[style] + 1, voicingStyle) == 1.0f);
+    }
+    for (int style = 0; style < kNumVoicingStyles; ++style)
+    {
+        Progression p;
+        p.numSlots = 1;
+        p.voicingStyle = style;
+        p.slots[0].chord = ch (0, "");
+        p.slots[0].voicing.n = maxs[style];
+        p.slots[0].voicing.velocity = 90;
+        updateActuals (p);
+        const float expected = 0.6f * 0.6f + 0.4f * normalizedVoicingDensity (maxs[style], (VoicingStyle) style);
+        CHECK (std::abs (p.slots[0].energy - expected) < 1.0e-6f);
+    }
+
+    // The assignment DP uses an 8-voice scratch table; inputs beyond that
+    // boundary are safely clamped to the first eight upper voices.
+    const std::vector<int> longA = { 48, 52, 55, 59, 60, 64, 67, 71, 79, 83 };
+    const std::vector<int> longB = { 48, 53, 57, 60, 62, 65, 69, 72, 81, 86 };
+    const std::vector<int> shortA (longA.begin(), longA.begin() + 8);
+    const std::vector<int> shortB (longB.begin(), longB.begin() + 8);
+    CHECK (std::abs (voiceLeadingDistance (longA, longB) - voiceLeadingDistance (shortA, shortB)) < 1.0e-6f);
+
+    const std::vector<int> upper = { 60, 64, 67, 71 };
+    const Voicing stacked = assembleVoicing (ch (0, ""), upper, 0.75f, VoicingStyle::Stacked);
+    bool hasTopOctave = false;
+    for (int i = 0; i < stacked.n; ++i)
+        for (int j = i + 1; j < stacked.n; ++j)
+            if (stacked.notes[(size_t) j] - stacked.notes[(size_t) i] == 12
+                && stacked.notes[(size_t) j] == upper.back() + 12)
+                hasTopOctave = true;
+    CHECK (hasTopOctave);
+    const Voicing emptyStack = assembleVoicing (ch (0, ""), {}, 0.75f, VoicingStyle::Stacked);
+    CHECK (emptyStack.n == 1 && emptyStack.bassCount == 1 && emptyStack.notes[0] < kUpperFloor);
+
+    Rng rng (7919);
+    const Chord major = ch (0, "");
+    const Voicing rootless = makeVoicing (major, nullptr, 64.0f, 0.5f, rng, 0.0f, 0.0f, VoicingStyle::Rootless);
+    bool hasNinth = false;
+    for (int i = 0; i < rootless.n; ++i)
+        if (rootless.notes[(size_t) i] >= kUpperFloor)
+        {
+            CHECK (mod12 (rootless.notes[(size_t) i]) != mod12 (major.root));
+            if (mod12 (rootless.notes[(size_t) i]) == mod12 (major.root + 2)) hasNinth = true;
+        }
+    CHECK (hasNinth);
+    const Chord sus2Chord = ch (0, "sus2");
+    const Voicing sus2 = makeVoicing (sus2Chord, nullptr, 64.0f, 0.5f, rng, 0.0f, 0.0f, VoicingStyle::Rootless);
+    CHECK (std::count_if (sus2.notes.begin(), sus2.notes.begin() + sus2.n,
+                          [] (int note) { return note >= kUpperFloor && mod12 (note) == 2; }) <= 1);
+    for (const auto& candidate : generateUpperCandidates (sus2Chord, VoicingStyle::Rootless))
+    {
+        std::vector<int> pitchClasses;
+        for (int note : candidate)
+            pitchClasses.push_back (mod12 (note));
+        std::sort (pitchClasses.begin(), pitchClasses.end());
+        CHECK (std::adjacent_find (pitchClasses.begin(), pitchClasses.end()) == pitchClasses.end());
+    }
+}
+
 static void testExactRing()
 {
     // The three directed edges have different weights, including the closing edge.
@@ -1656,6 +1726,7 @@ int main()
         CHECK (int (qualityClassOf (int (type))) == kPythonQualityClasses[type]);
     testVoicingEngineP31();
     testVoicingStylesAndEssentialTones();
+    testP75StyleDensityAndVoicingBacklog();
     testSpelling();
     testBassModel();
     testMetricOrdering();

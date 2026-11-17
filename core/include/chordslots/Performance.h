@@ -28,7 +28,7 @@ enum class CompStyle : int
     PulseEighth,    // 1/8 note pulse (every 12 steps)
     OffbeatReggae,  // Upbeat 1/8 notes (offset 12, 36...)
     BalladStabs,    // Dotted 1/4 + 1/8 syncopation (offsets 0, 36)
-    TrapStabs,      // 1/16th stabs on 1 and 2-and (offsets 0, 18)
+    TrapStabs,      // 1/16th stabs on each beat and its 2-and (0, 18; repeats every 24 steps)
     TripletSwing    // 1/8T swing pulses (offsets 0, 16, 32)
 };
 

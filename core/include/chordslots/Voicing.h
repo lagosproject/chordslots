@@ -115,6 +115,26 @@ inline const char* voicingStyleName (int style) noexcept
 
 constexpr int kNumVoicingStyles = 7;
 
+/** Per-style linear density scales fit on every mood with seeds 0..14 and
+    checked on held-out seeds 15..24. Piano keeps its original (notes-3)/5 map. */
+inline float normalizedVoicingDensity (int noteCount, VoicingStyle style) noexcept
+{
+    int minNotes = 3;
+    int maxNotes = 8;
+    switch (style)
+    {
+        case VoicingStyle::Close:    minNotes = 2; maxNotes = 6; break;
+        // Preserve Piano's original metric exactly: clamp((notes - 3) / 5).
+        case VoicingStyle::Piano:    minNotes = 3; maxNotes = 8; break;
+        case VoicingStyle::Spread:   minNotes = 3; maxNotes = 7; break;
+        case VoicingStyle::Drop2:    minNotes = 3; maxNotes = 7; break;
+        case VoicingStyle::Drop3:    minNotes = 3; maxNotes = 7; break;
+        case VoicingStyle::Rootless: minNotes = 2; maxNotes = 5; break;
+        case VoicingStyle::Stacked:  minNotes = 3; maxNotes = 7; break;
+    }
+    return std::clamp ((float) (noteCount - minNotes) / (float) (maxNotes - minNotes), 0.0f, 1.0f);
+}
+
 //==============================================================================
 struct Voicing
 {
@@ -138,10 +158,21 @@ inline bool violatesLowIntervalLimit (const Voicing& v)
     if (v.n < 2)
         return false;
     std::array<int, kMaxNotes> sorted;
-    for (int i = 0; i < v.n; ++i)
+    const int n = std::clamp (v.n, 0, kMaxNotes);
+    for (int i = 0; i < n; ++i)
         sorted[(size_t) i] = v.notes[(size_t) i];
-    std::sort (sorted.begin(), sorted.begin() + v.n);
-    return violatesLowIntervalLimit (sorted.data(), v.n);
+    for (int i = 1; i < n; ++i)
+    {
+        const int value = sorted[(size_t) i];
+        int j = i;
+        while (j > 0 && sorted[(size_t) (j - 1)] > value)
+        {
+            sorted[(size_t) j] = sorted[(size_t) (j - 1)];
+            --j;
+        }
+        sorted[(size_t) j] = value;
+    }
+    return violatesLowIntervalLimit (sorted.data(), n);
 }
 
 inline bool violatesLowIntervalLimit (const std::vector<int>& notes)
@@ -254,8 +285,8 @@ inline float voiceLeadingDistance (const std::vector<int>& u1, const std::vector
 
     const auto& L = (a.size() >= b.size()) ? a : b;
     const auto& S = (a.size() >= b.size()) ? b : a;
-    const int N = (int) L.size();
-    const int M = (int) S.size();
+    const int N = std::min ((int) L.size(), 8);
+    const int M = std::min ((int) S.size(), N);
 
     std::array<float, 8> extraCost {};
     for (int i = 0; i < N && i < 8; ++i)
@@ -971,6 +1002,12 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
     else if (style == VoicingStyle::Rootless)
     {
         auto pcs = getPitchClassesAfterOmissions (c, false);
+        const int ninth = mod12 (a.root + 2);
+        if (a.allPcs.size() == 3
+            && std::find (a.allPcs.begin(), a.allPcs.end(), ninth) == a.allPcs.end()
+            && std::find (pcs.begin(), pcs.end(), ninth) == pcs.end())
+            pcs.push_back (ninth);
+        std::sort (pcs.begin(), pcs.end());
         if (pcs.empty())
         {
             for (int x : a.allPcs)
@@ -1083,6 +1120,16 @@ inline std::vector<std::vector<int>> generateUpperCandidates (Chord c, VoicingSt
 inline Voicing assembleVoicing (Chord c, const std::vector<int>& upper, float energy,
                                 VoicingStyle style, int refBassNote = -1)
 {
+    if (upper.empty())
+    {
+        Voicing fallback;
+        fallback.n = 1;
+        fallback.notes[0] = pickBassRegister (c.bassPc(), refBassNote);
+        fallback.bassCount = 1;
+        fallback.velocity = std::clamp ((int) std::lround (45.0f + 75.0f * energy), 1, 127);
+        return fallback;
+    }
+
     const int bass = pickBassRegister (c.bassPc(), refBassNote, upper.front());
     std::vector<int> all = upper;
     all.push_back (bass);
@@ -1092,7 +1139,13 @@ inline Voicing assembleVoicing (Chord c, const std::vector<int>& upper, float en
         subBass = bass - 12;
 
     int top = -1;
-    if (energy > 0.6f && style != VoicingStyle::Stacked && style != VoicingStyle::Rootless)
+    if (style == VoicingStyle::Stacked && energy > 0.5f)
+    {
+        const int doubledTop = upper.back() + 12;
+        if (doubledTop <= 96)
+            top = doubledTop;
+    }
+    else if (energy > 0.6f && style != VoicingStyle::Stacked && style != VoicingStyle::Rootless)
     {
         int candTop = 60 + c.root;
         while (candTop <= upper.back()) candTop += 12;
