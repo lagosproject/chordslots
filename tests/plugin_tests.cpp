@@ -925,6 +925,130 @@ void testSplitMidiOutput()
     }
 }
 
+void testChordMarkersP74()
+{
+    struct Marker { juce::String text; double tick; };
+    Host h;
+
+    auto prepareVariation = [&] (int index, int tonic, const char* firstSuffix, const char* secondSuffix)
+    {
+        h.processor.setEditVariation (index);
+        h.processor.edit ([=] (cs::Progression& p, cs::Rng& rng)
+        {
+            p.tonic = tonic;
+            p.scale = 0;
+            cs::setNumSlots (p, 2);
+            cs::layoutEven (p);
+            const auto typeFor = [] (const char* suffix)
+            {
+                for (int i = 0; i < cs::numChordTypes(); ++i)
+                    if (std::strcmp (cs::chordTypes()[(size_t) i].suffix, suffix) == 0) return i;
+                return 0;
+            };
+            p.slots[0].chord = { tonic, typeFor (firstSuffix), 0 };
+            p.slots[1].chord = { cs::mod12 (tonic + 7), typeFor (secondSuffix), 0 };
+            cs::voiceAll (p, rng);
+        });
+    };
+    prepareVariation (0, 0, "", "7");
+    prepareVariation (1, 2, "m7", "maj7");
+    h.processor.setEditVariation (0);
+
+    constexpr int ticksPerStep = 20; // 480 PPQ / 24 steps per quarter note
+    auto expectedFor = [&] (const cs::Progression& p, double offset, int transpose)
+    {
+        std::vector<Marker> out;
+        for (int i = 0; i < p.numSlots; ++i)
+        {
+            auto chord = p.slots[(size_t) i].chord;
+            chord.root = cs::mod12 (chord.root + transpose);
+            const auto name = cs::chordName (chord, cs::mod12 (p.tonic + transpose), p.scale);
+            out.push_back ({ juce::String::fromUTF8 (name.c_str()),
+                             offset + p.slots[(size_t) i].start * ticksPerStep });
+        }
+        return out;
+    };
+
+    auto verifySerialized = [&] (ChordSlotsProcessor::MidiExportMode mode, int expectedFormat,
+                                const std::vector<Marker>& expectedChords,
+                                const std::vector<Marker>& expectedSections)
+    {
+        const juce::File file = h.processor.writeTempMidiFile (mode);
+        CHECK (file.existsAsFile());
+        if (! file.existsAsFile()) return;
+
+        juce::MemoryBlock bytes;
+        CHECK (file.loadFileAsData (bytes));
+        if (bytes.getSize() >= 14)
+        {
+            const auto* raw = static_cast<const juce::uint8*> (bytes.getData());
+            CHECK (std::memcmp (raw, "MThd", 4) == 0);
+            const int format = (int (raw[8]) << 8) | int (raw[9]);
+            CHECK (format == expectedFormat);
+        }
+        else CHECK (false);
+
+        juce::FileInputStream input (file);
+        juce::MidiFile parsed;
+        CHECK (input.openedOk() && parsed.readFrom (input));
+        CHECK (parsed.getNumTracks() == (expectedFormat == 0 ? 1 : 2));
+        std::vector<Marker> chordMarkers, sectionMarkers;
+        for (int track = 0; track < parsed.getNumTracks(); ++track)
+        {
+            const auto* sequence = parsed.getTrack (track);
+            if (sequence == nullptr) continue;
+            for (int i = 0; i < sequence->getNumEvents(); ++i)
+            {
+                const auto& message = sequence->getEventPointer (i)->message;
+                if (! message.isMetaEvent() || message.getMetaEventType() != 6) continue;
+                const Marker marker { message.getTextFromTextMetaEvent(), message.getTimeStamp() };
+                if (marker.text.startsWith ("Section ")) sectionMarkers.push_back (marker);
+                else chordMarkers.push_back (marker);
+                CHECK (track == 0);
+            }
+        }
+        CHECK (chordMarkers.size() == expectedChords.size());
+        for (size_t i = 0; i < std::min (chordMarkers.size(), expectedChords.size()); ++i)
+        {
+            CHECK (chordMarkers[i].text == expectedChords[i].text);
+            CHECK (std::abs (chordMarkers[i].tick - expectedChords[i].tick) < 0.01);
+        }
+        CHECK (sectionMarkers.size() == expectedSections.size());
+        for (size_t i = 0; i < std::min (sectionMarkers.size(), expectedSections.size()); ++i)
+        {
+            CHECK (sectionMarkers[i].text == expectedSections[i].text);
+            CHECK (std::abs (sectionMarkers[i].tick - expectedSections[i].tick) < 0.01);
+        }
+        file.deleteFile();
+    };
+
+    const auto a = h.processor.getProgression (0);
+    const auto b = h.processor.getProgression (1);
+    const auto expectedA = expectedFor (a, 0.0, 0);
+    if (auto* split = h.processor.apvts.getParameter ("splitMidi"))
+        split->setValueNotifyingHost (0.0f);
+    for (const auto mode : { ChordSlotsProcessor::MidiExportMode::Master,
+                             ChordSlotsProcessor::MidiExportMode::ChordsOnly,
+                             ChordSlotsProcessor::MidiExportMode::BassOnly })
+        verifySerialized (mode, 0, expectedA, {});
+
+    if (auto* split = h.processor.apvts.getParameter ("splitMidi"))
+        split->setValueNotifyingHost (1.0f);
+    verifySerialized (ChordSlotsProcessor::MidiExportMode::Master, 1, expectedA, {});
+
+    cs::Song song;
+    song.numEntries = 2;
+    song.entries[0] = { 0, 2 };
+    song.entries[1] = { 1, -5 };
+    h.processor.setSong (song);
+    std::vector<Marker> expectedSong = expectedFor (a, 0.0, 2);
+    const double bOffset = a.lengthSteps() * ticksPerStep;
+    const auto expectedB = expectedFor (b, bOffset, -5);
+    expectedSong.insert (expectedSong.end(), expectedB.begin(), expectedB.end());
+    const std::vector<Marker> sections = { { "Section A", 0.0 }, { "Section B", bOffset } };
+    verifySerialized (ChordSlotsProcessor::MidiExportMode::Song, 1, expectedSong, sections);
+}
+
 void testVariationBankAndHistory()
 {
     Host h (48000.0, 256);
@@ -1683,6 +1807,7 @@ int main (int argc, char** argv)
     testPerformanceAndStrum();
     testIncomingMidiTriggerIntegration();
     testSplitMidiOutput();
+    testChordMarkersP74();
     testExportPlaybackParity();
     testBassPatternExportPlaybackParity();
     testBassPatternBlockSpanningManyLoops();
