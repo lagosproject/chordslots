@@ -245,6 +245,12 @@ Rate of "extended" chords among major and minor tokens: Billboard 8 % of the maj
 
 **R10 stimuli** are in `tools/listening/r10/` (8 MIDI files, session-sheet generator). Pair 2 (Bdim vs Bm7b5) does not isolate the tritone, since both contain it; it tests the added seventh, and the plan wording should be read that way.
 
+**R3 result** ([report](audits/r3-dissonance/r3-dissonance.md), Haiku probe; the 0.686 and 0.665 reference values and the G7/Gmaj7 figures of the R2 sweep were reproduced first): across roughness only, TIV only and the 50/50 default, mean Pearson on the 11 progressions moves by at most 0.008, which that sample cannot resolve. Only five chord types move by more than 0.05 (dim, m7b5, dim7, m6, 7b9). The G7 versus Gmaj7 order depends on the split (roughness only puts G7 above, TIV only below), which matters for the tritone question. Decision: keep both terms 50/50.
+
+**R4 engine half** ([report](audits/r4-saturation/README.md)): `kBrightnessSoftClip` (off) replaces the hard clamp by a bounded curve. It removes the saturation of dim, m7b5, aug and maj7#11, but Dark, Tense and Dreamy then choose those types three to four times more often (Dark 4.3 to 17.1 %), so it changes the moods' character. Not to be enabled without listening; weights still wait for task 5.
+
+**Dark and degree ♭7** ([report](audits/dark-bVII/README.md)): the "Dark never produces ♭VII" item was an artifact (major B♭ is not in Phrygian); Dark makes 29 % of degree ♭7 chords, mostly B♭m, which is too many against the 11 to 14 % of the corpus.
+
 ### How to validate without depending on a single person
 
 Whoever develops the VST is not a professional producer, and it is not necessary to be one for most of the tests. It is advisable to separate two questions:
