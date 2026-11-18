@@ -89,6 +89,18 @@ void LanesView::paint (juce::Graphics& g)
     }
 }
 
+juce::String LanesView::getTooltip()
+{
+    static const char* const targets[] = { "a brighter chord", "more harmonic tension", "stronger note velocity" };
+    const auto pos = getMouseXYRelative().toFloat();
+    for (int lane = 0; lane < 3; ++lane)
+        if (laneBounds (lane).contains (pos))
+            return juce::String ("Click or drag higher to aim for ") + targets[lane]
+                 + ". The white marker shows the current value.";
+
+    return "Drop a MIDI file here to extract target curves from it.";
+}
+
 void LanesView::applyDrag (const juce::MouseEvent& e)
 {
     if (dragLane < 0)

@@ -350,6 +350,36 @@ void TimelineView::paint (juce::Graphics& g)
     }
 }
 
+juce::String TimelineView::getTooltip()
+{
+    const auto pos = getMouseXYRelative().toFloat();
+    if (pos.y < separatorTop)
+        return "Bar and beat positions for the current progression.";
+
+    if (pos.y < contentTop)
+    {
+        const int cut = cutAt (pos.x);
+        if (cut <= 0)
+            return "Click between separators to split a chord slot at the nearest grid point.";
+
+        return prog.slots[(size_t) cut].cutLocked
+            ? "This separator is locked. Double-click to unlock it."
+            : "Drag to move this separator. Double-click to lock it, or right-click for more options.";
+    }
+
+    if (midiVisible)
+        return "Click a slot to hear its generated notes. Right-click for slot actions.";
+
+    const int slot = slotAt (pos.x);
+    const float width = slotBounds (slot).getWidth();
+    if (width > 45.0f && optionsBounds (slot).expanded (4.0f).contains (pos))
+        return "Open slot actions such as auditioning, replacing or locking the chord.";
+    if (width > 38.0f && lockBounds (slot).expanded (4.0f).contains (pos))
+        return "Toggle the slot lock to keep this chord when you roll.";
+
+    return "Click a chord to see alternatives. Shift-click to hear it, or right-click for slot actions.";
+}
+
 void TimelineView::mouseMove (const juce::MouseEvent& e)
 {
     const bool inStrip = e.y >= separatorTop && e.y < contentTop;

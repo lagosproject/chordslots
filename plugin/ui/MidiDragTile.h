@@ -5,7 +5,8 @@
 #include "PluginProcessor.h"
 #include "LookAndFeel.h"
 
-class MidiDragTile final : public juce::Component
+class MidiDragTile final : public juce::Component,
+                           public juce::SettableTooltipClient
 {
 public:
     explicit MidiDragTile (ChordSlotsProcessor&,

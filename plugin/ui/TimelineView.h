@@ -5,7 +5,8 @@
 #include "PluginProcessor.h"
 #include "LookAndFeel.h"
 
-class TimelineView final : public juce::Component
+class TimelineView final : public juce::Component,
+                           public juce::TooltipClient
 {
 public:
     explicit TimelineView (ChordSlotsProcessor&);
@@ -15,6 +16,7 @@ public:
     void setMidiVisible (bool show);
 
     void paint (juce::Graphics&) override;
+    juce::String getTooltip() override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;

@@ -1,9 +1,37 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginEditor.h"
+#include "EditorPreferences.h"
 
 namespace
 {
 inline juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
+
+constexpr auto showTooltipsKey = "showTooltips";
+
+juce::PropertiesFile& editorSettings()
+{
+    static juce::PropertiesFile settings ([]
+    {
+        juce::PropertiesFile::Options options;
+        options.applicationName = "ChordSlots";
+        options.filenameSuffix = "editor.settings";
+        options.osxLibrarySubFolder = "Application Support";
+        options.millisecondsBeforeSaving = 0;
+        return options;
+    }());
+    return settings;
+}
+
+}
+
+bool editorPreferences::tooltipsEnabled()
+{
+    return editorSettings().getBoolValue (showTooltipsKey, true);
+}
+
+void editorPreferences::setTooltipsEnabled (bool enabled)
+{
+    editorSettings().setValue (showTooltipsKey, enabled);
 }
 
 ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
@@ -26,13 +54,18 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     setLookAndFeel (&lnf);
 
     // Header Combos
-    setupCombo (keyBox, keyLabel, "KEY");
-    setupCombo (scaleBox, scaleLabel, "SCALE");
-    setupCombo (barsBox, barsLabel, "BARS");
-    setupCombo (meterBox, meterLabel, "METER");
-    setupCombo (slotsBox, slotsLabel, "SLOTS");
-    slotsBox.setTooltip ("Set the total slot count. Add or remove individual cuts on the timeline.");
-    setupCombo (snapBox, snapLabel, "GRID");
+    setupCombo (keyBox, keyLabel, "KEY",
+              "Transpose the progression to a different root note.");
+    setupCombo (scaleBox, scaleLabel, "SCALE",
+              "Choose the scale and generate chords for it using the current slot timings.");
+    setupCombo (barsBox, barsLabel, "BARS",
+              "Set the length of the progression in bars.");
+    setupCombo (meterBox, meterLabel, "METER",
+              "Choose the time signature. Host follows your DAW.");
+    setupCombo (slotsBox, slotsLabel, "SLOTS",
+              "Set the number of chord slots. Use the timeline to add or remove individual cuts.");
+    setupCombo (snapBox, snapLabel, "GRID",
+              "Set the note division used to snap timeline cuts.");
 
     for (int pc = 0; pc < 12; ++pc)
         keyBox.addItem (utf8 (cs::pitchClassName (pc, pc, 0)), pc + 1);
@@ -63,6 +96,14 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     inputButton.setTooltip ("Configure incoming MIDI trigger mode and note mapping");
     inputButton.onClick = [this] { showInputMenu(); };
     addAndMakeVisible (inputButton);
+
+    optionsButton.setTooltip ("Change editor preferences such as hover help.");
+    optionsButton.onClick = [this] { showOptionsMenu(); };
+    #if ! JUCE_IOS && ! JUCE_ANDROID
+    if (processor.wrapperType != juce::AudioProcessor::wrapperType_Standalone)
+    #endif
+        addAndMakeVisible (optionsButton);
+    updateTooltips();
 
     keyBox.onChange = [this]
     {
@@ -179,6 +220,8 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 
     // Fit score badge
     fitCaption.setText ("MATCH", juce::dontSendNotification);
+    fitCaption.setTooltip ("How closely the current progression matches your target curves.");
+    fitLabel.setTooltip (fitCaption.getTooltip());
     fitCaption.setFont (ui::font (9.0f, true));
     fitCaption.setColour (juce::Label::textColourId, ui::textDim);
     fitCaption.setJustificationType (juce::Justification::centredRight);
@@ -244,6 +287,8 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     addAndMakeVisible (timeline);
     addAndMakeVisible (harmonyViewButton);
     addAndMakeVisible (grooveViewButton);
+    harmonyViewButton.setTooltip ("Show target curves, chord generation controls and locks.");
+    grooveViewButton.setTooltip ("Show controls for playing patterns, timing and dynamics.");
     harmonyViewButton.onClick = [this] { showGrooveView (false); };
     grooveViewButton.onClick = [this] { showGrooveView (true); };
     addAndMakeVisible (midiViewBtn);
@@ -262,13 +307,14 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         pickerOverlay.toFront (true);
     };
 
-    setupCombo (moodBox, moodLabel, "MOOD PRESET");
+    setupCombo (moodBox, moodLabel, "MOOD PRESET",
+              "Load a set of target curves and harmony settings, then generate a progression.");
     const auto& m = cs::moods();
     for (int i = 0; i < (int) m.size(); ++i)
         moodBox.addItem (m[(size_t) i].name, i + 1);
 
-    setupCombo (styleBox, styleLabel, "CHORD TRANSITIONS");
-    styleBox.setTooltip ("Biases which chord changes Roll favors. Auto follows the mood and scale. Free removes the learned bias.");
+    setupCombo (styleBox, styleLabel, "CHORD TRANSITIONS",
+              "Choose which chord changes Roll favors. Auto follows the mood and scale. Free removes that preference.");
     styleBox.addItem ("Auto", 1);
     styleBox.addItem ("Major", 2);
     styleBox.addItem ("Minor", 3);
@@ -276,21 +322,14 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     styleBox.addItem ("Free", 5);
     styleBox.setSelectedId (1, juce::dontSendNotification);
 
-    setupCombo (voicingBox, voicingLabel, "VOICING");
+    setupCombo (voicingBox, voicingLabel, "VOICING",
+              "Choose how chord notes are spread across registers.");
     for (int i = 0; i < cs::kNumVoicingStyles; ++i)
         voicingBox.addItem (cs::voicingStyleName ((cs::VoicingStyle) i), i + 1);
     voicingBox.setSelectedId ((int) cs::VoicingStyle::Piano + 1, juce::dontSendNotification);
 
-    setupCombo (shapeBox, shapeLabel, "SHAPES");
-    shapeBox.addItem (juce::String::fromUTF8 ("Shape Stamps ▾"), 1);
-    shapeBox.addItem (juce::String::fromUTF8 ("Rise (0.2 → 0.9)"), 2);
-    shapeBox.addItem (juce::String::fromUTF8 ("Drop (0.9 → 0.2)"), 3);
-    shapeBox.addItem ("Arch (Peak center)", 4);
-    shapeBox.addItem ("Pop Build (Step up)", 5);
-    shapeBox.addItem ("Valley (Dip center)", 6);
-    shapeBox.setSelectedId (1, juce::dontSendNotification);
-
-    setupCombo (bassPatternBox, bassPatternLabel, "BASS PATTERN");
+    setupCombo (bassPatternBox, bassPatternLabel, "BASS PATTERN",
+              "Choose how the bass plays under each chord.");
     bassPatternBox.addItem ("Sustain", (int) cs::BassStyle::Sustain + 1);
     bassPatternBox.addItem ("Octave pump", (int) cs::BassStyle::OctavePump + 1);
     bassPatternBox.addItem ("Offbeat 8ths", (int) cs::BassStyle::OffbeatEighths + 1);
@@ -302,17 +341,31 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         const auto bassStyle = (cs::BassStyle) (bassPatternBox.getSelectedId() - 1);
         processor.edit ([bassStyle] (cs::Progression& pr, cs::Rng&) { pr.bassStyle = bassStyle; });
     };
-    shapeBox.onChange = [this]
+
+    shapeLabel.setText ("SHAPES", juce::dontSendNotification);
+    shapeLabel.setFont (ui::font (10.0f, true));
+    shapeLabel.setColour (juce::Label::textColourId, ui::textDim);
+    addAndMakeVisible (shapeLabel);
+    addAndMakeVisible (shapeBox);
+    shapeBox.setTooltip ("Apply a shape to all three target curves and roll chords to fit it.");
+    shapeLabel.setTooltip (shapeBox.getTooltip());
+    shapeBox.onClick = [this]
     {
-        const int id = shapeBox.getSelectedId();
-        if (id > 1)
+        juce::PopupMenu menu;
+        menu.addItem (1, "Rise (Gradual build)");
+        menu.addItem (2, "Drop (Gradual release)");
+        menu.addItem (3, "Arch (Peak center)");
+        menu.addItem (4, "Pop Build (Step up)");
+        menu.addItem (5, "Valley (Dip center)");
+        juce::Component::SafePointer<ChordSlotsEditor> editor (this);
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&shapeBox), [editor] (int stamp)
         {
-            applyShapeStamp (id - 1);
-            shapeBox.setSelectedId (1, juce::dontSendNotification);
-        }
+            if (editor != nullptr && stamp != 0)
+                editor->applyShapeStamp (stamp);
+        });
     };
 
-    resetCurvesBtn.setTooltip ("Reset all target curves to neutral flat (0.50)");
+    resetCurvesBtn.setTooltip ("Set all three target curves to 50% and roll chords to fit them.");
     resetCurvesBtn.onClick = [this]
     {
         processor.edit ([] (cs::Progression& pr, cs::Rng& rng)
@@ -332,11 +385,11 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     analyzeMidiBtn.onClick = [this] { showMidiImportMenu(); };
     addAndMakeVisible (analyzeMidiBtn);
 
-    setupKnob (melodyFit, melodyFitLabel, "MELODY FIT");
+    setupKnob (melodyFit, melodyFitLabel, "MELODY FIT",
+              "Set how strongly Roll favors chords that fit the imported melody. Set to 0% to ignore it.");
     melodyFit.setRange (0.0, 1.0, 0.01);
     melodyFit.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    melodyFit.setPopupDisplayEnabled (true, true, this);
-    melodyFit.setTooltip ("Melody weight on the next Roll. Set to 0% to ignore the melody.");
+    melodyFit.setPopupDisplayEnabled (true, false, this);
     melodyFit.setColour (juce::Slider::rotarySliderFillColourId, ui::accent);
     melodyFit.textFromValueFunction = [] (double value)
     {
@@ -388,15 +441,24 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     }
 
     // Knobs with numeric text boxes
-    setupKnob (adventure, adventureLabel, "ADVENTURE");
-    setupKnob (variety, varietyLabel, "VARIETY");
-    setupKnob (syncopation, syncopationLabel, "SYNCOPATION");
-    setupKnob (bassMotion, bassMotionLabel, "BASS MOTION");
-    setupKnob (strum, strumLabel, "STRUM");
-    setupKnob (accent, accentLabel, "ACCENT");
-    setupKnob (humanize, humanizeLabel, "HUMANIZE");
-    setupKnob (gate, gateLabel, "GATE");
-    setupKnob (volume, volumeLabel, "SYNTH VOL");
+    setupKnob (adventure, adventureLabel, "ADVENTURE",
+              "Raise this to let Roll use more borrowed chords and extensions.");
+    setupKnob (variety, varietyLabel, "VARIETY",
+              "Raise this to explore more chord choices each time you Roll.");
+    setupKnob (syncopation, syncopationLabel, "SYNCOPATION",
+              "Raise this to move more unlocked chord changes off the regular beat during Roll.");
+    setupKnob (bassMotion, bassMotionLabel, "BASS MOTION",
+              "Raise this to let Roll use inversions for smoother movement between bass notes.");
+    setupKnob (strum, strumLabel, "STRUM",
+              "Spread the upper chord notes in time. Positive plays low to high. Negative plays high to low.");
+    setupKnob (accent, accentLabel, "ACCENT",
+              "Raise this to emphasize the highest chord note and soften the inner notes.");
+    setupKnob (humanize, humanizeLabel, "HUMANIZE",
+              "Add small variations in note timing and velocity for a more natural feel.");
+    setupKnob (gate, gateLabel, "GATE",
+              "Set how long notes are held relative to their rhythmic duration.");
+    setupKnob (volume, volumeLabel, "SYNTH VOL",
+              "Adjust the loudness of the built-in preview instrument.");
 
     adventure.setRange (0.0, 1.0, 0.01);
     variety.setRange (0.0, 1.0, 0.01);
@@ -478,7 +540,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     };
 
     // Groove comping combo
-    setupCombo (compBox, compLabel, "COMPING");
+    setupCombo (compBox, compLabel, "COMPING", "Choose the rhythm used to play the chords.");
     compBox.addItem ("Sustain", 1);
     compBox.addItem ("1/4 Pulse", 2);
     compBox.addItem ("1/8 Pulse", 3);
@@ -489,7 +551,8 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     compAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "compStyle", compBox);
 
     // Synth sound model combo
-    setupCombo (synthModelBox, synthModelLabel, "SOUND");
+    setupCombo (synthModelBox, synthModelLabel, "SOUND",
+              "Choose the instrument sound for the built-in preview.");
     synthModelBox.addItem ("Clean Saw", 1);
     synthModelBox.addItem ("Rhodes EP", 2);
     synthModelBox.addItem ("Felt Piano", 3);
@@ -540,6 +603,10 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     addAndMakeVisible (dragChordsTile);
     addAndMakeVisible (dragBassTile);
     addAndMakeVisible (dragSongTile);
+    dragTile.setTooltip ("Drag the current progression onto a MIDI track in your DAW.");
+    dragChordsTile.setTooltip ("Drag just the upper chord notes onto a MIDI track in your DAW.");
+    dragBassTile.setTooltip ("Drag just the bass notes onto a MIDI track in your DAW.");
+    dragSongTile.setTooltip ("Drag the full Song chain onto a MIDI track in your DAW.");
 
     // Context / Hint Bar & Targeted Rolls
     rollRootBtn.setTooltip ("Reroll only the root of this slot");
@@ -612,8 +679,11 @@ ChordSlotsEditor::~ChordSlotsEditor()
     setLookAndFeel (nullptr);
 }
 
-void ChordSlotsEditor::setupCombo (juce::ComboBox& box, juce::Label& label, const juce::String& caption)
+void ChordSlotsEditor::setupCombo (juce::ComboBox& box, juce::Label& label, const juce::String& caption,
+                                  const juce::String& tooltip)
 {
+    box.setTooltip (tooltip);
+    label.setTooltip (tooltip);
     label.setText (caption, juce::dontSendNotification);
     label.setFont (ui::font (10.0f, true));
     label.setColour (juce::Label::textColourId, ui::textDim);
@@ -621,8 +691,11 @@ void ChordSlotsEditor::setupCombo (juce::ComboBox& box, juce::Label& label, cons
     addAndMakeVisible (box);
 }
 
-void ChordSlotsEditor::setupKnob (juce::Slider& s, juce::Label& label, const juce::String& caption)
+void ChordSlotsEditor::setupKnob (juce::Slider& s, juce::Label& label, const juce::String& caption,
+                                 const juce::String& tooltip)
 {
+    s.setTooltip (tooltip);
+    label.setTooltip (tooltip);
     s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 56, 14);
     s.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
@@ -633,6 +706,36 @@ void ChordSlotsEditor::setupKnob (juce::Slider& s, juce::Label& label, const juc
     label.setColour (juce::Label::textColourId, ui::textDim);
     label.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (label);
+}
+
+void ChordSlotsEditor::showOptionsMenu()
+{
+    juce::PopupMenu menu;
+    const bool enabled = editorPreferences::tooltipsEnabled();
+    menu.addItem (1, "Show Tooltips", true, enabled);
+
+    juce::Component::SafePointer<ChordSlotsEditor> editor (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&optionsButton), [editor] (int result)
+    {
+        if (editor != nullptr && result == 1)
+        {
+            editorPreferences::setTooltipsEnabled (! editorPreferences::tooltipsEnabled());
+            editor->updateTooltips();
+        }
+    });
+}
+
+void ChordSlotsEditor::updateTooltips()
+{
+    if (editorPreferences::tooltipsEnabled())
+    {
+        if (tooltips == nullptr)
+            tooltips = std::make_unique<juce::TooltipWindow> (this, 900);
+    }
+    else
+    {
+        tooltips.reset();
+    }
 }
 
 void ChordSlotsEditor::showSongMenu()
@@ -949,6 +1052,8 @@ void ChordSlotsEditor::updateDragTileVisibility()
 
 void ChordSlotsEditor::timerCallback()
 {
+    updateTooltips();
+
     if (processor.isFollowingPlayback())
     {
         const int playingVar = processor.getPlayingVariation();
@@ -1211,15 +1316,20 @@ void ChordSlotsEditor::resized()
     auto area = getLocalBounds().reduced (14, 10);
 
     auto tabRow = area.removeFromTop (32);
-    harmonyViewButton.setBounds (tabRow.removeFromLeft (106));
+    harmonyViewButton.setBounds (tabRow.removeFromLeft (88));
     tabRow.removeFromLeft (4);
-    grooveViewButton.setBounds (tabRow.removeFromLeft (132));
-    tabRow.removeFromLeft (12);
-    undoButton.setBounds (tabRow.removeFromLeft (72).reduced (0, 2));
+    grooveViewButton.setBounds (tabRow.removeFromLeft (112));
+    tabRow.removeFromLeft (8);
+    undoButton.setBounds (tabRow.removeFromLeft (62).reduced (0, 2));
 
     auto sharedControls = tabRow.reduced (0, 2);
+    if (optionsButton.isVisible())
+    {
+        optionsButton.setBounds (sharedControls.removeFromRight (70));
+        sharedControls.removeFromRight (4);
+    }
     inputButton.setBounds (sharedControls.removeFromRight (92));
-    sharedControls.removeFromRight (14);
+    sharedControls.removeFromRight (8);
     auto variations = sharedControls.removeFromRight (326);
     variationLabel.setBounds (variations.removeFromLeft (70));
     for (auto& button : varButtons)

@@ -130,6 +130,11 @@ endfunction()
 
 cs_configure_plugin_sources(ChordSlots)
 
+if(NOT ANDROID AND NOT IOS)
+    target_sources(ChordSlots_Standalone PRIVATE plugin/StandaloneApp.cpp)
+    target_compile_definitions(ChordSlots_Standalone PRIVATE JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1)
+endif()
+
 if(CHORDSLOTS_BUILD_CLAP)
     clap_juce_extensions_plugin(TARGET ChordSlots
         CLAP_ID "org.chordslots.ChordSlots"

@@ -46,6 +46,9 @@ ChordPickerOverlay::ChordPickerOverlay (ChordSlotsProcessor& proc)
 {
     setAlwaysOnTop (true);
 
+    closeBtn.setTooltip ("Close the chord picker.");
+    switchViewBtn.setTooltip ("Switch between suggested alternatives and manual chord editing.");
+    swapBtn.setTooltip ("Replace the current chord with the selected alternative.");
     closeBtn.onClick = [this]
     {
         if (onClose)
@@ -75,6 +78,7 @@ ChordPickerOverlay::ChordPickerOverlay (ChordSlotsProcessor& proc)
         rootButtons[(size_t) i] = std::make_unique<juce::TextButton> (pcNames[i]);
         auto* b = rootButtons[(size_t) i].get();
         b->setClickingTogglesState (false);
+        b->setTooltip ("Set the root note of the chord in this slot.");
         b->onClick = [this, i] { selectRoot (i); };
         addAndMakeVisible (b);
     }
@@ -85,6 +89,7 @@ ChordPickerOverlay::ChordPickerOverlay (ChordSlotsProcessor& proc)
     {
         const char* sfx = types[(size_t) t].suffix;
         auto b = std::make_unique<juce::TextButton> (sfx[0] == '\0' ? juce::String ("Maj") : juce::String::fromUTF8 (sfx));
+        b->setTooltip ("Set the chord quality, such as major, minor or a seventh chord.");
         b->onClick = [this, t] { selectQuality (t); };
         addAndMakeVisible (b.get());
         qualityButtons.emplace_back (std::move (b), t);
@@ -148,6 +153,7 @@ void ChordPickerOverlay::setSlot (int slotIndex)
                 name = "/" + utf8 (cs::pitchClassName (cs::mod12 (activeChord.root + ivNorm), prog.tonic, prog.scale));
 
             auto b = std::make_unique<juce::TextButton> (name);
+            b->setTooltip ("Choose which chord note goes in the bass.");
             b->setToggleState (ivNorm == activeChord.bassInt, juce::dontSendNotification);
             b->onClick = [this, ivNorm] { selectBass (ivNorm); };
             addAndMakeVisible (b.get());
@@ -199,6 +205,7 @@ void ChordPickerOverlay::rebuildCandidates()
         else
         {
             button = std::make_unique<juce::TextButton> (label);
+            button->setTooltip ("Replace the current chord with this suggestion.");
             button->onClick = [this, chord] { applyChord (chord); };
         }
         if (chord == previous)

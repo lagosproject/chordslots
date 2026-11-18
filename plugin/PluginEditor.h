@@ -28,9 +28,11 @@ private:
     void updateDragTileVisibility();
     void showGrooveView (bool show);
     void rebuildKeyNames (int scale);
-    void setupCombo (juce::ComboBox&, juce::Label&, const juce::String& caption);
-    void setupKnob (juce::Slider&, juce::Label&, const juce::String& caption);
+    void setupCombo (juce::ComboBox&, juce::Label&, const juce::String& caption, const juce::String& tooltip);
+    void setupKnob (juce::Slider&, juce::Label&, const juce::String& caption, const juce::String& tooltip);
     void showInputMenu();
+    void showOptionsMenu();
+    void updateTooltips();
     void showSongMenu();
     void saveMidi();
     void showMidiImportMenu();
@@ -45,6 +47,7 @@ private:
     juce::ComboBox keyBox, scaleBox, barsBox, meterBox, slotsBox, snapBox;
     juce::Label keyLabel, scaleLabel, barsLabel, meterLabel, slotsLabel, snapLabel;
     juce::TextButton inputButton { "MIDI In ▾" };
+    juce::TextButton optionsButton { "Options" };
     juce::Label fitLabel, fitCaption;
 
     // Variations
@@ -58,11 +61,12 @@ private:
     bool grooveView = false;
     TimelineView timeline;
     juce::TextButton midiViewBtn { "MIDI view" };
-    juce::TooltipWindow tooltips { this };
+    std::unique_ptr<juce::TooltipWindow> tooltips;
     ChordPickerOverlay pickerOverlay;
 
     // Lane Toolbar controls
-    juce::ComboBox moodBox, styleBox, voicingBox, shapeBox, bassPatternBox;
+    juce::ComboBox moodBox, styleBox, voicingBox, bassPatternBox;
+    juce::TextButton shapeBox { juce::String::fromUTF8 ("Shape Stamps ▾") };
     juce::Label moodLabel, styleLabel, voicingLabel, shapeLabel, bassPatternLabel;
     juce::TextButton resetCurvesBtn { "Reset" };
     juce::TextButton analyzeMidiBtn;

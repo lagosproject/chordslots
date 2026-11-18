@@ -6,13 +6,15 @@
 #include "LookAndFeel.h"
 
 class LanesView final : public juce::Component,
-                        public juce::FileDragAndDropTarget
+                        public juce::FileDragAndDropTarget,
+                        public juce::TooltipClient
 {
 public:
     explicit LanesView (ChordSlotsProcessor&);
 
     void setProgression (const cs::Progression&);
     void paint (juce::Graphics&) override;
+    juce::String getTooltip() override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
