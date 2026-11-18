@@ -1,0 +1,25 @@
+item,file,condition,mood,tonic,scale,engine_seed,source,chords,slot_brightness,slot_tension
+item01,midi/item01.mid,random,,9,Minor,,,Em G G Dm7,,
+item02,midi/item02.mid,corpus,,,,,choco-v1.0.0.zip::billboard/raw/mirex/0148/full.lab@48,Em D G C,,
+item03,midi/item03.mid,random,,6,Minor,,,Dbm7 Bm Bm E7,,
+item04,midi/item04.mid,random,,1,Major,,,Fm F#maj7 Bbm7 Fm7,,
+item05,midi/item05.mid,random,,4,Minor,,,Am7 C Bm7 D,,
+item06,midi/item06.mid,chordslots,Dark,9,3,202608,,Am Dm Cm Gm7,0.31697 0.310404 0.197273 0.142973,0.221023 0.526015 0.525867 0.685913
+item07,midi/item07.mid,corpus,,,,,choco-v1.0.0.zip::billboard/raw/mirex/0190/full.lab@22,D Dbmaj7 C Fmaj7,,
+item08,midi/item08.mid,corpus,,,,,choco-v1.0.0.zip::billboard/raw/mirex/0455/full.lab@59,Bb7 F7 Bb7 F7,,
+item09,midi/item09.mid,random,,5,Minor,,,Ab Db Fm Fm,,
+item10,midi/item10.mid,chordslots,Uplifting,3,1,202607,,Ebm Bmaj7 F# Db,0.345859 0.821154 0.668889 0.707677,0.174143 0.468243 0.413569 0.661394
+item11,midi/item11.mid,chordslots,Melancholic,5,1,202602,,Fmadd9 Bbm Abadd9 Cm,0.393701 0.204848 0.612439 0.31798,0.359099 0.55924 0.439655 0.621006
+item12,midi/item12.mid,corpus,,,,,choco-v1.0.0.zip::billboard/raw/mirex/0372/full.lab@18,A G D G,,
+item13,midi/item13.mid,chordslots,Uplifting,8,1,202603,,Abm B6/9 F# E6/9,0.305859 0.720866 0.667677 0.655041,0.223629 0.409376 0.659553 0.611912
+item14,midi/item14.mid,chordslots,Melancholic,1,1,202606,,Dbm F#m A Bmadd9,0.283636 0.204848 0.535657 0.302792,0.234545 0.506985 0.483819 0.631852
+item15,midi/item15.mid,corpus,,,,,choco-v1.0.0.zip::billboard/raw/mirex/0889/full.lab@49,G C G7 C,,
+item16,midi/item16.mid,chordslots,Epic,10,1,202605,,Bbm F# F5 Abadd11,0.292525 0.630101 0.616566 0.58912,0.252902 0.45973 0.585502 0.626407
+item17,midi/item17.mid,chordslots,Epic,1,1,202601,,Dbm E B Abm,0.323636 0.695556 0.769899 0.386498,0.182046 0.343557 0.539388 0.654764
+item18,midi/item18.mid,random,,7,Major,,,Am G C Em,,
+item19,midi/item19.mid,corpus,,,,,choco-v1.0.0.zip::billboard/raw/mirex/0109/full.lab@68,Bb Bb7 Eb Ebm,,
+item20,midi/item20.mid,corpus,,,,,choco-v1.0.0.zip::billboard/raw/mirex/0056/full.lab@5,Cm7 F7 Bb Bdim,,
+item21,midi/item21.mid,random,,7,Minor,,,Cm7 Dm F7 Dm,,
+item22,midi/item22.mid,chordslots,Dark,8,3,202604,,Abm F#m Dbm F#m7,0.305859 0.192727 0.280404 0.193713,0.230012 0.654439 0.528141 0.650952
+item23,midi/item23.mid,corpus,,,,,choco-v1.0.0.zip::billboard/raw/mirex/1039/full.lab@3,A E A E,,
+item24,midi/item24.mid,random,,2,Major,,,Dbm7b5 Bm Bm7 A7,,
