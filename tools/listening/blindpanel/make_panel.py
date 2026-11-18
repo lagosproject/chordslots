@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""R7 blind panel: build 24 items (8 ChordSlots, 8 random in-scale, 8 corpus) as MIDI.
+"""R7 blind panel: build 24 items (6 ChordSlots full, 6 ChordSlots plain, 6 random in-scale, 6 corpus) as MIDI.
 
 Writes:
   midi/itemNN.mid        the stimuli for listeners (neutral names, shuffled order)
   operator/key.csv       item -> condition and source. Operator only, never sent with the listener sheets.
 
 Conditions
-  chordslots  rolled by the engine (make_panel roll): mood, tonic and seed are in the key.
+  cs_full     rolled by the engine (make_panel roll) and voiced with the mood targets: mood, tonic and seed are in
+              the key. At least two of the four chords are outside the plain vocabulary (add9, 6/9, 5, add11 ...).
+  cs_plain    rolled by the engine, but only draws whose four chords all sit in the plain vocabulary (the one the
+              random and corpus items use, no slash bass) are kept, and the chords are re-voiced with the neutral
+              voicing path the random and corpus items use. This removes the vocabulary and voicing confounds.
   random      four diatonic triads or sevenths of one scale (major or natural minor), random degrees.
   corpus      four consecutive chords from a Billboard annotation (ChoCo v1.0.0, CC BY 4.0), plain triads and
               sevenths only, absolute roots kept. Source file and window start are in the key.
@@ -44,7 +48,10 @@ TRIAD = {(4, 7): "", (3, 7): "m", (3, 6): "dim", (4, 8): "aug"}
 SEVENTH = {(4, 7, 11): "maj7", (4, 7, 10): "7", (3, 7, 10): "m7", (3, 6, 10): "m7b5", (3, 6, 9): "dim7",
            (3, 7, 11): "mMaj7"}
 SCALES = {"Major": [0, 2, 4, 5, 7, 9, 11], "Minor": [0, 2, 3, 5, 7, 8, 10]}
-MOODS = ["Epic", "Melancholic", "Uplifting", "Dark"]  # two items each
+MOODS = ["Epic", "Melancholic", "Uplifting", "Dark", "Epic", "Melancholic"]  # one per ChordSlots item
+N_PER_CONDITION = 6
+# Plain vocabulary: what the corpus parser and the diatonic generator can produce.
+PLAIN = set(QMAP.values()) | set(TRIAD.values()) | set(SEVENTH.values())
 
 
 def chord_name(root, suffix, bass=0):
@@ -149,22 +156,44 @@ def main():
     rng = random.Random(args.seed)
     items = []  # dicts with condition, chords, notes (one list per bar), and source fields
 
-    # 1. ChordSlots: rolled by the engine, moods Epic, Melancholic, Uplifting, Dark, two each.
-    for i in range(8):
-        mood = MOODS[i % 4]
+    # 1. ChordSlots, full vocabulary (cs_full) and plain vocabulary (cs_plain), both rolled by the engine.
+    voice_jobs = []  # (item, chords) for voicing with the engine
+    for i in range(N_PER_CONDITION):
+        mood = MOODS[i]
         tonic = rng.randrange(12)
         engine_seed = args.seed * 100 + i + 1
-        scale, slots = run_roll(args.probe, mood, tonic, engine_seed)
-        items.append({"condition": "chordslots", "mood": mood, "tonic": tonic, "scale": scale,
+        while True:  # at least two chords outside the plain vocabulary
+            scale, slots = run_roll(args.probe, mood, tonic, engine_seed)
+            if sum(1 for s in slots if s["suffix"] not in PLAIN or s["bass"]) >= 2:
+                break
+            engine_seed += 1000
+        items.append({"condition": "cs_full", "mood": mood, "tonic": tonic, "scale": scale,
                       "engine_seed": engine_seed, "source": "",
                       "chords": [(s["root"], s["suffix"], s["bass"]) for s in slots],
                       "notes": [s["notes"] for s in slots],
                       "brightness": [round(s["brightness"], 6) for s in slots],
                       "tension": [round(s["tension"], 6) for s in slots]})
+    for i in range(N_PER_CONDITION):
+        mood = MOODS[i]
+        tonic = rng.randrange(12)
+        engine_seed = args.seed * 100 + 50 + i + 1
+        tries = 0
+        while True:  # all chords plain, no slash bass, not all the same
+            scale, slots = run_roll(args.probe, mood, tonic, engine_seed)
+            tries += 1
+            if all(s["suffix"] in PLAIN and not s["bass"] for s in slots) and len({(s["root"], s["suffix"]) for s in slots}) > 1:
+                break
+            engine_seed += 1000
+            if tries > 500:
+                raise SystemExit(f"no plain-vocabulary roll for {mood} in 500 tries")
+        item = {"condition": "cs_plain", "mood": mood, "tonic": tonic, "scale": scale,
+                "engine_seed": engine_seed, "source": f"rejection-sampled, {tries} rolls",
+                "chords": [(s["root"], s["suffix"], 0) for s in slots]}
+        items.append(item)
+        voice_jobs.append(item)
 
     # 2. Random: four diatonic chords from one scale (major or natural minor).
-    voice_jobs = []  # (item, chords) for voicing with the engine
-    for _ in range(8):
+    for _ in range(N_PER_CONDITION):
         scale_name = rng.choice(list(SCALES))
         tonic = rng.randrange(12)
         while True:
@@ -182,22 +211,22 @@ def main():
         items.append(item)
         voice_jobs.append(item)
 
-    # 3. Corpus: one window from each of eight different songs (Billboard, ChoCo v1.0.0).
+    # 3. Corpus: one window from each of six different songs (Billboard, ChoCo v1.0.0).
     if os.path.exists(args.zip):
         songs = corpus_windows(args.zip)
         rng.shuffle(songs)
-        for wins in songs[:8]:
+        for wins in songs[:N_PER_CONDITION]:
             name, start, chords = rng.choice(wins)
             item = {"condition": "corpus", "mood": "", "tonic": "", "scale": "", "engine_seed": "",
                     "source": f"{os.path.basename(args.zip)}::{name.split('/partitions/')[1]}@{start}",
                     "chords": [(r, s, 0) for r, s in chords]}
             items.append(item)
             voice_jobs.append(item)
-        print(f"corpus: {len(songs)} songs with plain-chord windows; 8 windows drawn")
+        print(f"corpus: {len(songs)} songs with plain-chord windows; {N_PER_CONDITION} windows drawn")
     else:
         print(f"corpus source missing: {args.zip}")
 
-    # 4. Voice the random and corpus items with the engine.
+    # 4. Voice the cs_plain, random and corpus items with the neutral engine voicing.
     voiced = run_voice(args.probe, [[(r, s) for r, s, _b in it["chords"]] for it in voice_jobs], args.seed)
     for item, groups in zip(voice_jobs, voiced):
         item["notes"] = groups
@@ -229,7 +258,7 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
     print(f"wrote {args.key} ({len(rows)} items)")
-    counts = {c: sum(1 for r in rows if r["condition"] == c) for c in ("chordslots", "random", "corpus")}
+    counts = {c: sum(1 for r in rows if r["condition"] == c) for c in ("cs_full", "cs_plain", "random", "corpus")}
     print("counts:", counts)
     return 0
 

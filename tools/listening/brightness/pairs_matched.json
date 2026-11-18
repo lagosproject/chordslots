@@ -1,0 +1,1798 @@
+{
+  "description": "Operator key for the Task 5 Brightness pairs. Do not give this file to listeners.",
+  "tempo_bpm": 90,
+  "meter": "4/4",
+  "program": 0,
+  "program_name": "Acoustic Grand Piano (GM 0)",
+  "velocity": 80,
+  "bars_per_file": 4,
+  "beats_per_bar": 4,
+  "upper_register": "mean of the sounding notes at or above MIDI 48, as in the engine's registerBrightness",
+  "brightness": "engine Brightness of the slot (combineBrightness of contextQuality, modal and register terms)",
+  "pairs": [
+    {
+      "pair_id": "pair13",
+      "key": "C",
+      "type": "colour_small",
+      "tonic": 0,
+      "scale": 0,
+      "files": {
+        "A": {
+          "file": "pair13_A.mid",
+          "label": "C G Am F",
+          "upper_mean": 65.1875,
+          "brightness": 0.663245,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                55,
+                64,
+                67,
+                79
+              ],
+              "brightness": 0.759141
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                31,
+                50,
+                62,
+                71,
+                74
+              ],
+              "brightness": 0.782374
+            },
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                33,
+                52,
+                60,
+                72,
+                76
+              ],
+              "brightness": 0.408889
+            },
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                29,
+                48,
+                60,
+                72,
+                81
+              ],
+              "brightness": 0.702576
+            }
+          ]
+        },
+        "B": {
+          "file": "pair13_B.mid",
+          "label": "C G6 Asus2 F",
+          "upper_mean": 65.25,
+          "brightness": 0.765238,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                55,
+                64,
+                67,
+                76
+              ],
+              "brightness": 0.750808
+            },
+            {
+              "chord": "G6",
+              "root": 7,
+              "suffix": "6",
+              "pcs": [
+                2,
+                4,
+                7,
+                11
+              ],
+              "notes": [
+                31,
+                59,
+                62,
+                64,
+                76
+              ],
+              "brightness": 0.861017
+            },
+            {
+              "chord": "Asus2",
+              "root": 9,
+              "suffix": "sus2",
+              "pcs": [
+                4,
+                9,
+                11
+              ],
+              "notes": [
+                33,
+                52,
+                64,
+                71,
+                76
+              ],
+              "brightness": 0.754885
+            },
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                29,
+                48,
+                60,
+                69,
+                81
+              ],
+              "brightness": 0.694242
+            }
+          ]
+        }
+      },
+      "delta_upper": 0.0625,
+      "delta_brightness": 0.101993,
+      "higher_register_file": "B",
+      "higher_brightness_file": "B",
+      "contrast": "Different chord qualities on the same roots, with the voicing chosen so that the mean pitch of the upper notes is the same in both files."
+    },
+    {
+      "pair_id": "pair14",
+      "key": "C",
+      "type": "colour_small",
+      "tonic": 0,
+      "scale": 0,
+      "files": {
+        "A": {
+          "file": "pair14_A.mid",
+          "label": "A F Csus2 Gmaj7",
+          "upper_mean": 64.9375,
+          "brightness": 0.741636,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "A",
+              "root": 9,
+              "suffix": "",
+              "pcs": [
+                1,
+                4,
+                9
+              ],
+              "notes": [
+                45,
+                52,
+                61,
+                64,
+                76
+              ],
+              "brightness": 0.680354
+            },
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                48,
+                60,
+                69,
+                81
+              ],
+              "brightness": 0.694242
+            },
+            {
+              "chord": "Csus2",
+              "root": 0,
+              "suffix": "sus2",
+              "pcs": [
+                0,
+                2,
+                7
+              ],
+              "notes": [
+                36,
+                55,
+                62,
+                67,
+                79
+              ],
+              "brightness": 0.618521
+            },
+            {
+              "chord": "Gmaj7",
+              "root": 7,
+              "suffix": "maj7",
+              "pcs": [
+                2,
+                6,
+                7,
+                11
+              ],
+              "notes": [
+                31,
+                59,
+                62,
+                66,
+                78
+              ],
+              "brightness": 0.973427
+            }
+          ]
+        },
+        "B": {
+          "file": "pair14_B.mid",
+          "label": "Am F C G",
+          "upper_mean": 64.9412,
+          "brightness": 0.660606,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                45,
+                52,
+                60,
+                64,
+                72,
+                76
+              ],
+              "brightness": 0.406667
+            },
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                48,
+                60,
+                69,
+                81
+              ],
+              "brightness": 0.694242
+            },
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                55,
+                64,
+                67,
+                79
+              ],
+              "brightness": 0.759141
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                31,
+                50,
+                62,
+                71,
+                74
+              ],
+              "brightness": 0.782374
+            }
+          ]
+        }
+      },
+      "delta_upper": 0.0037,
+      "delta_brightness": -0.08103,
+      "higher_register_file": "B",
+      "higher_brightness_file": "A",
+      "contrast": "Different chord qualities on the same roots, with the voicing chosen so that the mean pitch of the upper notes is the same in both files."
+    },
+    {
+      "pair_id": "pair15",
+      "key": "C",
+      "type": "colour_small",
+      "tonic": 0,
+      "scale": 0,
+      "files": {
+        "A": {
+          "file": "pair15_A.mid",
+          "label": "C F Dm G",
+          "upper_mean": 66.3125,
+          "brightness": 0.664381,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                55,
+                64,
+                67,
+                79
+              ],
+              "brightness": 0.759141
+            },
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                48,
+                60,
+                69,
+                81
+              ],
+              "brightness": 0.694242
+            },
+            {
+              "chord": "Dm",
+              "root": 2,
+              "suffix": "m",
+              "pcs": [
+                2,
+                5,
+                9
+              ],
+              "notes": [
+                38,
+                57,
+                65,
+                69,
+                81
+              ],
+              "brightness": 0.396768
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                43,
+                50,
+                62,
+                71,
+                83
+              ],
+              "brightness": 0.807374
+            }
+          ]
+        },
+        "B": {
+          "file": "pair15_B.mid",
+          "label": "C Fmaj7 D6 Gsus4",
+          "upper_mean": 66.3125,
+          "brightness": 0.757238,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                55,
+                64,
+                67,
+                76
+              ],
+              "brightness": 0.750808
+            },
+            {
+              "chord": "Fmaj7",
+              "root": 5,
+              "suffix": "maj7",
+              "pcs": [
+                0,
+                4,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                57,
+                64,
+                72,
+                76
+              ],
+              "brightness": 0.893629
+            },
+            {
+              "chord": "D6",
+              "root": 2,
+              "suffix": "6",
+              "pcs": [
+                2,
+                6,
+                9,
+                11
+              ],
+              "notes": [
+                38,
+                59,
+                66,
+                69,
+                78
+              ],
+              "brightness": 0.937027
+            },
+            {
+              "chord": "Gsus4",
+              "root": 7,
+              "suffix": "sus4",
+              "pcs": [
+                0,
+                2,
+                7
+              ],
+              "notes": [
+                43,
+                50,
+                62,
+                72,
+                74
+              ],
+              "brightness": 0.447489
+            }
+          ]
+        }
+      },
+      "delta_upper": 0.0,
+      "delta_brightness": 0.092857,
+      "higher_register_file": "B",
+      "higher_brightness_file": "B",
+      "contrast": "Different chord qualities on the same roots, with the voicing chosen so that the mean pitch of the upper notes is the same in both files."
+    },
+    {
+      "pair_id": "pair16",
+      "key": "Am",
+      "type": "colour_small",
+      "tonic": 9,
+      "scale": 1,
+      "files": {
+        "A": {
+          "file": "pair16_A.mid",
+          "label": "Amaj7 Fsus2 G6 E7",
+          "upper_mean": 66.4444,
+          "brightness": 0.684553,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Amaj7",
+              "root": 9,
+              "suffix": "maj7",
+              "pcs": [
+                1,
+                4,
+                8,
+                9
+              ],
+              "notes": [
+                45,
+                56,
+                61,
+                64,
+                73,
+                76
+              ],
+              "brightness": 0.925195
+            },
+            {
+              "chord": "Fsus2",
+              "root": 5,
+              "suffix": "sus2",
+              "pcs": [
+                0,
+                5,
+                7
+              ],
+              "notes": [
+                41,
+                48,
+                60,
+                67,
+                72,
+                79
+              ],
+              "brightness": 0.430592
+            },
+            {
+              "chord": "G6",
+              "root": 7,
+              "suffix": "6",
+              "pcs": [
+                2,
+                4,
+                7,
+                11
+              ],
+              "notes": [
+                43,
+                52,
+                62,
+                71,
+                83
+              ],
+              "brightness": 0.744098
+            },
+            {
+              "chord": "E7",
+              "root": 4,
+              "suffix": "7",
+              "pcs": [
+                2,
+                4,
+                8,
+                11
+              ],
+              "notes": [
+                40,
+                56,
+                62,
+                71,
+                83
+              ],
+              "brightness": 0.638326
+            }
+          ]
+        },
+        "B": {
+          "file": "pair16_B.mid",
+          "label": "Am F G E",
+          "upper_mean": 66.4118,
+          "brightness": 0.587058,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                45,
+                52,
+                60,
+                64,
+                72,
+                76
+              ],
+              "brightness": 0.270303
+            },
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                48,
+                60,
+                69,
+                81
+              ],
+              "brightness": 0.557879
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                43,
+                50,
+                62,
+                71,
+                83
+              ],
+              "brightness": 0.67101
+            },
+            {
+              "chord": "E",
+              "root": 4,
+              "suffix": "",
+              "pcs": [
+                4,
+                8,
+                11
+              ],
+              "notes": [
+                40,
+                59,
+                68,
+                71,
+                83
+              ],
+              "brightness": 0.84904
+            }
+          ]
+        }
+      },
+      "delta_upper": -0.0326,
+      "delta_brightness": -0.097495,
+      "higher_register_file": "A",
+      "higher_brightness_file": "A",
+      "contrast": "Different chord qualities on the same roots, with the voicing chosen so that the mean pitch of the upper notes is the same in both files."
+    },
+    {
+      "pair_id": "pair17",
+      "key": "Am",
+      "type": "colour_small",
+      "tonic": 9,
+      "scale": 1,
+      "files": {
+        "A": {
+          "file": "pair17_A.mid",
+          "label": "Am C F G",
+          "upper_mean": 64.7647,
+          "brightness": 0.522159,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                45,
+                52,
+                60,
+                64,
+                72,
+                76
+              ],
+              "brightness": 0.270303
+            },
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                55,
+                64,
+                67,
+                76
+              ],
+              "brightness": 0.614444
+            },
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                48,
+                60,
+                69,
+                81
+              ],
+              "brightness": 0.557879
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                43,
+                50,
+                62,
+                71,
+                74
+              ],
+              "brightness": 0.64601
+            }
+          ]
+        },
+        "B": {
+          "file": "pair17_B.mid",
+          "label": "A Cm6 Fmaj7 G",
+          "upper_mean": 64.8235,
+          "brightness": 0.611212,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "A",
+              "root": 9,
+              "suffix": "",
+              "pcs": [
+                1,
+                4,
+                9
+              ],
+              "notes": [
+                45,
+                52,
+                61,
+                64,
+                73,
+                76
+              ],
+              "brightness": 0.747475
+            },
+            {
+              "chord": "Cm6",
+              "root": 0,
+              "suffix": "m6",
+              "pcs": [
+                0,
+                3,
+                7,
+                9
+              ],
+              "notes": [
+                36,
+                57,
+                63,
+                67,
+                75
+              ],
+              "brightness": 0.327431
+            },
+            {
+              "chord": "Fmaj7",
+              "root": 5,
+              "suffix": "maj7",
+              "pcs": [
+                0,
+                4,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                57,
+                60,
+                64,
+                76
+              ],
+              "brightness": 0.723932
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                43,
+                50,
+                62,
+                71,
+                74
+              ],
+              "brightness": 0.64601
+            }
+          ]
+        }
+      },
+      "delta_upper": 0.0588,
+      "delta_brightness": 0.089053,
+      "higher_register_file": "B",
+      "higher_brightness_file": "B",
+      "contrast": "Different chord qualities on the same roots, with the voicing chosen so that the mean pitch of the upper notes is the same in both files."
+    },
+    {
+      "pair_id": "pair18",
+      "key": "Am",
+      "type": "colour_small",
+      "tonic": 9,
+      "scale": 1,
+      "files": {
+        "A": {
+          "file": "pair18_A.mid",
+          "label": "Am Em6 F6 Cmaj7",
+          "upper_mean": 67.4444,
+          "brightness": 0.573588,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                45,
+                52,
+                60,
+                64,
+                76,
+                84
+              ],
+              "brightness": 0.29697
+            },
+            {
+              "chord": "Em6",
+              "root": 4,
+              "suffix": "m6",
+              "pcs": [
+                1,
+                4,
+                7,
+                11
+              ],
+              "notes": [
+                40,
+                55,
+                61,
+                73,
+                83
+              ],
+              "brightness": 0.537027
+            },
+            {
+              "chord": "F6",
+              "root": 5,
+              "suffix": "6",
+              "pcs": [
+                0,
+                2,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                57,
+                60,
+                62,
+                74,
+                84
+              ],
+              "brightness": 0.657634
+            },
+            {
+              "chord": "Cmaj7",
+              "root": 0,
+              "suffix": "maj7",
+              "pcs": [
+                0,
+                4,
+                7,
+                11
+              ],
+              "notes": [
+                36,
+                59,
+                64,
+                67,
+                79
+              ],
+              "brightness": 0.80272
+            }
+          ]
+        },
+        "B": {
+          "file": "pair18_B.mid",
+          "label": "Am Em F C",
+          "upper_mean": 67.4706,
+          "brightness": 0.470013,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                45,
+                52,
+                60,
+                64,
+                72,
+                76
+              ],
+              "brightness": 0.270303
+            },
+            {
+              "chord": "Em",
+              "root": 4,
+              "suffix": "m",
+              "pcs": [
+                4,
+                7,
+                11
+              ],
+              "notes": [
+                40,
+                59,
+                67,
+                71,
+                79
+              ],
+              "brightness": 0.362424
+            },
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                60,
+                69,
+                72,
+                81
+              ],
+              "brightness": 0.624545
+            },
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                55,
+                64,
+                67,
+                79
+              ],
+              "brightness": 0.622778
+            }
+          ]
+        }
+      },
+      "delta_upper": 0.0262,
+      "delta_brightness": -0.103575,
+      "higher_register_file": "B",
+      "higher_brightness_file": "A",
+      "contrast": "Different chord qualities on the same roots, with the voicing chosen so that the mean pitch of the upper notes is the same in both files."
+    },
+    {
+      "pair_id": "pair19",
+      "key": "C",
+      "type": "conflict",
+      "tonic": 0,
+      "scale": 0,
+      "files": {
+        "A": {
+          "file": "pair19_A.mid",
+          "label": "C Am F G",
+          "upper_mean": 58.1667,
+          "brightness": 0.585236,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                52,
+                55,
+                67
+              ],
+              "brightness": 0.667475
+            },
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                33,
+                52,
+                60,
+                64
+              ],
+              "brightness": 0.338519
+            },
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                29,
+                48,
+                60,
+                69
+              ],
+              "brightness": 0.633131
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                31,
+                50,
+                59,
+                62
+              ],
+              "brightness": 0.701818
+            }
+          ]
+        },
+        "B": {
+          "file": "pair19_B.mid",
+          "label": "Cm A Fsus2 G",
+          "upper_mean": 65.4444,
+          "brightness": 0.587219,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Cm",
+              "root": 0,
+              "suffix": "m",
+              "pcs": [
+                0,
+                3,
+                7
+              ],
+              "notes": [
+                36,
+                55,
+                63,
+                67,
+                75
+              ],
+              "brightness": 0.272525
+            },
+            {
+              "chord": "A",
+              "root": 9,
+              "suffix": "",
+              "pcs": [
+                1,
+                4,
+                9
+              ],
+              "notes": [
+                33,
+                52,
+                61,
+                64,
+                73,
+                76
+              ],
+              "brightness": 0.70202
+            },
+            {
+              "chord": "Fsus2",
+              "root": 5,
+              "suffix": "sus2",
+              "pcs": [
+                0,
+                5,
+                7
+              ],
+              "notes": [
+                29,
+                48,
+                60,
+                67,
+                72,
+                79
+              ],
+              "brightness": 0.566955
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                31,
+                50,
+                62,
+                71,
+                83
+              ],
+              "brightness": 0.807374
+            }
+          ]
+        }
+      },
+      "delta_upper": 7.2777,
+      "delta_brightness": 0.001983,
+      "higher_register_file": "B",
+      "higher_brightness_file": "B",
+      "lower_register_file": "A",
+      "brighter_colour_file": "A",
+      "contrast": "Register and chord colour pull in opposite directions at the same engine size. One file has brighter chord qualities about 8 semitones lower; the other has darker qualities at the higher register. Net engine Brightness is within 0.03. Choosing the higher register means register dominates; choosing the brighter chords means colour dominates."
+    },
+    {
+      "pair_id": "pair20",
+      "key": "C",
+      "type": "conflict",
+      "tonic": 0,
+      "scale": 0,
+      "files": {
+        "A": {
+          "file": "pair20_A.mid",
+          "label": "Fm6 G C7 Asus4",
+          "upper_mean": 65.4118,
+          "brightness": 0.58119,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Fm6",
+              "root": 5,
+              "suffix": "m6",
+              "pcs": [
+                0,
+                2,
+                5,
+                8
+              ],
+              "notes": [
+                41,
+                56,
+                60,
+                72,
+                74
+              ],
+              "brightness": 0.418341
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                43,
+                50,
+                62,
+                71,
+                74
+              ],
+              "brightness": 0.782374
+            },
+            {
+              "chord": "C7",
+              "root": 0,
+              "suffix": "7",
+              "pcs": [
+                0,
+                4,
+                7,
+                10
+              ],
+              "notes": [
+                36,
+                58,
+                64,
+                67,
+                76
+              ],
+              "brightness": 0.573427
+            },
+            {
+              "chord": "Asus4",
+              "root": 9,
+              "suffix": "sus4",
+              "pcs": [
+                2,
+                4,
+                9
+              ],
+              "notes": [
+                33,
+                52,
+                62,
+                64,
+                74,
+                76
+              ],
+              "brightness": 0.55062
+            }
+          ]
+        },
+        "B": {
+          "file": "pair20_B.mid",
+          "label": "F G C Am",
+          "upper_mean": 57.8462,
+          "brightness": 0.583384,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                48,
+                57,
+                69
+              ],
+              "brightness": 0.62202
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                43,
+                50,
+                59,
+                71
+              ],
+              "brightness": 0.735152
+            },
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                52,
+                55,
+                67
+              ],
+              "brightness": 0.667475
+            },
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                33,
+                48,
+                52,
+                60,
+                64
+              ],
+              "brightness": 0.308889
+            }
+          ]
+        }
+      },
+      "delta_upper": -7.5656,
+      "delta_brightness": 0.002194,
+      "higher_register_file": "A",
+      "higher_brightness_file": "B",
+      "lower_register_file": "B",
+      "brighter_colour_file": "B",
+      "contrast": "Register and chord colour pull in opposite directions at the same engine size. One file has brighter chord qualities about 8 semitones lower; the other has darker qualities at the higher register. Net engine Brightness is within 0.03. Choosing the higher register means register dominates; choosing the brighter chords means colour dominates."
+    },
+    {
+      "pair_id": "pair21",
+      "key": "Am",
+      "type": "conflict",
+      "tonic": 9,
+      "scale": 1,
+      "files": {
+        "A": {
+          "file": "pair21_A.mid",
+          "label": "Am G F C",
+          "upper_mean": 56.2308,
+          "brightness": 0.427576,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                45,
+                48,
+                52,
+                60,
+                64
+              ],
+              "brightness": 0.172525
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                43,
+                50,
+                59,
+                62
+              ],
+              "brightness": 0.565455
+            },
+            {
+              "chord": "F",
+              "root": 5,
+              "suffix": "",
+              "pcs": [
+                0,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                48,
+                57,
+                60
+              ],
+              "brightness": 0.452323
+            },
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                52,
+                55,
+                64
+              ],
+              "brightness": 0.52
+            }
+          ]
+        },
+        "B": {
+          "file": "pair21_B.mid",
+          "label": "Am G F7 C7",
+          "upper_mean": 64.125,
+          "brightness": 0.422219,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                45,
+                52,
+                60,
+                64,
+                76
+              ],
+              "brightness": 0.250303
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                43,
+                50,
+                62,
+                71,
+                74
+              ],
+              "brightness": 0.64601
+            },
+            {
+              "chord": "F7",
+              "root": 5,
+              "suffix": "7",
+              "pcs": [
+                0,
+                3,
+                5,
+                9
+              ],
+              "notes": [
+                41,
+                51,
+                60,
+                69,
+                72
+              ],
+              "brightness": 0.355498
+            },
+            {
+              "chord": "C7",
+              "root": 0,
+              "suffix": "7",
+              "pcs": [
+                0,
+                4,
+                7,
+                10
+              ],
+              "notes": [
+                36,
+                58,
+                64,
+                67,
+                76
+              ],
+              "brightness": 0.437063
+            }
+          ]
+        }
+      },
+      "delta_upper": 7.8942,
+      "delta_brightness": -0.005357,
+      "higher_register_file": "B",
+      "higher_brightness_file": "A",
+      "lower_register_file": "A",
+      "brighter_colour_file": "A",
+      "contrast": "Register and chord colour pull in opposite directions at the same engine size. One file has brighter chord qualities about 8 semitones lower; the other has darker qualities at the higher register. Net engine Brightness is within 0.03. Choosing the higher register means register dominates; choosing the brighter chords means colour dominates."
+    },
+    {
+      "pair_id": "pair22",
+      "key": "Am",
+      "type": "conflict",
+      "tonic": 9,
+      "scale": 1,
+      "files": {
+        "A": {
+          "file": "pair22_A.mid",
+          "label": "A7 Dm Csus4 Gsus4",
+          "upper_mean": 65.375,
+          "brightness": 0.347796,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "A7",
+              "root": 9,
+              "suffix": "7",
+              "pcs": [
+                1,
+                4,
+                7,
+                9
+              ],
+              "notes": [
+                45,
+                55,
+                61,
+                64,
+                76
+              ],
+              "brightness": 0.548427
+            },
+            {
+              "chord": "Dm",
+              "root": 2,
+              "suffix": "m",
+              "pcs": [
+                2,
+                5,
+                9
+              ],
+              "notes": [
+                38,
+                57,
+                65,
+                69,
+                77
+              ],
+              "brightness": 0.249293
+            },
+            {
+              "chord": "Csus4",
+              "root": 0,
+              "suffix": "sus4",
+              "pcs": [
+                0,
+                5,
+                7
+              ],
+              "notes": [
+                36,
+                55,
+                65,
+                67,
+                77
+              ],
+              "brightness": 0.282338
+            },
+            {
+              "chord": "Gsus4",
+              "root": 7,
+              "suffix": "sus4",
+              "pcs": [
+                0,
+                2,
+                7
+              ],
+              "notes": [
+                31,
+                50,
+                62,
+                72,
+                74
+              ],
+              "brightness": 0.311126
+            }
+          ]
+        },
+        "B": {
+          "file": "pair22_B.mid",
+          "label": "Am Dm C G",
+          "upper_mean": 57.0,
+          "brightness": 0.352744,
+          "duration_beats": 16,
+          "chords": [
+            {
+              "chord": "Am",
+              "root": 9,
+              "suffix": "m",
+              "pcs": [
+                0,
+                4,
+                9
+              ],
+              "notes": [
+                45,
+                48,
+                52,
+                60,
+                64
+              ],
+              "brightness": 0.172525
+            },
+            {
+              "chord": "Dm",
+              "root": 2,
+              "suffix": "m",
+              "pcs": [
+                2,
+                5,
+                9
+              ],
+              "notes": [
+                38,
+                53,
+                57,
+                65
+              ],
+              "brightness": 0.152997
+            },
+            {
+              "chord": "C",
+              "root": 0,
+              "suffix": "",
+              "pcs": [
+                0,
+                4,
+                7
+              ],
+              "notes": [
+                36,
+                52,
+                55,
+                64
+              ],
+              "brightness": 0.52
+            },
+            {
+              "chord": "G",
+              "root": 7,
+              "suffix": "",
+              "pcs": [
+                2,
+                7,
+                11
+              ],
+              "notes": [
+                31,
+                50,
+                59,
+                62
+              ],
+              "brightness": 0.565455
+            }
+          ]
+        }
+      },
+      "delta_upper": -8.375,
+      "delta_brightness": 0.004948,
+      "higher_register_file": "A",
+      "higher_brightness_file": "B",
+      "lower_register_file": "B",
+      "brighter_colour_file": "B",
+      "contrast": "Register and chord colour pull in opposite directions at the same engine size. One file has brighter chord qualities about 8 semitones lower; the other has darker qualities at the higher register. Net engine Brightness is within 0.03. Choosing the higher register means register dominates; choosing the brighter chords means colour dominates."
+    }
+  ]
+}

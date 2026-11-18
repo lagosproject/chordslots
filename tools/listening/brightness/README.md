@@ -1,6 +1,6 @@
 # Task 5: Brightness listening pairs
 
-Material for task 5 in `docs/GENERAL-PLAN.md` (carry out the Brightness listening) and the protocol in `docs/CONTINUITY-PLAN.md` ("Listening protocol with producers"). Twelve pairs of four-chord loops: six in C major and six in A minor. Each pair is two MIDI files.
+Material for task 5 in `docs/GENERAL-PLAN.md` (carry out the Brightness listening) and the protocol in `docs/CONTINUITY-PLAN.md` ("Listening protocol with producers"). Twelve pairs of four-chord loops: six in C major and six in A minor. Each pair is two MIDI files. A second, matched set (pairs 13-22, see "Matched set" below) was added so that register and colour effects can be compared at equal size.
 
 ## Contents
 
@@ -62,3 +62,28 @@ Do not explain what differs between the files. If the listener asks what is mean
 ## Check results
 
 `write_pairs.py` re-reads each MIDI file and compares it with the probe: format, tempo, program, velocity, bar count and pitch classes of each bar. It recomputes Brightness from the MIDI notes with `make_pairs check`, and compares the mean upper register and the loop Brightness with the key. The last run passed all checks (see the output printed by `write_pairs.py`).
+
+## Matched set (pairs 13 to 22)
+
+The first twelve pairs cannot compare register and colour at equal size: register pairs differ by 0.08 to 0.10 engine Brightness and colour pairs by 0.25 to 0.33. The matched set fixes that. It is built by `make_pairs matched` and written with the same `write_pairs.py`:
+
+```
+make_pairs matched > matched_raw.json
+python3 tools/listening/brightness/write_pairs.py matched_raw.json --json tools/listening/brightness/pairs_matched.json
+```
+
+(`pairs/pair13_A.mid` ... `pair22_B.mid`; operator key in `pairs_matched.json`. Regenerating the first set with the same code gives byte-identical files and an identical `pairs.json`.)
+
+| Pairs | Type | What differs | Engine gap |
+|---|---|---|---|
+| 13-18 | `colour_small` | Chord qualities change on 2 to 4 of the 4 chords, upper register matched within 0.06 semitone. Alternates whether file A or B is the brighter one. | 0.075 to 0.105 (checked 0.081 to 0.104), the same size as a register pair |
+| 19-22 | `conflict` | Register and colour point in opposite directions. One file has the brighter chord qualities about 7 to 8 semitones lower. The other has darker qualities at the original register. | Net gap within 0.03 (checked 0.002 to 0.005). The colour gap alone is 0.075 to 0.105 and the register gap about 0.09. |
+
+How to read them. In `colour_small` and in the register pairs of the first set, the "brighter" answer should follow the engine if the engine's Brightness tracks what is heard, and the two types can be compared directly because the engine gap is the same. In `conflict` pairs the engine sees a tie, so the listener's choice shows which cue they weigh more: the higher register (register dominates) or the brighter chords (colour dominates). `pairs_matched.json` gives `lower_register_file` and `brighter_colour_file` for each conflict pair (by construction they are the same file).
+
+Caveats.
+
+- The colour changes are chosen by search, not by hand. Several of them also change the mode of a chord, for example Amaj7 against Am (pair 16), A against Am and Cm6 on the C degree (pair 17), or Cm and A in C major (pair 19). So "colour" here includes mode mixture and suspensions, and a result says "chord quality including mode changes", not a pure colour effect. A hand-checked set of subtler changes (maj7 and 6 added to the same triads) would isolate colour better; it was not built.
+- Some loops are odd as harmony (for example Fm6 G C7 Asus4 in pair 20). Listeners may react to that, not to brightness. Record spontaneous comments.
+- Same engine voicing, 90 bpm, piano, as the first set. The numbers are engine numbers, not perceptual thresholds.
+- Ten more pairs add about 7 minutes to a session.

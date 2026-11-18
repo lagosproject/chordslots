@@ -2,7 +2,7 @@
 """Analyse filled R7 rating sheets against the operator key. Standard library only.
 
 Reports
-  1. Per condition (chordslots, random, corpus): n, mean and SD of plausibility and would_use.
+  1. Per condition (cs_full, cs_plain, random, corpus): n, mean and SD of plausibility and would_use.
   2. Per training group (music theory, none) and condition: mean plausibility and would_use.
   3. Inter-judge agreement for each rating, over the items every judge rated:
      - Kendall's W (with the tie correction), judges as raters and items as objects;

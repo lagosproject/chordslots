@@ -163,6 +163,14 @@ def build_key(raw, out_dir):
         if pair["type"] == "register":
             entry["contrast"] = ("Identical chords in the same order. In one file the top voices of each chord sit "
                                  "about 8 semitones lower; the bass and the chord content are unchanged.")
+        elif pair["type"] == "conflict":
+            low = "A" if a["upper_mean"] < b["upper_mean"] else "B"
+            entry["lower_register_file"] = low
+            entry["brighter_colour_file"] = low  # by construction: brighter chord qualities sit in the lower register
+            entry["contrast"] = ("Register and chord colour pull in opposite directions at the same engine size. One file "
+                                 "has brighter chord qualities about 8 semitones lower; the other has darker qualities at "
+                                 "the higher register. Net engine Brightness is within 0.03. Choosing the higher register "
+                                 "means register dominates; choosing the brighter chords means colour dominates.")
         else:
             entry["contrast"] = ("Different chord qualities on the same roots, with the voicing chosen so that the mean "
                                  "pitch of the upper notes is the same in both files.")
@@ -235,6 +243,10 @@ def check_files(key_pairs, out_dir, probe):
         if entry["type"] == "register" and not (7.0 <= abs(d_up) <= 12.0):
             all_ok = False
         if entry["type"] == "colour" and (abs(d_up) > 1.0 or abs(mb - ma) < 0.25):
+            all_ok = False
+        if entry["type"] == "colour_small" and (abs(d_up) > 1.0 or not 0.075 <= abs(mb - ma) <= 0.105):
+            all_ok = False
+        if entry["type"] == "conflict" and (not 7.0 <= abs(d_up) <= 12.0 or abs(mb - ma) > 0.03):
             all_ok = False
         for letter in ("A", "B"):
             entry["files"][letter].pop("_upper_midi", None)

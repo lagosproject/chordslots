@@ -237,7 +237,16 @@ struct ColourResult
     int tries = 0, prescreened = 0, voiced = 0;
 };
 
-static ColourResult searchColour (const Spec& spec, const Progression& base, unsigned rngSeed)
+struct ColourParams
+{
+    int minChanged = 3;
+    float prescreenGap = 0.2f; // approximate Brightness gap needed before voicing
+    double minGap = 0.25;      // measured loop Brightness gap, lower bound
+    double maxGap = 1e9;       // measured loop Brightness gap, upper bound
+    bool brighter = false;     // if true the changed loop must be brighter than the base loop (matched set)
+};
+
+static ColourResult searchColour (const Spec& spec, const Progression& base, unsigned rngSeed, const ColourParams& cp = ColourParams())
 {
     ColourResult res;
     const LoopStats a = statsOf (base);
@@ -264,9 +273,12 @@ static ColourResult searchColour (const Spec& spec, const Progression& base, uns
                 ++changed;
             }
         }
-        if (changed < 3 || cand == spec.chords)
+        if (changed < cp.minChanged || cand == spec.chords)
             continue;
-        if (std::fabs (approxBrightness (cand, spec.tonic, spec.scale) - approxBrightness (spec.chords, spec.tonic, spec.scale)) < 0.2f)
+        const float approxGap = approxBrightness (cand, spec.tonic, spec.scale) - approxBrightness (spec.chords, spec.tonic, spec.scale);
+        if (std::fabs (approxGap) < cp.prescreenGap || (cp.brighter && approxGap < 0.0f))
+            continue;
+        if (cp.maxGap < 1e8 && std::fabs (approxGap) > (float) cp.maxGap + 0.08f)
             continue;
         ++res.prescreened;
 
@@ -283,7 +295,8 @@ static ColourResult searchColour (const Spec& spec, const Progression& base, uns
                 const double dUp = std::fabs (sb.upperMean - a.upperMean);
                 const double dB = std::fabs (sb.brightness - a.brightness);
                 ++res.voiced;
-                if (dUp <= 1.0 && dB >= 0.25 && dUp < bestErr)
+                const bool signOk = ! cp.brighter || sb.brightness > a.brightness;
+                if (signOk && dUp <= 1.0 && dB >= cp.minGap && dB <= cp.maxGap && dUp < bestErr)
                 {
                     bestErr = dUp;
                     res.found = true;
@@ -350,10 +363,174 @@ static int runCheck()
     return 0;
 }
 
+// ---- Matched set (pairs 13-22) --------------------------------------------------------------------
+// The first set cannot compare the two effects at equal size: register pairs differ by about 0.09 engine
+// Brightness, colour pairs by 0.25-0.33. This set matches them.
+//   colour_small  chord qualities change (at least 2 of 4 chords), register matched within 1 semitone, and the
+//                 engine Brightness gap is 0.075-0.105, the same size as a register pair.
+//   conflict      the two cues point in opposite directions with the same engine size. File X has the brighter
+//                 chord qualities at a register about 8 semitones lower; file Y has the darker qualities at the
+//                 original register. The colour gap (register matched) is 0.075-0.105 and the net engine
+//                 Brightness gap is within 0.03. If listeners pick the higher register, register wins the
+//                 perceived Brightness; if they pick the brighter chords, colour wins.
+static const double kGapLo = 0.075, kGapHi = 0.105;
+
+struct ConflictResult
+{
+    bool found = false;
+    std::vector<Chord> darkChords;
+    unsigned seed = 0;
+    float targetB = 0.0f;
+};
+
+static ConflictResult searchConflict (const Spec& spec, const Progression& baseHigh, const Progression& baseLow, unsigned rngSeed)
+{
+    ConflictResult res;
+    const LoopStats a = statsOf (baseHigh); // brighter chords, original register
+    const LoopStats al = statsOf (baseLow); // brighter chords, register lowered
+    std::mt19937 rng (rngSeed);
+    std::uniform_real_distribution<float> u01 (0.0f, 1.0f);
+    const float targets[] = { 0.3f, 0.4f, 0.5f, 0.6f, 0.7f };
+    double bestScore = 1e9;
+    int voiced = 0;
+    for (int t = 0; t < 60000 && voiced < 600; ++t)
+    {
+        std::vector<Chord> cand = spec.chords;
+        int changed = 0;
+        for (auto& c : cand)
+            if (u01 (rng) < 0.6f)
+            {
+                std::string cur = chordTypes()[(size_t) c.type].suffix;
+                std::vector<std::string> opts;
+                for (const auto& sfx : kAlt)
+                    if (sfx != cur)
+                        opts.push_back (sfx);
+                c = mk (c.root, opts[(size_t) (rng() % opts.size())]);
+                ++changed;
+            }
+        if (changed < 2 || cand == spec.chords)
+            continue;
+        const float gap = approxBrightness (spec.chords, spec.tonic, spec.scale) - approxBrightness (cand, spec.tonic, spec.scale);
+        if (gap < 0.04f || gap > 0.16f)
+            continue;
+        for (float tb : targets)
+            for (unsigned seed = 1; seed <= 6; ++seed)
+            {
+                Progression q = build (spec.tonic, spec.scale, cand, seed, tb);
+                bool clipped = false;
+                for (int i = 0; i < q.numSlots; ++i)
+                    clipped = clipped || q.slots[(size_t) i].brightness <= 0.001f || q.slots[(size_t) i].brightness >= 0.999f;
+                if (clipped)
+                    continue;
+                ++voiced;
+                const LoopStats sq = statsOf (q);
+                const double dUp = std::fabs (sq.upperMean - a.upperMean);
+                const double colourGap = a.brightness - sq.brightness;
+                const double net = al.brightness - sq.brightness;
+                if (dUp > 1.0 || colourGap < kGapLo || colourGap > kGapHi || std::fabs (net) > 0.03)
+                    continue;
+                const double score = dUp + std::fabs (net) * 10.0;
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    res.found = true;
+                    res.darkChords = cand;
+                    res.seed = seed;
+                    res.targetB = tb;
+                }
+            }
+    }
+    return res;
+}
+
+static int runMatched()
+{
+    std::vector<Spec> specs = {
+        { "C", 0, 0, "colour_small", { mk (0, ""), mk (7, ""), mk (9, "m"), mk (5, "") } },
+        { "C", 0, 0, "colour_small", { mk (9, "m"), mk (5, ""), mk (0, ""), mk (7, "") } },
+        { "C", 0, 0, "colour_small", { mk (0, ""), mk (5, ""), mk (2, "m"), mk (7, "") } },
+        { "Am", 9, 1, "colour_small", { mk (9, "m"), mk (5, ""), mk (7, ""), mk (4, "") } },
+        { "Am", 9, 1, "colour_small", { mk (9, "m"), mk (0, ""), mk (5, ""), mk (7, "") } },
+        { "Am", 9, 1, "colour_small", { mk (9, "m"), mk (4, "m"), mk (5, ""), mk (0, "") } },
+        { "C", 0, 0, "conflict", { mk (0, ""), mk (9, "m"), mk (5, ""), mk (7, "") } },
+        { "C", 0, 0, "conflict", { mk (5, ""), mk (7, ""), mk (0, ""), mk (9, "m") } },
+        { "Am", 9, 1, "conflict", { mk (9, "m"), mk (7, ""), mk (5, ""), mk (0, "") } },
+        { "Am", 9, 1, "conflict", { mk (9, "m"), mk (2, "m"), mk (0, ""), mk (7, "") } },
+    };
+    std::printf ("[\n");
+    for (size_t k = 0; k < specs.size(); ++k)
+    {
+        const Spec& sp = specs[k];
+        const size_t pairNo = 12 + k + 1;
+        Progression base = build (sp.tonic, sp.scale, sp.chords, 1, 0.5f);
+        Progression a, b;
+        std::vector<Chord> aChords, bChords;
+        const bool baseIsA = (k % 2 == 0);
+        std::string extra;
+        if (std::strcmp (sp.type, "colour_small") == 0)
+        {
+            ColourParams cp;
+            cp.minChanged = 2;
+            cp.prescreenGap = 0.05f;
+            cp.minGap = kGapLo;
+            cp.maxGap = kGapHi;
+            cp.brighter = (k % 2 == 0); // alternate whether the changed loop is brighter or darker
+            ColourResult cr = searchColour (sp, base, 4100u + (unsigned) k, cp);
+            if (! cr.found)
+            {
+                std::fprintf (stderr, "pair %zu: no small colour match\n", pairNo);
+                return 1;
+            }
+            Progression other = build (sp.tonic, sp.scale, cr.chords, cr.seed, cr.targetB);
+            a = baseIsA ? base : other;
+            b = baseIsA ? other : base;
+            aChords = baseIsA ? sp.chords : cr.chords;
+            bChords = baseIsA ? cr.chords : sp.chords;
+        }
+        else
+        {
+            Progression low = base;
+            if (! lowerUpper (low))
+            {
+                std::fprintf (stderr, "pair %zu: no lowering\n", pairNo);
+                return 1;
+            }
+            ConflictResult cf = searchConflict (sp, base, low, 7300u + (unsigned) k);
+            if (! cf.found)
+            {
+                std::fprintf (stderr, "pair %zu: no conflict match\n", pairNo);
+                return 1;
+            }
+            Progression dark = build (sp.tonic, sp.scale, cf.darkChords, cf.seed, cf.targetB);
+            // X = brighter chords, lowered register (base spec chords); Y = darker chords, original register.
+            a = baseIsA ? low : dark;
+            b = baseIsA ? dark : low;
+            aChords = baseIsA ? sp.chords : cf.darkChords;
+            bChords = baseIsA ? cf.darkChords : sp.chords;
+        }
+        const LoopStats sa = statsOf (a), sb = statsOf (b);
+        std::fprintf (stderr, "pair %02zu %-13s %-3s dUpper %+.2f dBright %+.4f\n", pairNo, sp.type, sp.key, sb.upperMean - sa.upperMean, sb.brightness - sa.brightness);
+        std::string labelA, labelB;
+        for (size_t i = 0; i < aChords.size(); ++i)
+            labelA += (i ? " " : "") + chordName (aChords[i]);
+        for (size_t i = 0; i < bChords.size(); ++i)
+            labelB += (i ? " " : "") + chordName (bChords[i]);
+        std::printf ("  {\"pair_id\": \"pair%02zu\", \"key\": \"%s\", \"type\": \"%s\", \"tonic\": %d, \"scale\": %d,\n", pairNo, sp.key, sp.type, sp.tonic, sp.scale);
+        printLoop (labelA.c_str(), a, aChords, "A", false);
+        printLoop (labelB.c_str(), b, bChords, "B", false);
+        std::printf ("    \"delta_upper\": %.4f, \"delta_brightness\": %.6f\n", sb.upperMean - sa.upperMean, sb.brightness - sa.brightness);
+        std::printf ("  }%s\n", k + 1 < specs.size() ? "," : "");
+    }
+    std::printf ("]\n");
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1 && std::strcmp (argv[1], "check") == 0)
         return runCheck();
+    if (argc > 1 && std::strcmp (argv[1], "matched") == 0)
+        return runMatched();
 
     const float kTargetB = 0.5f;
     std::vector<Spec> specs = {
