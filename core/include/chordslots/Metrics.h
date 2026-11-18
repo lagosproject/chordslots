@@ -320,12 +320,33 @@ inline float blendContextualTension (float staticTension, float strain, float mo
                     + ContextualTension::momentumWeight * clamp01 (momentum / ContextualTension::momentumCeiling));
 }
 
+/** How far the quality term of a major-third chord on the fifth degree of a
+    minor-third scale is pulled towards a minor triad's. 0 keeps the previous
+    behaviour. In a minor key the major V (the harmonic-minor dominant) is part
+    of the key's own harmony, not a borrowed bright chord, yet its major third
+    makes it read as bright and it loses to the dark targets of minor moods.
+    Off until validated (PLAN-GENERAL, H9 and R11). */
+inline constexpr float kMinorDominantContext = 0.0f;
+
+/** Quality term of Brightness, with the minor-key dominant context applied. */
+inline float contextQualityBrightness (Chord c, int tonic, int scaleIdx,
+                                       float context = kMinorDominantContext)
+{
+    const float q = qualityBrightness (c.type);
+    if (context <= 0.0f || ! scaleHasMinorThird (scaleIdx)
+        || mod12 (c.root - tonic) != 7 || ! hasMajorThird (c.type))
+        return q;
+    constexpr int kMinorTriad = 1; // chordTypes()[1] is "m", checked in core_tests
+    return q + clamp01 (context) * (qualityBrightness (kMinorTriad) - q);
+}
+
 /** Metrics for a chord with a neutral register (used while choosing chords,
     before a voicing exists). */
 inline ChordMetrics chordMetrics (Chord c, int tonic, int scaleIdx, float reg = 0.5f)
 {
     ChordMetrics m;
-    m.brightness = combineBrightness (qualityBrightness (c.type), modalBrightness (c, tonic, scaleIdx), reg);
+    m.brightness = combineBrightness (contextQualityBrightness (c, tonic, scaleIdx),
+                                      modalBrightness (c, tonic, scaleIdx), reg);
     m.tension = tensionOf (c, tonic, scaleIdx);
     return m;
 }

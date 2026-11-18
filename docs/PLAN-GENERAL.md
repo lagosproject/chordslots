@@ -112,6 +112,23 @@ Barrido sobre una copia de los encabezados con el motor de la auditoría, reprod
 
 El Pearson sube de forma monótona en los tres modelos, pero el aumento es de unos 0.02 con solo 11 progresiones y una cohorte. Los datos no permiten elegir el peso, y el aumento sin tope hasta 0.10 sugiere que se ajusta a estos estímulos. Por eso el valor por defecto sigue en 0. **Pendiente:** fijar el peso con un criterio razonado (separar G7 de Gmaj7 por una diferencia comparable a la de disonancia entre ambos, de 0.04 a 0.06) y validarlo con datos independientes antes de activarlo. El conjunto de Barratt-Fitzgerald et al. se examinó y no sirve para esto (ver la [base de investigación](BASE-DE-INVESTIGACION.md)): sus estímulos manipulan la preparación de la disonancia y las modulaciones, y no hay MIDI. Quedan como opciones una prueba de pares con oyentes sobre acordes aislados y en cadencias (G7 frente a Gmaj7, dim frente a m7b5) y la revisión de una persona con formación teórica. El cambio también mueve Bdim, Cdim y los moods, así que habrá que volver a ejecutar `eval`.
 
+### Avance de R11: contexto de Brillantez para la dominante en menor
+
+La rama `r2-tritone-term` añade `kMinorDominantContext` en `Metrics.h`, con valor 0, y `contextQualityBrightness`, que acerca el término de calidad de un acorde con tercera mayor sobre el grado 7 de una escala con tercera menor al de una tríada menor. Se usa en la selección de candidatos y en la Brillantez dibujada. Con 0 los valores no cambian y las cuatro pruebas de CTest del núcleo pasan. Con 1.0 cambian 84 de 3 840 valores de Brillantez, todos en raíz 7 con tercera mayor, y ninguno en Mayor, Lidio o Mixolidio. La Brillantez de V baja de 0.80 a 0.44 y la de V7 de 0.62 a 0.39.
+
+Proporción de V, V7 y V9 entre los acordes generados (300 semillas, 4 slots, Do, escala propia de cada mood):
+
+| Valor | Tense (armónico menor) | Epic | Uplifting | Melancholic | Dark | Hard |
+|---|---|---|---|---|---|---|
+| 0.00 | 0.1 % | 0.0 % | 0.0 % | 0.0 % | 0.0 % | 0.0 % |
+| 0.50 | 1.7 % | 0.2 % | 0.3 % | 0.0 % | 0.0 % | 0.0 % |
+| 0.75 | 5.2 % | 0.4 % | 0.1 % | 0.0 % | 0.0 % | 0.0 % |
+| 1.00 | 9.2 % | 0.9 % | 0.0 % | 0.1 % | 0.0 % | 0.0 % |
+
+Con los objetivos por defecto no hay ningún cambio a ningún valor. La referencia del corpus es cerca del 6.5 % de las transiciones. Tense con 0.75 llega a 5.2 % sin mover ♭VII ni la tónica más de un punto. **El cambio ayuda solo a Tense.** En las escalas con tercera menor natural (Epic, Uplifting, Melancholic, Hard) hay un segundo obstáculo: el tono sensible de V cuenta como nota fuera de escala y recibe la penalización de Adventure. En Epic, el último slot da a G un coste de 0.054 frente a 0.005 del mejor acorde, y el término de notas fuera de escala aporta unos 0.034. Las comparaciones acorde a acorde con la misma semilla no sirven para medir localidad: el muestreo es conjunto y un coste distinto cambia toda la secuencia.
+
+**Siguiente paso propuesto:** tratar el tono sensible (séptima elevada) como nota de la escala para acordes de función dominante en escalas con tercera menor, detrás de otra constante desactivada. Esto resuelve a la vez la incoherencia original de H5, porque V entra en el grupo de candidatos con Adventure bajo.
+
 ### Cómo validar sin depender de una sola persona
 
 Quien desarrolla el VST no es productor profesional y tampoco hace falta serlo para la mayor parte de las pruebas. Conviene separar dos preguntas:

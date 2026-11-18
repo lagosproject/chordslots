@@ -133,6 +133,26 @@ static void testMetricOrdering()
     CHECK (T (ch (7, "")) < T (ch (7, "7")));
     CHECK (T (ch (0, "")) < T (ch (11, "dim")));
 
+    // H9/R11: minor-key dominant context. Off by default and then identical to qualityBrightness.
+    CHECK (std::string (chordTypes()[1].suffix) == "m"); // contextQualityBrightness relies on this index
+    CHECK (kMinorDominantContext == 0.0f);
+    for (int type = 0; type < numChordTypes(); ++type)
+        for (int scale = 0; scale < numScales(); ++scale)
+            for (int root = 0; root < 12; ++root)
+                CHECK (contextQualityBrightness ({ root, type, 0 }, 0, scale) == qualityBrightness (type));
+    {
+        const Chord V = ch (7, ""), V7 = ch (7, "7"), iv = ch (5, "m"), bVII = ch (10, "");
+        const int minorScale = 1;
+        // Only major-third chords on degree 7 of a minor-third scale change, and only downwards.
+        CHECK (contextQualityBrightness (V, 0, minorScale, 1.0f) < qualityBrightness (V.type));
+        CHECK (contextQualityBrightness (V7, 0, minorScale, 1.0f) < qualityBrightness (V7.type));
+        CHECK (std::abs (contextQualityBrightness (V, 0, minorScale, 1.0f) - qualityBrightness (1)) < 1.0e-6f);
+        CHECK (contextQualityBrightness (V, 0, minorScale, 0.5f) > contextQualityBrightness (V, 0, minorScale, 1.0f));
+        CHECK (contextQualityBrightness (iv, 0, minorScale, 1.0f) == qualityBrightness (iv.type));
+        CHECK (contextQualityBrightness (bVII, 0, minorScale, 1.0f) == qualityBrightness (bVII.type));
+        CHECK (contextQualityBrightness (V, 0, 0, 1.0f) == qualityBrightness (V.type)); // major key untouched
+    }
+
     // R2: the tritone term is off by default and must not change any value then.
     CHECK (kTritoneWeight == 0.0f);
     for (int type = 0; type < numChordTypes(); ++type)
