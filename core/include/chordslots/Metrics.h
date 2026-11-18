@@ -245,14 +245,43 @@ inline float typeDissonance (int type)
     return 0.5f * rough + 0.5f * harmonicDissonance (type);
 }
 
-inline float tensionFromDissonance (Chord c, int tonic, int scaleIdx, float dissonance)
+/** Weight of the tritone-resolution term in Tension. Zero keeps the previous
+    behaviour. The audits in docs/audits suggest a small positive value, but it
+    stays off until it is validated on data not used to choose it (PLAN-GENERAL, R2). */
+inline constexpr float kTritoneWeight = 0.0f;
+
+/** True when the chord's own tones (intervals below one octave, so extensions
+    such as the #11 of maj7#11 are ignored) contain a tritone. These are the
+    chords with an inherent need to resolve: dominant sevenths, dim, m7b5, dim7. */
+inline bool hasChordTritone (int type)
+{
+    static const std::vector<bool> table = []
+    {
+        std::vector<bool> v;
+        for (const auto& t : chordTypes())
+        {
+            bool found = false;
+            for (size_t a = 0; a < t.iv.size(); ++a)
+                for (size_t b = a + 1; b < t.iv.size(); ++b)
+                    if (t.iv[a] < 12 && t.iv[b] < 12 && std::abs (t.iv[a] - t.iv[b]) == 6)
+                        found = true;
+            v.push_back (found);
+        }
+        return v;
+    }();
+    return table[(size_t) type];
+}
+
+inline float tensionFromDissonance (Chord c, int tonic, int scaleIdx, float dissonance,
+                                    float tritoneWeight = kTritoneWeight)
 {
     const float dist = norm01 ((float) tonalDistanceRaw (c, tonic, scaleIdx), Calibration::tonalLo, Calibration::tonalHi);
     const auto function = functionOf (c, tonic);
     const int degree = mod12 (c.root - tonic);
     const float pull = degree == 10 ? (scaleHasMinorThird (scaleIdx) ? 0.7f : 0.4f)
                                    : (function == Function::tonic ? 0.0f : (function == Function::subdominant ? 0.4f : 1.0f));
-    return clamp01 (0.45f * dissonance + 0.35f * dist + 0.20f * pull);
+    const float tritone = hasChordTritone (c.type) ? tritoneWeight : 0.0f;
+    return clamp01 (0.45f * dissonance + 0.35f * dist + 0.20f * pull + tritone);
 }
 
 /** Chord-symbol estimate for candidate pruning and the legacy listening score. */
@@ -291,12 +320,33 @@ inline float blendContextualTension (float staticTension, float strain, float mo
                     + ContextualTension::momentumWeight * clamp01 (momentum / ContextualTension::momentumCeiling));
 }
 
+/** How far the quality term of a major-third chord on the fifth degree of a
+    minor-third scale is pulled towards a minor triad's. 0 keeps the previous
+    behaviour. In a minor key the major V (the harmonic-minor dominant) is part
+    of the key's own harmony, not a borrowed bright chord, yet its major third
+    makes it read as bright and it loses to the dark targets of minor moods.
+    Off until validated (PLAN-GENERAL, H9 and R11). */
+inline constexpr float kMinorDominantContext = 0.0f;
+
+/** Quality term of Brightness, with the minor-key dominant context applied. */
+inline float contextQualityBrightness (Chord c, int tonic, int scaleIdx,
+                                       float context = kMinorDominantContext)
+{
+    const float q = qualityBrightness (c.type);
+    if (context <= 0.0f || ! scaleHasMinorThird (scaleIdx)
+        || mod12 (c.root - tonic) != 7 || ! hasMajorThird (c.type))
+        return q;
+    constexpr int kMinorTriad = 1; // chordTypes()[1] is "m", checked in core_tests
+    return q + clamp01 (context) * (qualityBrightness (kMinorTriad) - q);
+}
+
 /** Metrics for a chord with a neutral register (used while choosing chords,
     before a voicing exists). */
 inline ChordMetrics chordMetrics (Chord c, int tonic, int scaleIdx, float reg = 0.5f)
 {
     ChordMetrics m;
-    m.brightness = combineBrightness (qualityBrightness (c.type), modalBrightness (c, tonic, scaleIdx), reg);
+    m.brightness = combineBrightness (contextQualityBrightness (c, tonic, scaleIdx),
+                                      modalBrightness (c, tonic, scaleIdx), reg);
     m.tension = tensionOf (c, tonic, scaleIdx);
     return m;
 }

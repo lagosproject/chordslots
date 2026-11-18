@@ -55,11 +55,12 @@ Una lectura de `Theory.h`, `Metrics.h`, `SpiralTension.h`, `Generator.h` y `Corp
 | **H5** | **El grupo de candidatos y el prior se contradicen en menor.** Con Adventure bajo, el V mayor no entra en la escala Minor: el grupo admite 0 notas fuera de escala por debajo de 0.2 y la escala Minor es el eólico natural. El prior, en cambio, puntúa V→i. En el clúster menor, V y V7 suman cerca del 6.5 % de las transiciones, resuelven a la tónica el 65 % y el 85 % de las veces, y aparecen al menos una vez en 94 de las 173 canciones (54 %). | En La menor con Adventure 0.1: 66 candidatos, con Em y sin E ni E7. A 0.3 aparecen ambos. Recuento de R5 sobre 17 589 transiciones: V 3.67 %, V7 2.84 %, v 4.27 %, ♭VII 13.71 %. Recuento por canción de R5b: V en 58, V7 en 58, cualquiera de los dos en 94, ♭VII en 114 y v en 64. La mediana de V o V7 es el 10 % de los acordes de esas canciones. | de Clercq y Temperley (2011), base del corpus RS200, tratan la armonía del rock como práctica propia y no como extensión de la clásica. Que falte V puede ser coherente con el estilo PopRock y no serlo con jazz, clásico o un mood como Epic. Vuvan y Hughes (2019) muestran que la expectativa de V–I frente a ♭VII–I depende del estilo. **Pendiente:** el recuento de R5 es por transiciones, no por canciones. Falta saber cuántas canciones en menor usan V o V7. |
 | **H6** | **El prior de transiciones es grueso y de un género.** Agrupa los acordes en 5 clases, así que Imaj7→IV y I→IV comparten estadística. El clúster "SoulRnb" se define por "≥30 % de acordes extendidos". Los datos son pop y rock de 1958–1991 y el producto apunta a productores (808, Hard, Dreamy). Minor tiene 173 anotaciones. La medición de R6 confirma que la agrupación oculta diferencias reales (ver resultados). | `QualityClass` (5 valores) y `tools/build_corpus.py`. | Eitel et al. (2024) modelan secuencias con PPM sobre símbolos más ricos. de Clercq y Temperley (2011) acotan el corpus al rock. Chordonomicon, ya listado en la base, cubre más géneros. Revisar procedencia y calidad antes de usarlo. |
 | **H7** | **El contextual está activo por defecto sin evidencia.** `kUseContextualTension = true` se usa en 13 puntos de `Generator.h`: curvas de Epic y Hard, costes de selección y alternativas, `slot.tension`, puntuación de ajuste y refresco al dividir o quitar slots. Un bloque de `core_tests.cpp` se omite si la constante es falsa. El comentario del código pide cambiarla solo tras la escucha ciega, y la auditoría no mostró ventaja. | `Metrics.h` y `Generator.h`, definición de `moods()`. | Es la pregunta de la tarea 2. La constante y las curvas deberían decidirse juntas. |
-| **H8** | **Convención implícita en los predicados de intervalos, sin fallos hoy.** Las extensiones superiores a 12 se ignoran (`hasMajorThird` busca 4, no 16). Con el vocabulario actual no hay discrepancias en 32 tipos. Solo maj7#11 y quartal cambiarían de clasificación si se redujera módulo 12. Quartal se etiqueta como sus por tener cuarta y no tercera. Faltan dominantes alterados (7#5, 7b13, 7#11). | `Theory.h`. Comprobado con un verificador independiente. Conviene una prueba antes de añadir tipos nuevos. | Es una cuestión de ingeniería, sin fuente. |
+| **H8** | **Convención implícita en los predicados de intervalos, sin fallos hoy.** Las extensiones superiores a 12 se ignoran (`hasMajorThird` busca 4, no 16). Con el vocabulario actual no hay discrepancias en 32 tipos. Solo maj7#11 y quartal cambiarían de clasificación si se redujera módulo 12. Quartal se etiqueta como sus por tener cuarta y no tercera. Faltan dominantes alterados (7#5, 7b13, 7#11). | `Theory.h`. Comprobado con un verificador independiente. Conviene una prueba antes de añadir tipos nuevos. |
+| **H9** | **El generador casi nunca produce una dominante en tonalidades menores, ni siquiera cuando es diatónica.** El prior del corpus pesa entre 0.005 y 0.016 por transición, mientras que alejarse de los objetivos de Brillantez y Tensión cuesta del orden de 0.2. Un V mayor es "brillante" por su calidad, de modo que choca con los moods menores y oscuros. El usuario solo obtiene V o V7 si sube a la vez Brillantez y Tensión del último slot y Adventure ≥ 0.3. | Sonda sobre 300 semillas y 4 slots en Do menor. Con los objetivos por defecto, V/V7/V9 son el 0 % de los acordes en todas las Adventure de 0.1 a 0.7. Mood Tense (armónico menor, V diatónico): 0.1 %. Uplifting, Epic, Melancholic, Dark y Hard: 0 %. El corpus tiene V o V7 en el 54 % de las canciones menores y en cerca del 6.5 % de las transiciones. Con el último slot en Brillantez 0.7 y Tensión 0.8, aparece en el 13 % (Adventure 0.3) y el 28 % (0.6), y domina ♭VII. G tiene coste unario 0.204 frente a 0.009 del mejor acorde. | Es una cuestión de ingeniería, sin fuente. |
 
 ### Tareas propuestas
 
-No alteran el orden de las tareas 1–5. R2 y R4 amplían las tareas 2 y 5 con los mismos informes y protocolos. El orden sugerido es R1, R3, R5, R2/R4, R6, R7 y R8.
+No alteran el orden de las tareas 1–5. R2 y R4 amplían las tareas 2 y 5 con los mismos informes y protocolos. El orden sugerido es R1, R3, R5, R2/R4, R6, R7 y R8. R10 depende de listeners y se agrupa con la tarea 5.
 
 | Id | Tarea | Se da por hecha cuando… |
 |---|---|---|
@@ -72,6 +73,8 @@ No alteran el orden de las tareas 1–5. R2 y R4 amplían las tareas 2 y 5 con l
 | **R7** | **Panel ciego de jueces.** Varias personas, incluida al menos una con formación teórica, valoran a ciegas progresiones de ChordSlots, progresiones aleatorias y progresiones reales del corpus. | Hay una tabla con acuerdo entre jueces y una conclusión sobre qué condiciones se distinguen. |
 | **R8** | **Valor por defecto del contextual (H7).** Fijar `kUseContextualTension` y las curvas de Epic y Hard según el resultado de la tarea 2. | La constante y las curvas se cambian juntas en un solo diff con el informe enlazado. |
 | **R9** | **Informes de auditoría dentro del repositorio.** Hecha en `e39b0ca`: los informes, scripts y tablas están en [docs/audits](audits/README.md). Las cifras citadas en este plan (11 progresiones, 63 posiciones, 195 de 240, 288 casos) se comprobaron en los informes. Los informes examinaron el commit `7dc1ef0`. El núcleo (`core/`) no ha cambiado desde entonces. | Hecha. Los scripts de Windows (`.cmd`, `.ps1`) no se han probado en Linux. |
+| **R10** | **Prueba de pares para el término de tritono (necesita oyentes).** Acordes aislados y cadencias cortas con el mismo instrumento, tempo y registro: G7 frente a Gmaj7, dim frente a m7b5, V7 frente a IV, V7 frente a V. Preguntas: cuál suena más tenso, cuál pide resolver, y sin diferencia o no sé. Se agrupa con la sesión de la tarea 5 para reclutar una sola vez, y admite oyentes que no son productores. | Hay respuestas por persona y par, y un peso de `kTritoneWeight` elegido a partir de ellas (probablemente entre 0.04 y 0.06) o la decisión de dejarlo en 0. Los estímulos y la hoja de respuestas se pueden preparar antes de reclutar. |
+| **R11** | **Dominante en menor (H9).** Probar dos opciones detrás de constantes con valor por defecto que no cambie nada: (a) Brillantez que tenga en cuenta el contexto para acordes de función dominante en tonalidades menores; (b) un término de cadencia que favorezca la dominante antes de la vuelta del loop. Medir la proporción de V/V7 generada frente al corpus y la sensibilidad a los objetivos. | Hay una tabla con la proporción de V-familia por mood y Adventure frente al 6.5 % del corpus, y el efecto en las aserciones de R1 y R1b y en `eval`. Decisión documentada sobre si el producto debe ofrecer cadencias por defecto o solo bajo petición. |
 
 ### Resultados preliminares de R1, R3, R4 y R5
 
@@ -93,6 +96,49 @@ Cuatro análisis de solo lectura se ejecutaron el 18 de noviembre de 2026 con sc
 | **R6** | Sobre 1 090 canciones y 99 389 transiciones, el 34.6 % de las transiciones implica un acorde de séptima o extendido (el 39.6 % en Billboard y el 12.1 % en RS200). Al separar triada y familia de séptima, 9 de las 10 fuentes más frecuentes superan 0.1 bits de divergencia Jensen-Shannon (entre 0.08 y 0.33) frente a un suelo de ruido de 0.003 a 0.04. Las más altas son V mayor (0.325), ♭III mayor (0.275) y ♭VII mayor (0.235). | El suelo de ruido supone muestreo independiente entre transiciones. Las canciones se agrupan por estilo, así que el ruido real es mayor. Repetir con remuestreo por canción antes de decidir. |
 | **H7** | Lista de los 13 puntos y de los efectos en pruebas (ver H7). La lectura es estática: no se invirtió la constante ni se ejecutó `eval`, así que se desconoce cuánto se mueven las líneas base. | Medir el efecto en `eval` de Epic y Hard antes de R8. |
 | **H8** | Sin discrepancias en 32 tipos (ver H8). | Prueba que falle si se añade un tipo cuya clasificación depende de la convención. |
+
+### Avance de R2: término de tritono
+
+La rama `r2-tritone-term` añade `kTritoneWeight` en `Metrics.h`, con valor 0, y `hasChordTritone`, que marca los acordes con un tritono entre sus notas propias (séptimas de dominante, dim, m7b5, dim7; no cuenta el ♯11 de maj7#11). Con peso 0 los valores no cambian: las cuatro pruebas de CTest del núcleo, incluida `eval`, pasan.
+
+Barrido sobre una copia de los encabezados con el motor de la auditoría, reproducido en Linux con las mismas tablas publicadas (11 progresiones, Pearson medio con la región estable):
+
+| Peso | G7 frente a Gmaj7 | Estático con voicing | Contextual |
+|---|---|---|---|
+| 0.00 | 0.743 frente a 0.760 | 0.686 | 0.665 |
+| 0.04 | 0.783 frente a 0.760 | 0.696 | 0.676 |
+| 0.06 | 0.803 frente a 0.760 | 0.699 | 0.681 |
+| 0.10 | 0.843 frente a 0.760 | 0.704 | 0.687 |
+
+El Pearson sube de forma monótona en los tres modelos, pero el aumento es de unos 0.02 con solo 11 progresiones y una cohorte. Los datos no permiten elegir el peso, y el aumento sin tope hasta 0.10 sugiere que se ajusta a estos estímulos. Por eso el valor por defecto sigue en 0. **Pendiente:** fijar el peso con un criterio razonado (separar G7 de Gmaj7 por una diferencia comparable a la de disonancia entre ambos, de 0.04 a 0.06) y validarlo con datos independientes antes de activarlo. El conjunto de Barratt-Fitzgerald et al. se examinó y no sirve para esto (ver la [base de investigación](BASE-DE-INVESTIGACION.md)): sus estímulos manipulan la preparación de la disonancia y las modulaciones, y no hay MIDI. Quedan como opciones una prueba de pares con oyentes sobre acordes aislados y en cadencias (G7 frente a Gmaj7, dim frente a m7b5) y la revisión de una persona con formación teórica. El cambio también mueve Bdim, Cdim y los moods, así que habrá que volver a ejecutar `eval`.
+
+### Avance de R11: contexto de Brillantez para la dominante en menor
+
+La rama `r2-tritone-term` añade `kMinorDominantContext` en `Metrics.h`, con valor 0, y `contextQualityBrightness`, que acerca el término de calidad de un acorde con tercera mayor sobre el grado 7 de una escala con tercera menor al de una tríada menor. Se usa en la selección de candidatos y en la Brillantez dibujada. Con 0 los valores no cambian y las cuatro pruebas de CTest del núcleo pasan. Con 1.0 cambian 84 de 3 840 valores de Brillantez, todos en raíz 7 con tercera mayor, y ninguno en Mayor, Lidio o Mixolidio. La Brillantez de V baja de 0.80 a 0.44 y la de V7 de 0.62 a 0.39.
+
+Proporción de V, V7 y V9 entre los acordes generados (300 semillas, 4 slots, Do, escala propia de cada mood):
+
+| Valor | Tense (armónico menor) | Epic | Uplifting | Melancholic | Dark | Hard |
+|---|---|---|---|---|---|---|
+| 0.00 | 0.1 % | 0.0 % | 0.0 % | 0.0 % | 0.0 % | 0.0 % |
+| 0.50 | 1.7 % | 0.2 % | 0.3 % | 0.0 % | 0.0 % | 0.0 % |
+| 0.75 | 5.2 % | 0.4 % | 0.1 % | 0.0 % | 0.0 % | 0.0 % |
+| 1.00 | 9.2 % | 0.9 % | 0.0 % | 0.1 % | 0.0 % | 0.0 % |
+
+Con los objetivos por defecto no hay ningún cambio a ningún valor. La referencia del corpus es cerca del 6.5 % de las transiciones. Tense con 0.75 llega a 5.2 % sin mover ♭VII ni la tónica más de un punto. **El cambio ayuda solo a Tense.** En las escalas con tercera menor natural (Epic, Uplifting, Melancholic, Hard) hay un segundo obstáculo: el tono sensible de V cuenta como nota fuera de escala y recibe la penalización de Adventure. En Epic, el último slot da a G un coste de 0.054 frente a 0.005 del mejor acorde, y el término de notas fuera de escala aporta unos 0.034. Las comparaciones acorde a acorde con la misma semilla no sirven para medir localidad: el muestreo es conjunto y un coste distinto cambia toda la secuencia.
+
+**Opción (c): tono sensible como nota de la escala.** `kMinorLeadingToneInScale` en `Theory.h`, desactivada, hace que la tercera mayor de un acorde V-familia no cuente como nota fuera de escala en las escalas con tercera menor. Con ella activada, V y V7 entran en el grupo de candidatos con Adventure 0.1 y 0.15 (72 candidatos en lugar de 66), lo que resuelve la incoherencia original de H5. Una prueba comprueba que no cambia ningún otro acorde ni las escalas mayores.
+
+Proporción de V, V7 y V9 con el tono sensible activado (300 semillas, escala propia de cada mood; ref. del corpus: cerca del 6.5 %):
+
+| Contexto de Brillantez | Tense | Epic | Uplifting | Melancholic | Dark | Hard |
+|---|---|---|---|---|---|---|
+| 0.00 | 0.1 % | 0.8 % | 0.8 % | 0.0 % | 0.0 % | 0.2 % |
+| 0.50 | 1.7 % | 3.2 % | 6.9 % | 0.0 % | 0.0 % | 6.2 % |
+| 0.75 | 5.2 % | 5.0 % | 4.0 % | 0.0 % | 0.0 % | 16.4 % |
+| 1.00 | 9.2 % | 9.2 % | 0.5 % | 0.8 % | 0.0 % | 18.7 % |
+
+La proporción de tónica se mantiene a menos de un punto de la base en Tense, Epic y Uplifting en todos los valores salvo uno. Ningún ajuste sirve a todos los moods: **0.5** acerca Uplifting, Epic y Hard al corpus y deja Tense bajo; **0.75** pone Tense, Epic y Uplifting en la banda, pero lleva Hard al 16 %. Melancholic y Dark no cambian. Con los objetivos por defecto no hay efecto, y con el tono sensible activado y el contexto en 1.0, el último slot con objetivos altos produce V en más del 90 % de los casos, que es excesivo. **Estado:** las dos constantes siguen desactivadas. Activarlas mueve las líneas base de `eval` y los resultados de varios moods, y el 6.5 % es una referencia global del corpus, no un objetivo por mood. Antes de activar (tono sensible activado y contexto cerca de 0.5) conviene que una persona con formación teórica escuche progresiones con y sin el cambio, dentro de la sesión de R10.
 
 ### Cómo validar sin depender de una sola persona
 

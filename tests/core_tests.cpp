@@ -133,6 +133,80 @@ static void testMetricOrdering()
     CHECK (T (ch (7, "")) < T (ch (7, "7")));
     CHECK (T (ch (0, "")) < T (ch (11, "dim")));
 
+    // H9/R11: leading tone as part of the minor scale for V-family chords. Off by default.
+    CHECK (! kMinorLeadingToneInScale);
+    {
+        const int minorScale = 1;
+        for (int scale = 0; scale < numScales(); ++scale)
+            for (int root = 0; root < 12; ++root)
+                for (int type = 0; type < numChordTypes(); ++type)
+                {
+                    const Chord c { root, type, 0 };
+                    const int off = tonesOutsideScale (c, 0, scale, false);
+                    const int on = tonesOutsideScale (c, 0, scale, true);
+                    CHECK (tonesOutsideScale (c, 0, scale) == off); // default is off
+                    const bool target = scaleHasMinorThird (scale) && root == 7 && hasMajorThird (type);
+                    if (target)
+                        CHECK (on <= off && on >= off - 1);
+                    else
+                        CHECK (on == off); // nothing else changes
+                }
+        // In C minor, V and V7 stop counting as outside the scale; vii dim and Dm are untouched.
+        CHECK (tonesOutsideScale (ch (7, ""), 0, minorScale, false) == 1);
+        CHECK (tonesOutsideScale (ch (7, ""), 0, minorScale, true) == 0);
+        CHECK (tonesOutsideScale (ch (7, "7"), 0, minorScale, true) == 0);
+        CHECK (tonesOutsideScale (ch (11, "dim"), 0, minorScale, true) == tonesOutsideScale (ch (11, "dim"), 0, minorScale, false));
+        CHECK (tonesOutsideScale (ch (7, ""), 0, 0, true) == 0); // major key unchanged
+    }
+
+    // H9/R11: minor-key dominant context. Off by default and then identical to qualityBrightness.
+    CHECK (std::string (chordTypes()[1].suffix) == "m"); // contextQualityBrightness relies on this index
+    CHECK (kMinorDominantContext == 0.0f);
+    for (int type = 0; type < numChordTypes(); ++type)
+        for (int scale = 0; scale < numScales(); ++scale)
+            for (int root = 0; root < 12; ++root)
+                CHECK (contextQualityBrightness ({ root, type, 0 }, 0, scale) == qualityBrightness (type));
+    {
+        const Chord V = ch (7, ""), V7 = ch (7, "7"), iv = ch (5, "m"), bVII = ch (10, "");
+        const int minorScale = 1;
+        // Only major-third chords on degree 7 of a minor-third scale change, and only downwards.
+        CHECK (contextQualityBrightness (V, 0, minorScale, 1.0f) < qualityBrightness (V.type));
+        CHECK (contextQualityBrightness (V7, 0, minorScale, 1.0f) < qualityBrightness (V7.type));
+        CHECK (std::abs (contextQualityBrightness (V, 0, minorScale, 1.0f) - qualityBrightness (1)) < 1.0e-6f);
+        CHECK (contextQualityBrightness (V, 0, minorScale, 0.5f) > contextQualityBrightness (V, 0, minorScale, 1.0f));
+        CHECK (contextQualityBrightness (iv, 0, minorScale, 1.0f) == qualityBrightness (iv.type));
+        CHECK (contextQualityBrightness (bVII, 0, minorScale, 1.0f) == qualityBrightness (bVII.type));
+        CHECK (contextQualityBrightness (V, 0, 0, 1.0f) == qualityBrightness (V.type)); // major key untouched
+    }
+
+    // R2: the tritone term is off by default and must not change any value then.
+    CHECK (kTritoneWeight == 0.0f);
+    for (int type = 0; type < numChordTypes(); ++type)
+    {
+        const Chord c { 7, type };
+        CHECK (tensionFromDissonance (c, C, major, typeDissonance (type))
+               == tensionFromDissonance (c, C, major, typeDissonance (type), 0.0f));
+    }
+    // Which chords carry a tritone among their own tones.
+    CHECK (hasChordTritone (ch (7, "7").type) && hasChordTritone (ch (7, "dim").type));
+    CHECK (hasChordTritone (ch (7, "m7b5").type) && hasChordTritone (ch (7, "dim7").type));
+    CHECK (hasChordTritone (ch (7, "9").type) && hasChordTritone (ch (7, "13").type));
+    CHECK (! hasChordTritone (ch (7, "").type) && ! hasChordTritone (ch (7, "maj7").type));
+    CHECK (! hasChordTritone (ch (7, "m7").type) && ! hasChordTritone (ch (7, "7sus4").type));
+    CHECK (! hasChordTritone (ch (7, "maj7#11").type)); // the #11 is an extension
+    // With a small positive weight a dominant seventh is more tense than the
+    // major seventh on the same root, as in a standard harmony text (resolution of the tritone).
+    {
+        const float w = 0.05f;
+        const auto tens = [&] (const char* sfx)
+        {
+            const Chord c = ch (7, sfx);
+            return tensionFromDissonance (c, C, major, typeDissonance (c.type), w);
+        };
+        CHECK (tens ("7") > tens ("maj7"));
+        CHECK (tens ("dim") > tensionFromDissonance (ch (7, "dim"), C, major, typeDissonance (ch (7, "dim").type), 0.0f));
+    }
+
     // P1.3: bVII tension functional weight depends on the scale's third
     // Major scale (C major, scale 0): degree 10 (Bb) has subdominant functional weight 0.4
     const Chord cbVII_c = ch (10, ""); // Bb in C

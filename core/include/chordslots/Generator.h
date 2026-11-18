@@ -974,7 +974,7 @@ inline void updateActualsLocal (Progression& p, int i)
         if (s.voicing.notes[(size_t) j] >= kUpperFloor)
             upper[n++] = s.voicing.notes[(size_t) j];
 
-    s.brightness = combineBrightness (qualityBrightness (s.chord.type),
+    s.brightness = combineBrightness (contextQualityBrightness (s.chord, p.tonic, p.scale),
                                       modalBrightness (s.chord, p.tonic, p.scale),
                                       registerBrightness (upper, n));
     s.tension = kUseContextualTension ? measuredContextualTension (p, i)
