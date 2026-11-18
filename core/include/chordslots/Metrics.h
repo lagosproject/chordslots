@@ -222,11 +222,27 @@ struct ChordMetrics
     float tension = 0.5f;
 };
 
+/** Soft end of the Brightness dial. 0 keeps the hard clamp, which pins dim, m7b5
+    (low end) and aug, maj7#11 (high end) to exactly 0 or 1 for most roots and
+    scales (R4, H3). A value above 0 replaces the clamp by a bounded tanh curve
+    with the same ends, so those chords keep a distinct value. About 0.8 is a
+    gentle setting (slope 0.87 at the middle). Off until validated (GENERAL-PLAN, R4). */
+inline constexpr float kBrightnessSoftClip = 0.0f;
+
+inline float softClip01 (float x, float k)
+{
+    if (k <= 0.0f)
+        return clamp01 (x);
+    const float y = 0.5f + 0.5f * std::tanh (k * (2.0f * x - 1.0f)) / std::tanh (2.0f * k);
+    return clamp01 (y); // x beyond [-0.5, 1.5] cannot occur with the current weights
+}
+
 /** Brightness from its three ingredients. */
 inline float combineBrightness (float quality, float modal, float reg)
 {
     const float raw = 0.55f * quality + 0.25f * modal + 0.20f * reg;
-    return clamp01 ((raw - Calibration::brightLo) / (Calibration::brightHi - Calibration::brightLo));
+    return softClip01 ((raw - Calibration::brightLo) / (Calibration::brightHi - Calibration::brightLo),
+                       kBrightnessSoftClip);
 }
 
 inline float norm01 (float x, float lo, float hi) { return clamp01 ((x - lo) / (hi - lo)); }

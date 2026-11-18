@@ -224,6 +224,22 @@ static void testMetricOrdering()
                 CHECK (contextQualityBrightness (ch (10, ""), 0, sc, 0.0f, 1.0f) == qualityBrightness (ch (10, "").type));
     }
 
+    // R4: soft end of the Brightness dial is off by default and then equals the old hard clamp.
+    CHECK (kBrightnessSoftClip == 0.0f);
+    for (float x : { -0.4f, -0.1f, 0.0f, 0.3f, 0.5f, 1.0f, 1.2f })
+        CHECK (softClip01 (x, 0.0f) == clamp01 (x));
+    for (float k : { 0.4f, 0.8f, 1.2f })
+    {
+        CHECK (std::abs (softClip01 (0.5f, k) - 0.5f) < 1.0e-6f);
+        float prev = -1.0f;
+        for (float x = -0.4f; x <= 1.4f; x += 0.05f)
+        {
+            const float y = softClip01 (x, k);
+            CHECK (y > prev && y > 0.0f && y < 1.0f); // strictly increasing, no saturation inside the real range
+            prev = y;
+        }
+    }
+
     // Per-mood strength of that context: off by default, so every progression gets the global value.
     CHECK (! kMoodDiatonicContext);
     for (int mood = -1; mood < (int) moods().size(); ++mood)

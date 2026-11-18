@@ -1,0 +1,18 @@
+== softclip 0.0
+Euphoric    sat-types   0.0%  tonic  29.1%  |B-target| 0.059
+Uplifting   sat-types   0.0%  tonic  26.2%  |B-target| 0.062
+Epic        sat-types   0.0%  tonic  25.2%  |B-target| 0.054
+Melancholic sat-types   0.0%  tonic  26.9%  |B-target| 0.051
+Dark        sat-types   4.3%  tonic  25.7%  |B-target| 0.086
+Tense       sat-types   0.9%  tonic  13.2%  |B-target| 0.060
+Dreamy      sat-types   2.8%  tonic  38.7%  |B-target| 0.055
+Hard        sat-types   0.0%  tonic  25.2%  |B-target| 0.071
+== softclip 0.8
+Euphoric    sat-types   0.2%  tonic  31.8%  |B-target| 0.046
+Uplifting   sat-types   0.0%  tonic  25.8%  |B-target| 0.049
+Epic        sat-types   0.0%  tonic  25.1%  |B-target| 0.049
+Melancholic sat-types   0.0%  tonic  26.0%  |B-target| 0.040
+Dark        sat-types  17.1%  tonic  25.5%  |B-target| 0.085
+Tense       sat-types   9.0%  tonic  13.3%  |B-target| 0.058
+Dreamy      sat-types  10.9%  tonic  40.9%  |B-target| 0.053
+Hard        sat-types   0.4%  tonic  25.1%  |B-target| 0.088

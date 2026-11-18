@@ -1,0 +1,8 @@
+k=0.0  n=3840  raw range [-0.19,1.14]  y<=0.001: 4.9%  y>=0.999: 3.1%  distinct(3dp)=244
+   dim        at0  85% at1   0%
+   aug        at0   0% at1  85%
+   m7b5       at0  68% at1   0%
+   maj7#11    at0   0% at1  15%
+k=0.4  n=3840  raw range [-0.19,1.14]  y<=0.001: 0.0%  y>=0.999: 0.0%  distinct(3dp)=229
+k=0.8  n=3840  raw range [-0.19,1.14]  y<=0.001: 0.0%  y>=0.999: 0.0%  distinct(3dp)=250
+k=1.2  n=3840  raw range [-0.19,1.14]  y<=0.001: 0.0%  y>=0.999: 0.0%  distinct(3dp)=265
