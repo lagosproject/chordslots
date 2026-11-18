@@ -1,10 +1,9 @@
 # ChordSlots — Handoff (2026-11-16)
 
-This document lets another agent (Codex, Claude, a human) continue `IMPLEMENTATION_PLAN.md`
-without the previous session. Read this first, then `IMPLEMENTATION_PLAN.md`, then the
-prompt for the phase you are about to run in `docs/phase-prompts/`.
+This handoff records build notes, corpus setup and implementation decisions from the v0.2 cycle.
+See [the general plan](PLAN-GENERAL.md) for current work and [the original plan](../IMPLEMENTATION_PLAN.md) for historical scope.
 
-## 1. Where things stand
+## 1. Status at the original handoff
 
 | Phase | Status | Notes |
 |---|---|---|
@@ -18,7 +17,6 @@ prompt for the phase you are about to run in `docs/phase-prompts/`.
 | P7 Producer features | ⏳ in progress | `phase/p7` builds on local P6. P7.1 adds melody harmonization. Next is P7.2 bass patterns. |
 | P8 Formats & CI | ⏳ ready | `docs/phase-prompts/P8.md`; **needs a Mac + Logic for the AU MIDI FX check**; GitHub CI is outward-facing, so confirm with the user before enabling it |
 
-(If the table says P3 is merged but `git log` disagrees, trust `git log`.)
 
 ## 2. How the work was done (keep doing it this way)
 

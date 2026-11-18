@@ -91,12 +91,15 @@ void LanesView::paint (juce::Graphics& g)
 
 juce::String LanesView::getTooltip()
 {
-    static const char* const targets[] = { "a brighter chord", "more harmonic tension", "stronger note velocity" };
+    static const char* const help[] = {
+        "Guide chord choice and voicing register when regenerating a slot.",
+        "Guide slot regeneration toward a target level of harmonic tension in context.",
+        "Adjust MIDI velocity and voicing density while keeping the chords. Doublings depend on the voicing style and notes."
+    };
     const auto pos = getMouseXYRelative().toFloat();
     for (int lane = 0; lane < 3; ++lane)
         if (laneBounds (lane).contains (pos))
-            return juce::String ("Click or drag higher to aim for ") + targets[lane]
-                 + ". The white marker shows the current value.";
+            return juce::String (help[lane]) + " The white marker shows the current value.";
 
     return "Drop a MIDI file here to extract target curves from it.";
 }
@@ -151,8 +154,8 @@ void LanesView::mouseUp (const juce::MouseEvent&)
     const unsigned mask = editedMask;
     const bool energy = dragLane == 2;
     dragLane = -1;
-    // Releasing the mouse makes the edited slots follow their new targets;
-    // everything else stays exactly as it was.
+    // Brightness and Tension regenerate by the edited-slot mask.
+    // Energy reapplies voicing and velocity targets to all voiced, unlocked slots.
     processor.edit ([mask, energy] (cs::Progression& p, cs::Rng& rng)
     {
         if (energy)

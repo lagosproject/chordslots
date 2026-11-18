@@ -10,7 +10,7 @@ ChordSlots is a JUCE instrument plugin with an optional CLAP build. Its preview 
 
 ## What it does
 
-- **Draw a progression by feel.** Edit up to 16 slots over as many as 8 bars. Move or add cuts, set each slot's Brightness, Tension, and Energy targets, and compare those targets with the chord's measured values. The overall Fit appears as Match.
+- **Draw a progression by feel.** Edit up to 16 slots over as many as 8 bars. Move or add cuts and set each slot's Brightness, Tension, and Energy targets. Match averages the per-slot scores based on the differences between measured and target Brightness and Tension.
 - **Shape harmony.** Choose key, scale, mood, Chord Transitions, and voicing. Each mood supplies initial target curves. Rolls select chords to match those curves. Adventure controls how far the candidate pool reaches beyond diatonic chords. The sampler accounts for transitions around the loop, while Variety sets its sampling temperature.
 - **Edit and keep good ideas.** Lock a slot or layer before rolling again. Choose chord alternatives, undo edits, and keep four independent variations (A–D). Switch immediately, on the next slot, or on the next bar.
 - **Harmonize a melody.** Import a MIDI melody and set Melody Fit to make sustained notes and stronger beats influence chord selection. Set Melody Fit to zero to ignore the imported melody.
@@ -28,9 +28,9 @@ Metrics are computed from the generated notes and their interval properties.
 
 | Target | What is measured |
 | --- | --- |
-| **Brightness** | Chord-tone position on the line of fifths, colour relative to the key, and voicing register. |
-| **Tension** | Sensory roughness, harmonic consonance and distance from the tonic, with a small functional term for dominant chords. |
-| **Energy** | A performance property measured from MIDI velocity and voicing density, including bass and doublings. |
+| **Brightness** | Chord quality, colour relative to the key and upper-voice register. The target guides chord choice and voicing register when a slot regenerates. |
+| **Tension** | Harmonic tension in context, combining the voiced chord's local tension, distance from the key and movement from the previous chord, including across the loop boundary. The target guides slot regeneration. |
+| **Energy** | MIDI velocity and voicing density, including bass and doublings. Editing Energy reapplies the targets to voiced, unlocked slots while keeping their chords. Doublings depend on the target, voicing style and available register. |
 
 The search scores candidate chords against slot targets and progression transitions. It then samples a progression before assigning voicings. The prior combines key-relative transitions from 890 McGill Billboard annotations and 200 RS200 songs. The major, minor, and extended-harmony groups contain 917, 173, and 377 annotations. The extended group includes songs in either mode with at least 30% extended chords. Sparse rows use interpolated unigram backoff. Adventure adjusts the prior's influence.
 

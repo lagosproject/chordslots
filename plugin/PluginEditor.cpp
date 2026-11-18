@@ -364,7 +364,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 
     // Fit score badge
     fitCaption.setText ("MATCH", juce::dontSendNotification);
-    fitCaption.setTooltip ("How closely the current progression matches your target curves.");
+    fitCaption.setTooltip ("How closely the generated slots match their Brightness and Tension targets.");
     fitLabel.setTooltip (fitCaption.getTooltip());
     fitCaption.setFont (ui::font (9.0f, true));
     fitCaption.setColour (juce::Label::textColourId, ui::textDim);
@@ -452,7 +452,9 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     };
 
     setupCombo (moodBox, moodLabel, "MOOD PRESET",
-              "Load a set of target curves and harmony settings, then generate a progression.");
+              "Open the menu to see what each preset applies before choosing it.");
+    moodBox.setTextWhenNothingSelected ("Custom");
+    moodBox.getRootMenu()->addSectionHeader ("All presets replace Brightness, Tension and Energy target curves");
     const auto& m = cs::moods();
     for (int i = 0; i < (int) m.size(); ++i)
         moodBox.addItem (m[(size_t) i].name, i + 1);
@@ -1156,6 +1158,22 @@ void ChordSlotsEditor::refresh()
     snapBox.setSelectedId (p.snap, juce::dontSendNotification);
     moodBox.setSelectedId (p.mood + 1, juce::dontSendNotification);
     styleBox.setSelectedId (p.style == -1 ? 1 : p.style + 2, juce::dontSendNotification);
+    cs::Progression preset;
+    preset.style = p.style;
+    for (juce::PopupMenu::MenuItemIterator it (*moodBox.getRootMenu()); it.next();)
+    {
+        auto& item = it.getItem();
+        if (item.itemID == 0)
+            continue;
+
+        cs::applyMood (preset, item.itemID - 1);
+        const auto transition = styleBox.getItemText (1 + (int) cs::styleForProgression (preset));
+        // JUCE renders this as secondary text in the popup, separate from the combo's selected text.
+        item.shortcutKeyDescription = juce::String (cs::scales()[(size_t) preset.scale].name)
+            + "  |  Adventure " + juce::String (juce::roundToInt (preset.adventure * 100.0f))
+            + "%  |  Syncopation " + juce::String (juce::roundToInt (preset.syncopation * 100.0f))
+            + "%  |  " + (p.style < 0 ? "Auto uses " : "Keeps ") + transition;
+    }
     voicingBox.setSelectedId (p.voicingStyle + 1, juce::dontSendNotification);
     bassPatternBox.setButtonText (bassPatternNames[static_cast<int> (p.bassStyle)]);
     songButton.setToggleState (processor.isSongEnabled(), juce::dontSendNotification);
