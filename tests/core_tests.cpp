@@ -1892,6 +1892,141 @@ static void testTensionHierarchy()
         std::printf ("  %s debatable (%s): %s  %.3f vs %.3f\n", c.id, l > r ? "holds" : "does not hold", c.claim, l, r);
     }
     std::printf ("  known failing today: %d, known failing that now pass: %d\n", knownFailNow, knownPassNow);
+
+    // Tonal function of vi (tonic) and vii° (dominant), as encoded in functionOf. No hard
+    // assertion for these existed in the repository (see docs/audits/r1-tension-assertions.md),
+    // so they are recorded here as debatable: printed, never failing.
+    struct FunctionCase
+    {
+        const char* id;
+        const char* claim;
+        int root; const char* suffix;
+        Function expected;
+    };
+    const FunctionCase functionCases[] = {
+        { "DB3", "vi as tonic (Am in C)",       9, "m",   Function::tonic },
+        { "DB4", "vii° as dominant (Bdim in C)", 11, "dim", Function::dominant },
+    };
+    for (const auto& c : functionCases)
+    {
+        const bool holds = functionOf (ch (c.root, c.suffix), C) == c.expected;
+        std::printf ("  %s debatable (%s): %s  functionOf\n", c.id, holds ? "holds" : "does not hold", c.claim);
+    }
+}
+
+// H8 guard (docs/GENERAL-PLAN.md). The interval predicates read raw intervals, so an extension
+// above 12 is not reduced (hasMajorThird looks for 4, not 16). Every predicate is computed on the
+// intervals as written and on the same intervals reduced modulo 12. A type whose result differs is
+// sensitive to that convention. Only the types in the allowlist are expected to be sensitive today;
+// a new sensitive type fails until it is reviewed and added here, and an allowlisted type that stops
+// being sensitive fails so the list stays exact.
+static void testIntervalConventionGuard()
+{
+    struct Probe
+    {
+        const char* name;
+        int (*fn) (const std::vector<int>&);
+    };
+    const Probe probes[] = {
+        { "hasMajorThird",       [] (const std::vector<int>& v) { return int (hasMajorThird (v)); } },
+        { "hasMinorThird",       [] (const std::vector<int>& v) { return int (hasMinorThird (v)); } },
+        { "hasPerfectFifth",     [] (const std::vector<int>& v) { return int (hasPerfectFifth (v)); } },
+        { "hasDimFifth",         [] (const std::vector<int>& v) { return int (hasDimFifth (v)); } },
+        { "hasAugFifth",         [] (const std::vector<int>& v) { return int (hasAugFifth (v)); } },
+        { "seventhKind",         [] (const std::vector<int>& v) { return int (seventhKind (v)); } },
+        { "seventhIsMajor",      [] (const std::vector<int>& v) { return int (seventhIsMajor (v)); } },
+        { "isSus",               [] (const std::vector<int>& v) { return int (isSus (v)); } },
+        { "isPower",             [] (const std::vector<int>& v) { return int (isPower (v)); } },
+        { "isTriadType",         [] (const std::vector<int>& v) { return int (isTriadType (v)); } },
+        { "isSeventhType",       [] (const std::vector<int>& v) { return int (isSeventhType (v)); } },
+        { "qualityClass",        [] (const std::vector<int>& v) { return int (qualityClassFromIntervals (v)); } },
+        { "numDistinctPitchCls", [] (const std::vector<int>& v) { return numDistinctPitchClasses (v); } },
+    };
+    // Expected sensitive types today (H8): maj7#11 gains a dim fifth from 18 mod 12; quartal (0, 5, 10, 15)
+    // gains a minor third from 15 mod 12 and so stops being labelled sus/quartal.
+    const std::set<std::string> allowlist = { "maj7#11", "quartal" };
+
+    std::set<std::string> sensitive;
+    for (int type = 0; type < numChordTypes(); ++type)
+    {
+        const ChordTypeDef& def = chordTypes()[(size_t) type];
+        std::vector<int> reduced;
+        for (int iv : def.iv)
+            reduced.push_back (mod12 (iv));
+
+        std::string differing;
+        for (const auto& p : probes)
+            if (p.fn (def.iv) != p.fn (reduced))
+                differing += std::string (differing.empty() ? "" : ", ") + p.name;
+        if (differing.empty())
+            continue;
+
+        sensitive.insert (def.suffix);
+        if (allowlist.count (def.suffix) == 0)
+        {
+            ++checks; ++failures;
+            std::printf ("FAIL H8: chord type \"%s\" classification depends on the interval convention "
+                         "(predicates: %s). Review it and add it to the allowlist, or make the predicates reduce modulo 12.\n",
+                         def.suffix, differing.c_str());
+        }
+        else
+        {
+            std::printf ("  H8 allowlisted sensitive type \"%s\": %s\n", def.suffix, differing.c_str());
+        }
+    }
+    for (const auto& name : allowlist)
+    {
+        if (sensitive.count (name) == 0)
+        {
+            ++checks; ++failures;
+            std::printf ("FAIL H8: allowlisted chord type \"%s\" is no longer sensitive to the convention; "
+                         "remove it from the allowlist.\n", name.c_str());
+        }
+    }
+    std::printf ("  H8: %d chord types checked, %d sensitive (allowlist: %d)\n",
+                 numChordTypes(), (int) sensitive.size(), (int) allowlist.size());
+}
+
+// R5 (H5): candidate pool in A minor. Documents the current behaviour: at Adventure 0.1 major V is
+// not admitted (E and E7 have a G#, out of the natural minor scale), at 0.3 it is. The leading-tone
+// flag is off, so tonesOutsideScale with and without the flag must agree here. The flag is not changed.
+static bool inPool (const std::vector<Candidate>& pool, Chord c)
+{
+    for (const auto& x : pool)
+        if (x.chord == c)
+            return true;
+    return false;
+}
+
+static void testCandidatePoolMinor()
+{
+    const int A = 9, minorScale = 1;
+    const auto low = buildCandidates (A, minorScale, 0.1f);
+    const auto mid = buildCandidates (A, minorScale, 0.3f);
+
+    // Adventure 0.1: no major V (E, E7), Em present.
+    CHECK (low.size() == 66);
+    CHECK (! inPool (low, ch (4, "")));
+    CHECK (! inPool (low, ch (4, "7")));
+    CHECK (inPool (low, ch (4, "m")));
+
+    // Adventure 0.3: both E and E7 appear, each with one tone outside the minor scale (G#).
+    CHECK (inPool (mid, ch (4, "")));
+    CHECK (inPool (mid, ch (4, "7")));
+    CHECK (tonesOutsideScale (ch (4, ""), A, minorScale, false) == 1);
+    CHECK (tonesOutsideScale (ch (4, "7"), A, minorScale, false) == 1);
+
+    // The flag is off: the pool's outside counts equal the explicit baseline (leadingToneInScale = false)
+    // and the default. The flag-on count is only queried through the argument; the constant is not flipped.
+    CHECK (! kMinorLeadingToneInScale);
+    for (const auto* pool : { &low, &mid })
+        for (const auto& c : *pool)
+        {
+            CHECK (c.outside == tonesOutsideScale (c.chord, A, minorScale, false));
+            CHECK (c.outside == tonesOutsideScale (c.chord, A, minorScale));
+        }
+    CHECK (tonesOutsideScale (ch (4, ""), A, minorScale, true) == 0);
+    CHECK (tonesOutsideScale (ch (4, "7"), A, minorScale, true) == 0);
 }
 
 int main()
@@ -1914,6 +2049,8 @@ int main()
     testBassModel();
     testMetricOrdering();
     testTensionHierarchy();
+    testIntervalConventionGuard();
+    testCandidatePoolMinor();
     testInvariants();
     testLocks();
     testTargetsSteerOutput();
