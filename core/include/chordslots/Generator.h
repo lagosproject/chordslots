@@ -275,7 +275,8 @@ struct Candidate
 };
 
 /** Every chord the generator may use in this key at this adventure level. */
-inline std::vector<Candidate> buildCandidates (int tonic, int scaleIdx, float adventure)
+inline std::vector<Candidate> buildCandidates (int tonic, int scaleIdx, float adventure,
+                                               float diatonicContext = kMinorDiatonicMajorContext)
 {
     std::vector<Candidate> out;
     const unsigned sm = scaleMask (scaleIdx);
@@ -294,7 +295,7 @@ inline std::vector<Candidate> buildCandidates (int tonic, int scaleIdx, float ad
             if (outside > maxOutside)
                 continue;
 
-            const ChordMetrics m = chordMetrics (c, tonic, scaleIdx);
+            const ChordMetrics m = chordMetrics (c, tonic, scaleIdx, 0.5f, diatonicContext);
             out.push_back ({ c, m.brightness, m.tension, outside, chordTypes()[(size_t) type].complexity });
         }
     }
@@ -312,21 +313,38 @@ struct Mood
     float syncopation;
     std::vector<float> b, t, e; // control points spread across the loop
     std::optional<CorpusStyle> defaultStyle = std::nullopt; // Auto follows the current scale
+    float diatonicContext = 0.0f; // per-mood strength of kMinorDiatonicMajorContext, used only if kMoodDiatonicContext
 };
+
+/** When true, each mood brings its own strength for the minor-key diatonic
+    major-chord Brightness context (Mood::diatonicContext) instead of the global
+    kMinorDiatonicMajorContext. Off until validated by listening (GENERAL-PLAN). */
+inline constexpr bool kMoodDiatonicContext = false;
 
 inline const std::vector<Mood>& moods()
 {
     static const std::vector<Mood> m = {
         { "Euphoric",    0, 0.30f, 0.25f, { 0.70f, 0.78f, 0.85f, 0.80f }, { 0.22f, 0.45f, 0.60f, 0.40f }, { 0.70f, 0.80f, 0.90f, 1.00f } },
         { "Uplifting",   1, 0.30f, 0.30f, { 0.35f, 0.60f, 0.70f, 0.62f }, { 0.25f, 0.38f, 0.45f, 0.62f }, { 0.75f, 0.80f, 0.90f, 0.95f } },
-        { "Epic",        1, 0.35f, 0.20f, { 0.30f, 0.58f, 0.66f, 0.40f }, kUseContextualTension ? std::vector<float> { 0.24f, 0.42f, 0.62f, 0.64f } : std::vector<float> { 0.22f, 0.40f, 0.62f, 0.68f }, { 0.70f, 0.80f, 0.90f, 1.00f } },
-        { "Melancholic", 1, 0.40f, 0.20f, { 0.30f, 0.25f, 0.55f, 0.28f }, { 0.25f, 0.50f, 0.42f, 0.60f }, { 0.40f, 0.45f, 0.50f, 0.40f } },
+        { "Epic",        1, 0.35f, 0.20f, { 0.30f, 0.58f, 0.66f, 0.40f }, kUseContextualTension ? std::vector<float> { 0.24f, 0.42f, 0.62f, 0.64f } : std::vector<float> { 0.22f, 0.40f, 0.62f, 0.68f }, { 0.70f, 0.80f, 0.90f, 1.00f }, std::nullopt, 0.75f },
+        { "Melancholic", 1, 0.40f, 0.20f, { 0.30f, 0.25f, 0.55f, 0.28f }, { 0.25f, 0.50f, 0.42f, 0.60f }, { 0.40f, 0.45f, 0.50f, 0.40f }, std::nullopt, 0.75f },
         { "Dark",        3, 0.50f, 0.35f, { 0.25f, 0.15f, 0.30f, 0.10f }, { 0.25f, 0.60f, 0.55f, 0.75f }, { 0.65f, 0.70f, 0.70f, 0.80f } },
         { "Tense",       7, 0.65f, 0.45f, { 0.30f, 0.35f, 0.20f, 0.40f }, { 0.45f, 0.65f, 0.80f, 0.90f }, { 0.50f, 0.60f, 0.70f, 0.85f } },
         { "Dreamy",      4, 0.60f, 0.15f, { 0.85f, 0.70f, 0.90f, 0.75f }, { 0.40f, 0.55f, 0.48f, 0.55f }, { 0.30f, 0.30f, 0.35f, 0.30f }, CorpusStyle::SoulRnb },
-        { "Hard",        1, 0.15f, 0.50f, { 0.28f, 0.35f, 0.22f, 0.45f }, kUseContextualTension ? std::vector<float> { 0.24f, 0.54f, 0.55f, 0.64f } : std::vector<float> { 0.22f, 0.50f, 0.55f, 0.65f }, { 1.00f, 1.00f, 1.00f, 1.00f } },
+        { "Hard",        1, 0.15f, 0.50f, { 0.28f, 0.35f, 0.22f, 0.45f }, kUseContextualTension ? std::vector<float> { 0.24f, 0.54f, 0.55f, 0.64f } : std::vector<float> { 0.22f, 0.50f, 0.55f, 0.65f }, { 1.00f, 1.00f, 1.00f, 1.00f }, std::nullopt, 0.40f },
     };
     return m;
+}
+
+/** Diatonic-context strength in force for a progression: the preset's own value
+    when kMoodDiatonicContext is on and the targets come from a preset, otherwise
+    the global constant. */
+inline float diatonicContextFor (const Progression& p)
+{
+    if constexpr (kMoodDiatonicContext)
+        if (p.mood >= 0 && p.mood < (int) moods().size())
+            return moods()[(size_t) p.mood].diatonicContext;
+    return kMinorDiatonicMajorContext;
 }
 
 inline CorpusStyle styleForProgression (const Progression& p) noexcept
@@ -572,7 +590,7 @@ inline std::vector<Candidate> slotCandidates (const Progression& p, int i, const
     {
         // The lock pins something the current key/adventure no longer offers.
         // Keep what is there rather than breaking the lock.
-        const ChordMetrics m = chordMetrics (cur, p.tonic, p.scale);
+        const ChordMetrics m = chordMetrics (cur, p.tonic, p.scale, 0.5f, diatonicContextFor (p));
         v.push_back ({ cur, m.brightness, m.tension, tonesOutsideScale (cur, p.tonic, p.scale),
                        chordTypes()[(size_t) cur.type].complexity });
     }
@@ -585,7 +603,7 @@ namespace detail
 inline Candidate currentCandidate (const Progression& p, int slot)
 {
     const Chord chord = p.slots[(size_t) slot].chord;
-    const auto metrics = chordMetrics (chord, p.tonic, p.scale);
+    const auto metrics = chordMetrics (chord, p.tonic, p.scale, 0.5f, diatonicContextFor (p));
     return { chord, metrics.brightness, metrics.tension, tonesOutsideScale (chord, p.tonic, p.scale),
              chordTypes()[(size_t) chord.type].complexity };
 }
@@ -764,7 +782,7 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
     if (n < 1)
         return;
 
-    const auto all = buildCandidates (p.tonic, p.scale, p.adventure);
+    const auto all = buildCandidates (p.tonic, p.scale, p.adventure, diatonicContextFor (p));
     if (all.empty())
         return;
 
@@ -891,7 +909,7 @@ inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxC
         return {};
 
     // The manual picker retains its wider palette at low Adventure.
-    const auto all = buildCandidates (p.tonic, p.scale, std::max (p.adventure, 0.45f));
+    const auto all = buildCandidates (p.tonic, p.scale, std::max (p.adventure, 0.45f), diatonicContextFor (p));
     const auto current = p.slots[(size_t) slot].chord;
     const auto neighbour = [&] (int offset) { return p.slots[(size_t) ((slot + n + offset) % n)].chord; };
     const Chord previous = neighbour (-1), next = neighbour (1);
@@ -974,7 +992,7 @@ inline void updateActualsLocal (Progression& p, int i)
         if (s.voicing.notes[(size_t) j] >= kUpperFloor)
             upper[n++] = s.voicing.notes[(size_t) j];
 
-    s.brightness = combineBrightness (contextQualityBrightness (s.chord, p.tonic, p.scale),
+    s.brightness = combineBrightness (contextQualityBrightness (s.chord, p.tonic, p.scale, kMinorDominantContext, diatonicContextFor (p)),
                                       modalBrightness (s.chord, p.tonic, p.scale),
                                       registerBrightness (upper, n));
     s.tension = kUseContextualTension ? measuredContextualTension (p, i)
@@ -1440,7 +1458,7 @@ inline void rollSlotRoot (Progression& p, int slot, Rng& rng)
     if (slot < 0 || slot >= p.numSlots)
         return;
     const Slot& s = p.slots[(size_t) slot];
-    const auto all = buildCandidates (p.tonic, p.scale, std::max (p.adventure, 0.45f));
+    const auto all = buildCandidates (p.tonic, p.scale, std::max (p.adventure, 0.45f), diatonicContextFor (p));
     std::vector<Candidate> candidates;
     for (const auto& c : all)
     {
@@ -1485,7 +1503,7 @@ inline void rollSlotColor (Progression& p, int slot, Rng& rng)
     if (slot < 0 || slot >= p.numSlots)
         return;
     const Slot& s = p.slots[(size_t) slot];
-    const auto all = buildCandidates (p.tonic, p.scale, std::max (p.adventure, 0.45f));
+    const auto all = buildCandidates (p.tonic, p.scale, std::max (p.adventure, 0.45f), diatonicContextFor (p));
     std::vector<Candidate> candidates;
     for (const auto& c : all)
     {

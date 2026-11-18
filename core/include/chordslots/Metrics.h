@@ -368,10 +368,11 @@ inline float contextQualityBrightness (Chord c, int tonic, int scaleIdx,
 
 /** Metrics for a chord with a neutral register (used while choosing chords,
     before a voicing exists). */
-inline ChordMetrics chordMetrics (Chord c, int tonic, int scaleIdx, float reg = 0.5f)
+inline ChordMetrics chordMetrics (Chord c, int tonic, int scaleIdx, float reg = 0.5f,
+                                  float diatonicContext = kMinorDiatonicMajorContext)
 {
     ChordMetrics m;
-    m.brightness = combineBrightness (contextQualityBrightness (c, tonic, scaleIdx),
+    m.brightness = combineBrightness (contextQualityBrightness (c, tonic, scaleIdx, kMinorDominantContext, diatonicContext),
                                       modalBrightness (c, tonic, scaleIdx), reg);
     m.tension = tensionOf (c, tonic, scaleIdx);
     return m;

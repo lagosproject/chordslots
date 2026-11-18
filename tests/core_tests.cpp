@@ -224,6 +224,27 @@ static void testMetricOrdering()
                 CHECK (contextQualityBrightness (ch (10, ""), 0, sc, 0.0f, 1.0f) == qualityBrightness (ch (10, "").type));
     }
 
+    // Per-mood strength of that context: off by default, so every progression gets the global value.
+    CHECK (! kMoodDiatonicContext);
+    for (int mood = -1; mood < (int) moods().size(); ++mood)
+    {
+        Progression q;
+        q.mood = mood;
+        CHECK (diatonicContextFor (q) == kMinorDiatonicMajorContext);
+    }
+    for (const auto& m : moods())
+    {
+        CHECK (m.diatonicContext >= 0.0f && m.diatonicContext <= 1.0f);
+        CHECK (m.diatonicContext == 0.0f || scaleHasMinorThird (m.scale)); // only has an effect in minor-third scales
+    }
+    {
+        const auto a = buildCandidates (0, 1, 0.3f);
+        const auto b = buildCandidates (0, 1, 0.3f, kMinorDiatonicMajorContext);
+        CHECK (a.size() == b.size());
+        for (size_t i = 0; i < a.size() && i < b.size(); ++i)
+            CHECK (a[i].brightness == b[i].brightness && a[i].tension == b[i].tension);
+    }
+
     // R2: the tritone term is off by default and must not change any value then.
     CHECK (kTritoneWeight == 0.0f);
     for (int type = 0; type < numChordTypes(); ++type)
