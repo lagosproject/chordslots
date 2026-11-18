@@ -251,6 +251,8 @@ Rate of "extended" chords among major and minor tokens: Billboard 8 % of the maj
 
 **Dark and degree ♭7** ([report](audits/dark-bVII/README.md)): the "Dark never produces ♭VII" item was an artifact (major B♭ is not in Phrygian); Dark makes 29 % of degree ♭7 chords, mostly B♭m, which is too many against the 11 to 14 % of the corpus.
 
+**Listening material ready (no listener data yet).** Task 5: 12 Brightness pairs in `tools/listening/brightness/` (register pairs shift the upper register 7 to 9 semitones with the same chords; colour pairs change chord qualities with the upper register matched within 0.1 semitone; the numbers were regenerated and checked). Caveat: by construction the engine Brightness differs by only 0.08 to 0.10 in register pairs and 0.25 to 0.33 in colour pairs, so a "which is brighter" result cannot compare the two effects at equal size without a second set matched on Brightness. R7: 24-item blind panel in `tools/listening/blindpanel/` (8 ChordSlots, 8 random, 8 corpus, key kept apart) with a rating-sheet generator and an agreement script, tested only on synthetic ratings. Confounds noted there: ChordSlots items use extended chords the other conditions lack. R7 still needs at least one rater with music-theory training.
+
 ### How to validate without depending on a single person
 
 Whoever develops the VST is not a professional producer, and it is not necessary to be one for most of the tests. It is advisable to separate two questions:
