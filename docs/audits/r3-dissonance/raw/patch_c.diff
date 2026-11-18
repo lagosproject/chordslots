@@ -1,0 +1,20 @@
+--- original/Metrics.h
++++ variant/Metrics.h (wr=0.0, wh=1.0)
+@@ -242,7 +242,7 @@
+ inline float typeDissonance (int type)
+ {
+     const float rough = norm01 (typeRoughness (type), Calibration::roughLo, Calibration::roughHi);
+-    return 0.5f * rough + 0.5f * harmonicDissonance (type);
++    return 0.0f * rough + 1.0f * harmonicDissonance (type);
+ }
+ 
+ /** Weight of the tritone-resolution term in Tension. Zero keeps the previous
+@@ -298,7 +298,7 @@
+         return tensionOf (c, tonic, scaleIdx);
+     const float rough = norm01 ((float) (roughness (notes, n) / n),
+                                 Calibration::voicedRoughLo, Calibration::voicedRoughHi);
+-    return tensionFromDissonance (c, tonic, scaleIdx, 0.5f * rough + 0.5f * harmonicDissonance (c.type));
++    return tensionFromDissonance (c, tonic, scaleIdx, 0.0f * rough + 1.0f * harmonicDissonance (c.type));
+ }
+ 
+ // P6 preview. Change this only after comparing the blind listening scores.

@@ -1,0 +1,20 @@
+node:fs:440
+    return binding.readFileUtf8(path, stringToFlags(options.flag));
+                   ^
+
+Error: ENOENT: no such file or directory, open 'brightness-current.csv'
+    at readFileSync (node:fs:440:20)
+    at file:///tmp/claude-1000/-home-vant-Documentos-ChordSlots/1f0d8a57-76e5-468b-8266-c3e4a3a52a01/scratchpad/r3/variant_a/run/analyze.mjs:98:32
+    at Array.map (<anonymous>)
+    at summarize (file:///tmp/claude-1000/-home-vant-Documentos-ChordSlots/1f0d8a57-76e5-468b-8266-c3e4a3a52a01/scratchpad/r3/variant_a/run/analyze.mjs:98:18)
+    at file:///tmp/claude-1000/-home-vant-Documentos-ChordSlots/1f0d8a57-76e5-468b-8266-c3e4a3a52a01/scratchpad/r3/variant_a/run/analyze.mjs:134:19
+    at ModuleJob.run (node:internal/modules/esm/module_job:377:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:689:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'open',
+  path: 'brightness-current.csv'
+}
+
+Node.js v24.9.0
