@@ -26,7 +26,7 @@ Use **Harmony** to shape a progression, then open **Groove & Feel** to adjust ba
 
 Metrics are computed from the generated notes and their interval properties.
 
-See the [research notes](docs/BASE-DE-INVESTIGACION.md) for the studies, benchmarks, and internal audit findings behind the ongoing review of these controls.
+See the [research notes](docs/RESEARCH-BASE.md) for the studies, benchmarks, and internal audit findings behind the ongoing review of these controls.
 
 | Target | What is measured |
 | --- | --- |

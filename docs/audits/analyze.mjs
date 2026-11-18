@@ -135,11 +135,11 @@ const rollSummary=summarize('brightness-');
 const editSummary=summarize('brightness-edit-');
 
 const f=(n,d=3)=>n==null?'—':n.toFixed(d);
-console.log('| P | Acordes MIDI | Perfiles íntegros | Acordes comparados | r estático simbólico | r estático con voicing | r contextual | r TIS archivado | Δ primer acorde en loop |');
+console.log('| P | MIDI chords | Complete profiles | Chords compared | r static symbolic | r static with voicing | r contextual | r archived TIS | Δ first chord in loop |');
 console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|');
 for(const r of comparisons) console.log('| '+[r.progression,r.midiChords,r.completeFiles,r.matchedChords,...['staticSymbol','staticVoiced','contextLinear','tisArchive'].map(k=>f(r[k+'_humanStable'])),f(r.loopFirstDelta)].join(' | ')+' |');
-for (const [operation,summary] of [['Roll',rollSummary],['Edición',editSummary]]) {
-console.log('\n### '+operation+'\n\n| Escala | H bajo / medio / alto | Cambian B→A | ↑ / = / ↓ B→M | ↑ / = / ↓ M→A | A en máximo | MIDI superior Δ fijo / actual | MIDI total Δ fijo / actual | UI Δ fijo / actual |');
+for (const [operation,summary] of [['Roll',rollSummary],['Edit',editSummary]]) {
+console.log('\n### '+operation+'\n\n| Scale | H low / mid / high | Change L→H | ↑ / = / ↓ L→M | ↑ / = / ↓ M→H | H at maximum | Upper MIDI Δ fixed / current | Total MIDI Δ fixed / current | UI Δ fixed / current |');
 console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|');
 for(const fixed of summary.filter(r=>r.mode==='fixed')) {
     const current=summary.find(r=>r.scale===fixed.scale&&r.mode==='current');

@@ -1,7 +1,7 @@
 # ChordSlots — Handoff (2026-11-16)
 
 This handoff records build notes, corpus setup and implementation decisions from the v0.2 cycle.
-See [the general plan](PLAN-GENERAL.md) for current work and [the original plan](../IMPLEMENTATION_PLAN.md) for historical scope.
+See [the general plan](GENERAL-PLAN.md) for current work and [the original plan](../IMPLEMENTATION_PLAN.md) for historical scope.
 
 ## 1. Status at the original handoff
 

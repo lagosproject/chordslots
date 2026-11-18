@@ -111,17 +111,17 @@ for (const edited of positions)
 writeCsv('edits.csv',edits);
 writeCsv('paired.csv',paired);
 writeCsv('summary.csv',summaries);
-const form=(x,n=3)=>x.toFixed(n).replace('.',',');
-const table=['| Slot | Centro | Inicio | Comparación | rawH ↑ | rawH = | rawH ↓ | Mediana Δ registro | Mediana |Δ registro| | Mediana |Δ T| slot / sig. |',
+const form=(x,n=3)=>x.toFixed(n);
+const table=['| Slot | Center | Start | Comparison | rawH ↑ | rawH = | rawH ↓ | Median Δ register | Median |Δ register| | Median |Δ T| slot / next |',
     '|---:|---|---:|---|---:|---:|---:|---:|---:|---:|'];
-table[0]='| Slot | Centro | Inicio | Comparación | rawH ↑ | rawH = | rawH ↓ | Mediana Δ registro | Mediana magnitud registro | Mediana magnitud ΔT slot / sig. |';
+table[0]='| Slot | Center | Start | Comparison | rawH ↑ | rawH = | rawH ↓ | Median Δ register | Median register magnitude | Median ΔT magnitude slot / next |';
 for (const s of summaries.filter(x=>x.scale==='All')) {
-    const label={reference:'Referencia vs base',increase:'Subida vs base',vsReference:'Subida vs referencia'};
-    const ratio=n=>n+'/'+s.n+' ('+form(100*n/s.n,1)+' %)';
-    table.push('| '+[s.edited,s.mode==='current'?'Actual':'Fijo',form(s.start,1),label[s.variant],
+    const label={reference:'Reference vs base',increase:'Increase vs base',vsReference:'Increase vs reference'};
+    const ratio=n=>n+'/'+s.n+' ('+form(100*n/s.n,1)+'%)';
+    table.push('| '+[s.edited,s.mode==='current'?'Current':'Fixed',form(s.start,1),label[s.variant],
         ratio(s.up),s.n-s.up-s.down,s.down,form(s.medianUpper,2),form(s.absUpper,2),
         form(s.absTension)+' / '+form(s.absNext)].join(' | ')+' |');
 }
 writeFileSync('tables.md',table.join('\n')+'\n');
-console.log('Bases comprobadas en 240 slots. Estados completos de RNG idénticos en los cuatro ficheros.');
-console.log('Cambios fuera del slot',edits.reduce((acc,r)=>[acc[0]+r.otherChords,acc[1]+r.otherNotes,acc[2]+r.fartherTension],[0,0,0]));
+console.log('Bases checked across 240 slots. Full RNG states identical in all four files.');
+console.log('Changes outside the slot',edits.reduce((acc,r)=>[acc[0]+r.otherChords,acc[1]+r.otherNotes,acc[2]+r.fartherTension],[0,0,0]));

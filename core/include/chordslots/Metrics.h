@@ -247,7 +247,7 @@ inline float typeDissonance (int type)
 
 /** Weight of the tritone-resolution term in Tension. Zero keeps the previous
     behaviour. The audits in docs/audits suggest a small positive value, but it
-    stays off until it is validated on data not used to choose it (PLAN-GENERAL, R2). */
+    stays off until it is validated on data not used to choose it (GENERAL-PLAN, R2). */
 inline constexpr float kTritoneWeight = 0.0f;
 
 /** True when the chord's own tones (intervals below one octave, so extensions
@@ -325,7 +325,7 @@ inline float blendContextualTension (float staticTension, float strain, float mo
     behaviour. In a minor key the major V (the harmonic-minor dominant) is part
     of the key's own harmony, not a borrowed bright chord, yet its major third
     makes it read as bright and it loses to the dark targets of minor moods.
-    Off until validated (PLAN-GENERAL, H9 and R11). */
+    Off until validated (GENERAL-PLAN, H9 and R11). */
 inline constexpr float kMinorDominantContext = 0.0f;
 
 /** Same idea for the other major chords that are native to a minor key: the
@@ -334,7 +334,7 @@ inline constexpr float kMinorDominantContext = 0.0f;
     `qualityBrightness`, which is context-free, so dark moods never choose them,
     although bVII is the most frequent upper-degree chord of minor-key songs in
     the corpora (13-16 %). 0 keeps the previous behaviour. Off until validated
-    (PLAN-GENERAL, "Mecanismo del exceso de v menor y de la falta de bVII"). */
+    (GENERAL-PLAN, "Mechanism behind the excess of minor v and the shortage of bVII"). */
 inline constexpr float kMinorDiatonicMajorContext = 0.0f;
 
 /** True for a chord with a major third whose root is bIII, bVI or bVII of the

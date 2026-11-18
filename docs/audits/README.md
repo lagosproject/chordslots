@@ -1,28 +1,28 @@
-# Auditorías de ChordSlots
+# ChordSlots audits
 
-| Auditoría | Informe |
+| Audit | Report |
 |---|---|
-| Tensión frente a oyentes y barrido de Brillantez | [Informe y tablas](INFORME.md) |
-| Brillantez al editar un solo slot | [Informe y tablas](local-edit/INFORME.md) |
-| Energía con acordes fijos y paridad MIDI | [Informe y tablas](energy/INFORME.md) |
-| Vista previa del menú Mood | [Auxiliar](mood-check/check.cpp) · [Menú en Auto](mood-check/menu-auto.png) · [Menú con estilo manual](mood-check/menu-manual.png) |
+| Tension against listeners and Brightness sweep | [Report and tables](REPORT.md) |
+| Brightness when editing a single slot | [Report and tables](local-edit/REPORT.md) |
+| Energy with fixed chords and MIDI parity | [Report and tables](energy/REPORT.md) |
+| Mood menu preview | [Helper](mood-check/check.cpp) · [Menu in Auto](mood-check/menu-auto.png) · [Menu with manual style](mood-check/menu-manual.png) |
 
-Los informes registran el commit que se examinó. Las tablas versionadas conservan los resultados de esa revisión. Regenerarlas con otro commit permite comprobar qué ha cambiado. Usa Git para comparar el resultado nuevo con las tablas publicadas.
+The reports record the commit that was examined. The versioned tables keep the results of that review. Regenerating them with another commit lets you check what has changed. Use Git to compare the new output with the published tables.
 
-## Reproducción en Windows
+## Reproduction on Windows
 
-Desde la raíz del repositorio, con Node.js y el compilador de Visual Studio 2022 para x64. Los scripts usan Community por defecto. Para los auxiliares del motor, también puedes lanzar los comandos desde un Developer Command Prompt x64 de otra edición de Visual Studio.
+From the repository root, with Node.js and the Visual Studio 2022 compiler for x64. The scripts use Community by default. For the engine helpers, you can also launch the commands from an x64 Developer Command Prompt of another Visual Studio edition.
 
-### Tensión y Brillantez
+### Tension and Brightness
 
-El barrido interno y la edición local se pueden ejecutar sin los materiales externos.
+The internal sweep and the local edit can be run without the external materials.
 
 ```powershell
 cmd /c docs\audits\run-engine.cmd
 cmd /c docs\audits\local-edit\run.cmd
 ```
 
-Para reconstruir la comparación de Tensión, descarga los materiales desde el repositorio de los autores y fija la revisión usada en el informe. El código de la auditoría utiliza `docs/audits/materials` por defecto. Puedes usar un checkout existente asignando su ruta absoluta a `CHORDSLOTS_AUDIT_MATERIALS`.
+To rebuild the Tension comparison, download the materials from the authors' repository and pin the revision used in the report. The audit code uses `docs/audits/materials` by default. You can use an existing checkout by assigning its absolute path to `CHORDSLOTS_AUDIT_MATERIALS`.
 
 ```powershell
 git clone https://github.com/merismeris/tonal-tension-TIS.git docs/audits/materials
@@ -35,11 +35,11 @@ node analyze.mjs | Set-Content tables.md -Encoding utf8
 Pop-Location
 ```
 
-La comparación solo publica tablas agregadas. Consulta el informe para los detalles de la licencia de los materiales originales.
+The comparison only publishes aggregated tables. See the report for the license details of the original materials.
 
-### Energía y menú Mood
+### Energy and the Mood menu
 
-Necesitan un build Release x64 de `chordslots_plugin_tests` generado con CMake y Visual Studio. Los auxiliares reutilizan sus opciones de compilación y sus bibliotecas.
+They need a Release x64 build of `chordslots_plugin_tests` generated with CMake and Visual Studio. The helpers reuse its compile options and its libraries.
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -48,4 +48,4 @@ cmake --build build --config Release --target chordslots_plugin_tests
 & ./docs/audits/mood-check/run.ps1
 ```
 
-Pasa `-BuildDir` a los scripts para reutilizar otra carpeta de build. La captura del menú usa el editor JUCE sin ventana. Para comprobar un plugin cargado en un DAW, sigue la tarea de integración del [plan general](../PLAN-GENERAL.md).
+Pass `-BuildDir` to the scripts to reuse another build folder. The menu capture uses the JUCE editor without a window. To check a plugin loaded in a DAW, follow the integration task in the [general plan](../GENERAL-PLAN.md).

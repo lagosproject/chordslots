@@ -1,7 +1,7 @@
 # ChordSlots v0.2: Prioritized Implementation Plan
 
 > Historical plan from the v0.2 development cycle. The current review of Harmony,
-> performance controls and presets is tracked in [the general plan](docs/PLAN-GENERAL.md).
+> performance controls and presets is tracked in [the general plan](docs/GENERAL-PLAN.md).
 > Build notes, corpus setup and prior implementation decisions are in [the handoff](docs/HANDOFF.md).
 
 ## Ordering principles
