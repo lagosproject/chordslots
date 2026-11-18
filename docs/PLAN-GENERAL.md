@@ -159,6 +159,29 @@ Referencia en mayor (V o V7): 16.2 % en Billboard y RS200, 19.4 % en POP909.
 
 **Límites.** POP909 son arreglos de piano de canciones pop chinas, no de los géneros de productores. Sus tonalidades salen del audio y pueden confundir relativas mayor y menor (148 canciones cambian de tonalidad). La definición de "canción en menor" de Billboard y RS200 es la de `build_corpus.py` y la de POP909 es la tonalidad anotada, así que las comparaciones de un punto no son concluyentes. **Pendiente:** medir la proporción de v menor y de ♭VII en el generador por mood, que no se midió; sin eso no se sabe si el generador acierta en el grado 7 menor ni en ♭VII, solo que le falta V mayor. Los scripts quedaron en el scratchpad de la sesión y no están en el repositorio.
 
+### Medición del generador frente al corpus en menor (V mayor, v menor, ♭VII)
+
+Pendiente del contraste anterior. Se generaron 600 semillas por mood (4 slots, tónica Do, escala propia de cada mood, repeticiones colapsadas) y se clasificó cada acorde por sus intervalos (con tercera mayor y séptima menor: dominante; con tercera mayor sin ella: mayor; con tercera menor: menor). Se compararon la base (constantes por defecto) y las dos variantes con el tono sensible activado. Referencia del corpus en menor: V mayor o V7 5.2 a 6.5 %, v menor 4.4 a 9.1 %, ♭VII mayor 13.6 a 15.5 %, tónica cerca del 26 %, y todo el grado 7 entre el 11 % (Billboard y RS200) y el 14 % (POP909).
+
+Moods con escala de tercera menor, base:
+
+| Mood | Escala | V mayor/dom | v menor | ♭VII mayor | Tónica | Grado 7 total |
+|---|---|---|---|---|---|---|
+| Uplifting | Menor | 0.2 % | 0.0 % | 22.3 % | 26.2 % | 0.2 % |
+| Epic | Menor | 0.0 % | 17.8 % | 20.9 % | 25.2 % | 17.8 % |
+| Melancholic | Menor | 0.0 % | 17.7 % | 0.5 % | 26.9 % | 17.7 % |
+| Hard | Menor | 0.0 % | 23.6 % | 5.1 % | 25.2 % | 23.6 % |
+| Dark | Frigio | 0.0 % | 5.2 % | 0.0 % | 25.7 % | 5.2 % |
+| Tense | Armónico menor | 8.5 % | 6.8 % | 0.0 % | 13.2 % | 15.3 % |
+
+Con el tono sensible activado (V mayor/dom, v menor): contexto 0.5, Uplifting 6.4 y 0.0, Epic 3.8 y 16.0, Hard 7.7 y 22.7, Tense 11.1 y 6.4; contexto 0.75, Uplifting 3.9 y 0.0, Epic 6.4 y 13.8, Hard 17.3 y 22.0, Tense 18.0 y 5.0. Los demás moods casi no cambian. Euphoric (Mayor) tiene 24.3 % de V, por encima del 16 a 19 % del corpus en mayor.
+
+**Lo que se concluye.** (1) El problema no es que falte el grado 7, sino que **el grado 7 es casi siempre menor**: Epic, Melancholic y Hard generan entre 17.7 y 23.6 % de v menor, de dos a cinco veces el corpus (4.4 a 9.1 %), con un total del grado 7 por encima del 11 a 14 % del corpus. (2) La proporción de tónica (25 a 27 %) coincide con el corpus. (3) ♭VII, el acorde más característico del menor en el corpus, sale poco en Melancholic (0.5 %), Hard (5.1 %), Dark y Tense (0 %), y sale algo más de lo normal en Uplifting y Epic (21 a 22 %). Parte de esto puede ser intencionado, porque un mood oscuro elige acordes menores, pero no se ha contrastado con oyentes. (4) La opción (c) **añade V sin quitar v**: en Hard el total del grado 7 pasa de 23.6 % a 30.4 % con 0.5 y a 39.3 % con 0.75, y lo que cede es ♭VII, no el v. En Uplifting, en cambio, con 0.5 se obtiene 6.4 % de V y nada de v, que es la banda del corpus. Por eso la recomendación pasa a ser más matizada: **activar el tono sensible con contexto 0.5 solo ayuda claramente a Uplifting (y algo a Epic)**; para Hard y Epic el defecto es el exceso de v menor, y eso no lo resuelve esta opción.
+
+**Corrección a una cifra anterior.** La tabla de R11 dice que Tense genera 0.1 % de V-familia en la base. Esa cuenta incluía solo V, V7 y V9 sin alteraciones. Tense genera sobre todo dominantes alteradas (V7♯9 4.2 %, V7♭9 4.2 %, V7sus4 1.7 %), que suman el 8.5 % de este recuento. En el corpus esas variantes se agrupan en la clase dominante, pero no se pueden comprobar sus alteraciones con el prior de 5 clases. Las cifras de las tablas anteriores de V-familia son por tanto "V simple", y esta sección usa "cualquier V mayor o dominante".
+
+**Pendiente.** Qué mecanismo hace que Epic, Melancholic y Hard elijan v menor tan a menudo (candidata: la Brillantez objetivo de esos moods, que favorece las calidades menores), y si conviene reducirlo. Es una decisión de producto y se debe oír antes de cambiar nada. Los scripts quedaron en el scratchpad de la sesión.
+
 ### Cómo validar sin depender de una sola persona
 
 Quien desarrolla el VST no es productor profesional y tampoco hace falta serlo para la mayor parte de las pruebas. Conviene separar dos preguntas:
