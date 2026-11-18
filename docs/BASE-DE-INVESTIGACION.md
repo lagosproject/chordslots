@@ -34,6 +34,22 @@ Revisión de noviembre de 2026. Referencias empleadas para estudiar las curvas d
 - Noesis documenta una curva de tensión editable. Harmonia describe objetivos de tensión y brillo por slot. Scaler 3 ofrece colecciones por mood y Hookpad Aria permite pedir sugerencias para una selección. Ableton Stacks genera acordes con reglas editables. Estas referencias sirvieron para comparar flujos de trabajo. [Noesis](https://dystopianwaves.gumroad.com/l/pnoesisihgaa) · [Harmonia](https://github.com/TGALLOWAY1/Harmonia) · [Scaler 3](https://scalermusic.com/products/scaler-3/) · [Hookpad Aria](https://arxiv.org/abs/2502.08122) · [Ableton Stacks](https://www.ableton.com/en/live-manual/12/midi-tools/)
 - Las transiciones del VST incorporan recuentos derivados de **McGill Billboard vía ChoCo** y **RS200**. La atribución, las versiones y las licencias están en [DATA_LICENSES.md](../DATA_LICENSES.md). **Chordonomicon** se estudió como posible fuente adicional de progresiones por género y sección. [ChoCo](https://doi.org/10.1038/s41597-023-02410-w) · [RS200](https://rockcorpus.midside.com/) · [Chordonomicon](https://arxiv.org/abs/2410.22046)
 
+## Contraste añadido por la revisión crítica
+
+Fuentes incorporadas el 18 de noviembre de 2026 para contrastar los hallazgos H1–H8 y las tareas R1–R9 del [plan general](PLAN-GENERAL.md#revisión-crítica-del-motor-musical). Los datos bibliográficos (autores, año, revista y DOI) se comprobaron con búsquedas. El contenido se resume a partir de resúmenes y fichas, no del texto completo. Conviene leer el artículo entero antes de apoyar una decisión de diseño en él.
+
+| Fuente | Cómo se usa en ChordSlots |
+|---|---|
+| Lerdahl y Krumhansl (2007), *Modeling Tonal Tension*, Music Perception 24(4). [DOI](https://doi.org/10.1525/mp.2007.24.4.329) | Modelo de tensión con estructura prolongacional, espacio de alturas, tensión de superficie y **atracción**. Contrasta con H1: ChordSlots aproxima distancia y disonancia, pero no atracción ni resolución del tritono (R2). |
+| Farbood (2012), *A Parametric, Temporal Model of Musical Tension*, Music Perception 29(4). [DOI](https://doi.org/10.1525/mp.2012.29.4.387) | Estima con un estudio web y otro de laboratorio cuánto aporta cada parámetro a la tensión percibida. Es el precedente metodológico para ajustar pesos con datos de oyentes (H3, R4). |
+| de Clercq y Temperley (2011), *A corpus analysis of rock harmony*, Popular Music 30(1). [DOI](https://doi.org/10.1017/S026114301000067X) · [Corpus](https://rockcorpus.midside.com/) | Origen del corpus RS200. Presenta el rock como práctica armónica propia. Sirve para matizar H5 y H6: el prior y el grupo de candidatos reflejan un estilo, no la armonía en general. |
+| Bigand y Poulin-Charronnat (2006), *Are we "experienced listeners"?*, Cognition 100. [DOI](https://doi.org/10.1016/j.cognition.2005.11.007) | Revisión sobre capacidades musicales que no dependen de formación formal. Respalda reclutar oyentes que no son productores para las pruebas de percepción. |
+| Collins, Laney, Willis y Garthwaite, *Developing and evaluating computational models of musical style*, AI EDAM. [Artículo](https://www.cambridge.org/core/product/2D13038AEC3BB894F1345C63F74F6CF4/core-reader) · Amabile (1982), Consensual Assessment Technique, J. Personality and Social Psychology | Collins et al. adaptan la técnica de Amabile para que jueces independientes valoren salidas de modelos de estilo. Es el diseño de R7. No localicé el texto de Pearce y Wiggins (2007) sobre evaluación de modelos de composición, por lo que no lo cito. |
+
+Las fuentes ya listadas más arriba que apoyan esta revisión son Bigand, Parncutt y Lerdahl (1996) para H1, Harrison y Pearce (2020) para H2, Eerola, Friberg y Bresin (2013), Temperley y Tan (2013) y Smit et al. (2020) para H3 y H4, Vuvan y Hughes (2019) para H5, y Eitel et al. (2024) junto con Chordonomicon para H6.
+
+**Limitaciones.** El resultado de H5 depende de contar V y V7 en el corpus propio (R5). Los hallazgos H7 y H8 no tienen fuente porque son decisiones de ingeniería.
+
 ## Dónde quedan los ensayos
 
 El [índice de auditorías](audits/README.md) reúne los informes completos, los scripts, las tablas de resultados y las instrucciones para repetir los ensayos. Los originales de terceros se consultan en sus depósitos y la atribución de los corpus distribuidos se mantiene en el archivo de licencias.
