@@ -1830,6 +1830,70 @@ static void testMelodyHarmonization()
     CHECK (slotMelodyProfile (p, 2)[0] == 0.0f);
 }
 
+// R1 tension hierarchy from standard harmony texts, checked with the static metric tensionOf
+// (kTritoneWeight = 0 today). Textbook cases marked knownFailing fail with the engine as of
+// 2026-11-18 (see docs/audits/r1-tension-assertions.md): they are printed, not counted as failures.
+// A known-failing case that passes is also printed, so the list can be trimmed. Debatable cases
+// are printed with their values and never fail the build.
+struct TensionCase
+{
+    const char* id;
+    const char* claim;
+    int lRoot; const char* lSuffix;
+    int rRoot; const char* rSuffix;
+    int tonic; int scale;
+    bool knownFailing;
+};
+
+static void testTensionHierarchy()
+{
+    const int C = 0, A = 9, major = 0, minor = 1;
+    const TensionCase textbook[] = {
+        { "TH1", "G7 > Gmaj7 (dominant seventh vs major seventh, same root)", 7, "7",    7, "maj7", C, major, true },
+        { "TH2", "G7 > G (V7 vs V triad)",                                       7, "7",    7, "",     C, major, false },
+        { "TH3", "G7 > F (V7 vs IV)",                                            7, "7",    5, "",     C, major, false },
+        { "TH4", "G7 > Dm7 (V7 vs ii7)",                                         7, "7",    2, "m7",   C, major, false },
+        { "TH5", "Bdim7 > Bm7b5 (fully vs half diminished, same root)",          11, "dim7", 11, "m7b5", C, major, false },
+        { "TH6", "Bdim7 > Bdim (seventh added to diminished triad)",             11, "dim7", 11, "dim",  C, major, false },
+        { "TH7", "G7 > C (V7 vs tonic triad)",                                       7, "7",    0, "",     C, major, false },
+        { "TH8", "E7 > Am in A minor (V7 vs i)",                                  4, "7",    9, "m",    A, minor, false },
+    };
+    const TensionCase debatable[] = {
+        { "DB1", "Bdim > Bm7b5 (diminished triad vs half diminished)",          11, "dim",  11, "m7b5", C, major, false },
+        { "DB2", "Cmaj7 > C (I7 vs I)",                                           0, "maj7",  0, "",     C, major, false },
+    };
+
+    const auto value = [] (int root, const char* suffix, int tonic, int scale)
+    {
+        return tensionOf (ch (root, suffix), tonic, scale);
+    };
+    int knownFailNow = 0, knownPassNow = 0;
+    std::printf ("R1 tension hierarchy (static tensionOf, kTritoneWeight = %.2f):\n", (double) kTritoneWeight);
+    for (const auto& c : textbook)
+    {
+        const float l = value (c.lRoot, c.lSuffix, c.tonic, c.scale);
+        const float r = value (c.rRoot, c.rSuffix, c.tonic, c.scale);
+        const bool pass = l > r;
+        if (c.knownFailing)
+        {
+            if (pass) { ++knownPassNow; std::printf ("  %s NOW PASSES (remove from known list): %s  %.3f > %.3f\n", c.id, c.claim, l, r); }
+            else      { ++knownFailNow; std::printf ("  %s KNOWN FAILING: %s  %.3f vs %.3f\n", c.id, c.claim, l, r); }
+        }
+        else
+        {
+            std::printf ("  %s %s: %s  %.3f vs %.3f\n", c.id, pass ? "pass" : "FAIL", c.claim, l, r);
+            CHECK (pass);
+        }
+    }
+    for (const auto& c : debatable)
+    {
+        const float l = value (c.lRoot, c.lSuffix, c.tonic, c.scale);
+        const float r = value (c.rRoot, c.rSuffix, c.tonic, c.scale);
+        std::printf ("  %s debatable (%s): %s  %.3f vs %.3f\n", c.id, l > r ? "holds" : "does not hold", c.claim, l, r);
+    }
+    std::printf ("  known failing today: %d, known failing that now pass: %d\n", knownFailNow, knownPassNow);
+}
+
 int main()
 {
     testSongPrimitives();
@@ -1849,6 +1913,7 @@ int main()
     testSpelling();
     testBassModel();
     testMetricOrdering();
+    testTensionHierarchy();
     testInvariants();
     testLocks();
     testTargetsSteerOutput();
