@@ -36,4 +36,4 @@ Revisión de noviembre de 2026. Referencias empleadas para estudiar las curvas d
 
 ## Dónde quedan los ensayos
 
-En el espacio de trabajo, junto al checkout, `audit-curves/INFORME.md` contiene la auditoría de Tensión y Brillantez. `audit-curves/local-edit/INFORME.md` contiene la edición local y `audit-curves/energy/INFORME.md` documenta Energía y la paridad MIDI. En esas carpetas están los scripts y CSV de cada ensayo. Esta página conserva la síntesis y las citas dentro del repositorio. Los originales de terceros se consultan en sus depósitos y la atribución de los corpus distribuidos se mantiene en el archivo de licencias.
+El [índice de auditorías](audits/README.md) reúne los informes completos, los scripts, las tablas de resultados y las instrucciones para repetir los ensayos. Los originales de terceros se consultan en sus depósitos y la atribución de los corpus distribuidos se mantiene en el archivo de licencias.
