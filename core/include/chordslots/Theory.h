@@ -345,13 +345,25 @@ inline unsigned chordMask (Chord c)
     return m;
 }
 
+/** When true, the leading tone (the major third of a V-family chord) does not
+    count as outside a scale with a minor third. In a minor key the raised
+    seventh belongs to the dominant (harmonic-minor practice), so V and V7 are
+    not "borrowed" chords. Off until validated (PLAN-GENERAL, H9 and R11). */
+inline constexpr bool kMinorLeadingToneInScale = false;
+
 /** Number of chord tones that fall outside the scale. */
-inline int tonesOutsideScale (Chord c, int tonic, int scaleIdx)
+inline int tonesOutsideScale (Chord c, int tonic, int scaleIdx,
+                              bool leadingToneInScale = kMinorLeadingToneInScale)
 {
     const unsigned sm = scaleMask (scaleIdx);
+    // The leading tone sits 11 semitones above the tonic and is the third of a
+    // major-third chord whose root is a fifth above it.
+    const bool exemptLeadingTone = leadingToneInScale && scaleHasMinorThird (scaleIdx)
+                                   && mod12 (c.root - tonic) == 7 && hasMajorThird (c.type);
     int n = 0;
     for (int iv : chordTypes()[(size_t) c.type].iv)
-        if ((sm & (1u << mod12 (c.root + iv - tonic))) == 0)
+        if ((sm & (1u << mod12 (c.root + iv - tonic))) == 0
+            && ! (exemptLeadingTone && mod12 (c.root + iv - tonic) == 11))
             ++n;
     if (c.isSlash() && (sm & (1u << mod12 (c.bassPc() - tonic))) == 0)
     {

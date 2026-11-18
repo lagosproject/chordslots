@@ -127,7 +127,18 @@ Proporción de V, V7 y V9 entre los acordes generados (300 semillas, 4 slots, Do
 
 Con los objetivos por defecto no hay ningún cambio a ningún valor. La referencia del corpus es cerca del 6.5 % de las transiciones. Tense con 0.75 llega a 5.2 % sin mover ♭VII ni la tónica más de un punto. **El cambio ayuda solo a Tense.** En las escalas con tercera menor natural (Epic, Uplifting, Melancholic, Hard) hay un segundo obstáculo: el tono sensible de V cuenta como nota fuera de escala y recibe la penalización de Adventure. En Epic, el último slot da a G un coste de 0.054 frente a 0.005 del mejor acorde, y el término de notas fuera de escala aporta unos 0.034. Las comparaciones acorde a acorde con la misma semilla no sirven para medir localidad: el muestreo es conjunto y un coste distinto cambia toda la secuencia.
 
-**Siguiente paso propuesto:** tratar el tono sensible (séptima elevada) como nota de la escala para acordes de función dominante en escalas con tercera menor, detrás de otra constante desactivada. Esto resuelve a la vez la incoherencia original de H5, porque V entra en el grupo de candidatos con Adventure bajo.
+**Opción (c): tono sensible como nota de la escala.** `kMinorLeadingToneInScale` en `Theory.h`, desactivada, hace que la tercera mayor de un acorde V-familia no cuente como nota fuera de escala en las escalas con tercera menor. Con ella activada, V y V7 entran en el grupo de candidatos con Adventure 0.1 y 0.15 (72 candidatos en lugar de 66), lo que resuelve la incoherencia original de H5. Una prueba comprueba que no cambia ningún otro acorde ni las escalas mayores.
+
+Proporción de V, V7 y V9 con el tono sensible activado (300 semillas, escala propia de cada mood; ref. del corpus: cerca del 6.5 %):
+
+| Contexto de Brillantez | Tense | Epic | Uplifting | Melancholic | Dark | Hard |
+|---|---|---|---|---|---|---|
+| 0.00 | 0.1 % | 0.8 % | 0.8 % | 0.0 % | 0.0 % | 0.2 % |
+| 0.50 | 1.7 % | 3.2 % | 6.9 % | 0.0 % | 0.0 % | 6.2 % |
+| 0.75 | 5.2 % | 5.0 % | 4.0 % | 0.0 % | 0.0 % | 16.4 % |
+| 1.00 | 9.2 % | 9.2 % | 0.5 % | 0.8 % | 0.0 % | 18.7 % |
+
+La proporción de tónica se mantiene a menos de un punto de la base en Tense, Epic y Uplifting en todos los valores salvo uno. Ningún ajuste sirve a todos los moods: **0.5** acerca Uplifting, Epic y Hard al corpus y deja Tense bajo; **0.75** pone Tense, Epic y Uplifting en la banda, pero lleva Hard al 16 %. Melancholic y Dark no cambian. Con los objetivos por defecto no hay efecto, y con el tono sensible activado y el contexto en 1.0, el último slot con objetivos altos produce V en más del 90 % de los casos, que es excesivo. **Estado:** las dos constantes siguen desactivadas. Activarlas mueve las líneas base de `eval` y los resultados de varios moods, y el 6.5 % es una referencia global del corpus, no un objetivo por mood. Antes de activar (tono sensible activado y contexto cerca de 0.5) conviene que una persona con formación teórica escuche progresiones con y sin el cambio, dentro de la sesión de R10.
 
 ### Cómo validar sin depender de una sola persona
 

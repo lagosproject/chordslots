@@ -133,6 +133,32 @@ static void testMetricOrdering()
     CHECK (T (ch (7, "")) < T (ch (7, "7")));
     CHECK (T (ch (0, "")) < T (ch (11, "dim")));
 
+    // H9/R11: leading tone as part of the minor scale for V-family chords. Off by default.
+    CHECK (! kMinorLeadingToneInScale);
+    {
+        const int minorScale = 1;
+        for (int scale = 0; scale < numScales(); ++scale)
+            for (int root = 0; root < 12; ++root)
+                for (int type = 0; type < numChordTypes(); ++type)
+                {
+                    const Chord c { root, type, 0 };
+                    const int off = tonesOutsideScale (c, 0, scale, false);
+                    const int on = tonesOutsideScale (c, 0, scale, true);
+                    CHECK (tonesOutsideScale (c, 0, scale) == off); // default is off
+                    const bool target = scaleHasMinorThird (scale) && root == 7 && hasMajorThird (type);
+                    if (target)
+                        CHECK (on <= off && on >= off - 1);
+                    else
+                        CHECK (on == off); // nothing else changes
+                }
+        // In C minor, V and V7 stop counting as outside the scale; vii dim and Dm are untouched.
+        CHECK (tonesOutsideScale (ch (7, ""), 0, minorScale, false) == 1);
+        CHECK (tonesOutsideScale (ch (7, ""), 0, minorScale, true) == 0);
+        CHECK (tonesOutsideScale (ch (7, "7"), 0, minorScale, true) == 0);
+        CHECK (tonesOutsideScale (ch (11, "dim"), 0, minorScale, true) == tonesOutsideScale (ch (11, "dim"), 0, minorScale, false));
+        CHECK (tonesOutsideScale (ch (7, ""), 0, 0, true) == 0); // major key unchanged
+    }
+
     // H9/R11: minor-key dominant context. Off by default and then identical to qualityBrightness.
     CHECK (std::string (chordTypes()[1].suffix) == "m"); // contextQualityBrightness relies on this index
     CHECK (kMinorDominantContext == 0.0f);
