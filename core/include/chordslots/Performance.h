@@ -29,18 +29,67 @@ enum class CompStyle : int
     OffbeatReggae,  // Upbeat 1/8 notes (offset 12, 36...)
     BalladStabs,    // Dotted 1/4 + 1/8 syncopation (offsets 0, 36)
     TrapStabs,      // 1/16th stabs on each beat and its 2-and (0, 18; repeats every 24 steps)
-    TripletSwing    // 1/8T swing pulses (offsets 0, 16, 32)
+    TripletSwing,   // 1/8T swing pulses (offsets 0, 16, 32)
+    Clave32,
+    GarageShuffle,
+    CinematicPush,
+    ShldPop,
+    ShldPop2,
+    ShldSoul,
+    ShldHipHop2,
+    ArpUp,
+    ArpDown
 };
+
+inline constexpr const char* kCompStyleNames[] {
+    "Sustain", "1/4 Pulse", "1/8 Pulse", "Offbeat Reggae", "Ballad Stabs",
+    "Trap Stabs", "Triplet Swing", "3-2 Clave", "Garage Shuffle", "Cinematic Push"
+};
+inline constexpr int kNumCompStyles = sizeof (kCompStyleNames) / sizeof (kCompStyleNames[0]);
+inline constexpr const char* kExtraCompStyleNames[] {
+    "SHLD Pop", "SHLD Pop 2", "SHLD Soul", "SHLD Hip Hop", "Arp Up", "Arp Down"
+};
+inline constexpr int kNumExtraCompStyles = sizeof (kExtraCompStyleNames) / sizeof (kExtraCompStyleNames[0]);
+
+inline constexpr bool isShldRhythm (CompStyle style) noexcept
+{
+    return style >= CompStyle::ShldPop && style <= CompStyle::ShldHipHop2;
+}
+
+inline constexpr bool isArpeggio (CompStyle style) noexcept
+{
+    return style == CompStyle::ArpUp || style == CompStyle::ArpDown;
+}
+
+inline constexpr const char* compStyleName (int index) noexcept
+{
+    return index < kNumCompStyles ? kCompStyleNames[index] : kExtraCompStyleNames[index - kNumCompStyles];
+}
+
+inline constexpr int compPreviewBars (CompStyle style) noexcept
+{
+    return style == CompStyle::Clave32 || isShldRhythm (style) ? 2 : 1;
+}
 
 struct CompHit
 {
     int stepOffset = 0;      // in 24-step timebase relative to slot start
     int durationSteps = 0;   // gate length in steps
     float velScale = 1.0f;   // velocity multiplier
+    int arpVoice = 0;        // zero plays all voices, signed ordinals count up or down
+
+    int selectedVoice (int first, int end) const noexcept
+    {
+        if (arpVoice == 0 || end <= first)
+            return -1;
+        return arpVoice > 0 ? first + (arpVoice - 1) % (end - first)
+                            : end - 1 - (-arpVoice - 1) % (end - first);
+    }
 };
 
 /** Non-allocating hit generator writing directly into a caller-provided fixed buffer. */
-inline int getCompHits (CompStyle style, int slotSteps, CompHit* outHits, int maxHits, int /*meterNum*/ = 4, int /*meterDen*/ = 4) noexcept
+inline int getCompHits (CompStyle style, int slotSteps, CompHit* outHits, int maxHits,
+                        int /*meterNum*/ = 4, int /*meterDen*/ = 4, int slotStart = 0) noexcept
 {
     if (outHits == nullptr || maxHits <= 0)
         return 0;
@@ -51,6 +100,43 @@ inline int getCompHits (CompStyle style, int slotSteps, CompHit* outHits, int ma
         if (count < maxHits)
             outHits[count++] = { stepOffset, durationSteps, velScale };
     };
+
+    if (isShldRhythm (style))
+    {
+        // SHLD c2mpatterns.py (MIT, see DATA_LICENSES.md). N and S strike the current
+        // voicing. X is silent. Durations are converted from beats to steps.
+        constexpr int phraseSteps = 8 * 24;
+        constexpr CompHit rhythms[][5] {
+            { { 0, 36 }, { 36, 60 }, { 96, 36 }, { 132, 60 } },
+            { { 0, 42 }, { 42, 54 }, { 96, 42 }, { 138, 54 } },
+            { { 0, 24 }, { 24, 24 }, { 48, 36 }, { 84, 48 }, { 132, 60 } },
+            { { 0, 24 }, { 42, 54 }, { 114, 30 }, { 144, 48 } }
+        };
+        const int index = static_cast<int> (style) - kNumCompStyles;
+        const int slotEnd = slotStart + slotSteps;
+        for (int cycle = slotStart / phraseSteps * phraseSteps; cycle < slotEnd && count < maxHits; cycle += phraseSteps)
+        {
+            for (const auto& hit : rhythms[index])
+            {
+                const int start = std::max (slotStart, cycle + hit.stepOffset);
+                const int end = std::min (slotEnd, cycle + hit.stepOffset + hit.durationSteps);
+                if (start < end)
+                    addHit (start - slotStart, end - start, hit.velScale);
+            }
+        }
+        return count;
+    }
+
+    if (isArpeggio (style))
+    {
+        const int direction = style == CompStyle::ArpUp ? 1 : -1;
+        for (int step = 0; step < slotSteps && count < maxHits; step += 12)
+        {
+            addHit (step, std::min (10, slotSteps - step), step % 24 == 0 ? 1.0f : 0.85f);
+            outHits[count - 1].arpVoice = direction * (step / 12 + 1);
+        }
+        return count;
+    }
 
     if (style == CompStyle::Sustain || slotSteps <= 0)
     {
@@ -111,6 +197,26 @@ inline int getCompHits (CompStyle style, int slotSteps, CompHit* outHits, int ma
             float v = (st % 48 == 0) ? 1.0f : 0.88f;
             addHit (st, dur, v);
         }
+    }
+    else
+    {
+        constexpr CompHit clave[] { { 0, 9, 1.0f }, { 36, 8, 0.87f }, { 72, 9, 0.94f },
+                                    { 120, 8, 0.86f }, { 144, 9, 0.94f } };
+        constexpr CompHit shuffle[] { { 0, 10, 1.0f }, { 16, 5, 0.72f }, { 40, 6, 0.89f } };
+        constexpr CompHit push[] { { 0, 30, 1.0f }, { 36, 17, 0.83f }, { 66, 24, 0.95f },
+                                   { 90, 6, 0.73f } };
+
+        const auto repeat = [&] (const auto& pattern, int cycleSteps)
+        {
+            for (int start = 0; start < slotSteps && count < maxHits; start += cycleSteps)
+                for (const auto& hit : pattern)
+                    if (const int step = start + hit.stepOffset; step < slotSteps)
+                        addHit (step, std::min (hit.durationSteps, slotSteps - step), hit.velScale);
+        };
+
+        if (style == CompStyle::Clave32) repeat (clave, 192);
+        if (style == CompStyle::GarageShuffle) repeat (shuffle, 48);
+        if (style == CompStyle::CinematicPush) repeat (push, 96);
     }
 
     if (count == 0)

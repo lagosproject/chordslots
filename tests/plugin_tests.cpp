@@ -300,6 +300,91 @@ void testPreviewAndAudition()
     CHECK (h.heldAfterReplay() == 0);
 }
 
+void testCompStyleAudition()
+{
+    Host h;
+    h.setBpm (120.0);
+    const auto selected = h.processor.getPerformanceParams().compStyle;
+    h.processor.auditionCompStyle (cs::CompStyle::Clave32);
+    h.run ((int) std::ceil (5.0 * h.sampleRate / h.blockSize));
+
+    // The second bar of the clave needs to sound even if the first slot is shorter.
+    CHECK (std::any_of (h.events.begin(), h.events.end(), [&] (const auto& e)
+    {
+        return e.on && e.sample == std::llround (144 * samplesPerStep (h));
+    }));
+    CHECK (h.heldAfterReplay() == 0);
+    CHECK (h.processor.getPerformanceParams().compStyle == selected);
+}
+
+void testShldRhythmStateAndPhase()
+{
+    Host h;
+    auto* comp = h.processor.apvts.getParameter ("compStyle");
+    comp->setValueNotifyingHost (comp->convertTo0to1 ((float) cs::CompStyle::PulseEighth));
+    juce::MemoryBlock legacy;
+    h.processor.getStateInformation (legacy);
+    auto root = juce::ValueTree::fromXml (*juce::AudioProcessor::getXmlFromBinary (legacy.getData(), (int) legacy.getSize()));
+    auto params = root.getChildWithName ("Params");
+    params.removeChild (params.getChildWithProperty ("id", "chordRhythm"), nullptr);
+    juce::AudioProcessor::copyXmlToBinary (*root.createXml(), legacy);
+
+    auto* rhythm = h.processor.apvts.getParameter ("chordRhythm");
+    rhythm->setValueNotifyingHost (rhythm->convertTo0to1 (4.0f));
+    CHECK (h.processor.getPerformanceParams().compStyle == cs::CompStyle::ShldHipHop2);
+
+    cs::CompHit hits[8];
+    const auto style = h.processor.getPerformanceParams().compStyle;
+    CHECK (cs::getCompHits (style, 10, hits, 8, 4, 4, 28) == 0);
+    CHECK (cs::getCompHits (style, 22, hits, 8, 4, 4, 30) == 1);
+    CHECK (hits[0].stepOffset == 12 && hits[0].durationSteps == 10);
+
+    juce::MemoryBlock saved;
+    h.processor.getStateInformation (saved);
+    h.processor.setStateInformation (legacy.getData(), (int) legacy.getSize());
+    CHECK (h.processor.getPerformanceParams().compStyle == cs::CompStyle::PulseEighth);
+    h.processor.setStateInformation (saved.getData(), (int) saved.getSize());
+    CHECK (h.processor.getPerformanceParams().compStyle == cs::CompStyle::ShldHipHop2);
+}
+
+void testBassAndArpAuditions()
+{
+    Host bass;
+    auto preview = bass.processor.getProgression();
+    preview.bars = 1;
+    preview.numSlots = 1;
+    preview.bassStyle = cs::BassStyle::OctavePump;
+    bass.processor.auditionBassPattern (preview);
+    bass.run ((int) std::ceil (3.0 * bass.sampleRate / bass.blockSize));
+    std::vector<int> pitches;
+    for (const auto& event : bass.events)
+    {
+        CHECK (event.channel == 2);
+        if (event.on)
+            pitches.push_back (event.note);
+    }
+    CHECK (pitches.size() == 8);
+    CHECK (pitches.size() >= 2 && pitches[1] == pitches[0] + 12);
+    CHECK (bass.peak > 0 && bass.heldAfterReplay() == 0);
+    CHECK (bass.processor.getProgression().bassStyle == cs::BassStyle::Sustain);
+
+    for (auto style : { cs::CompStyle::ArpUp, cs::CompStyle::ArpDown })
+    {
+        Host arp;
+        auto* split = arp.processor.apvts.getParameter ("splitMidi");
+        split->setValueNotifyingHost (1.0f);
+        arp.processor.auditionCompStyle (style);
+        arp.run ((int) std::ceil (3.0 * arp.sampleRate / arp.blockSize));
+        pitches.clear();
+        for (const auto& event : arp.events)
+            if (event.on && event.channel == 1)
+                pitches.push_back (event.note);
+        CHECK (pitches.size() == 8);
+        CHECK (pitches.size() >= 2 && (style == cs::CompStyle::ArpUp ? pitches[0] < pitches[1] : pitches[0] > pitches[1]));
+        CHECK (arp.heldAfterReplay() == 0);
+    }
+}
+
 void testSeparatorLocksAndAlternativeAudition()
 {
     Host host;
@@ -1448,19 +1533,9 @@ void testMeterAndTripletGrid()
 // P1.7: Export parity test across comp styles, split on/off, strum 0/max
 void testExportPlaybackParity()
 {
-    const std::vector<cs::CompStyle> compStyles = {
-        cs::CompStyle::Sustain,
-        cs::CompStyle::PulseQuarter,
-        cs::CompStyle::PulseEighth,
-        cs::CompStyle::OffbeatReggae,
-        cs::CompStyle::BalladStabs,
-        cs::CompStyle::TrapStabs,
-        cs::CompStyle::TripletSwing
-    };
-
     for (double bpm : { 120.0, 200.0, 60.0 })
     {
-        for (auto style : compStyles)
+        for (int index = 0; index < cs::kNumCompStyles + cs::kNumExtraCompStyles; ++index)
         {
             for (bool split : { false, true })
             {
@@ -1469,8 +1544,12 @@ void testExportPlaybackParity()
                     Host h (48000.0, 256);
                     h.setBpm (bpm);
 
-                if (auto* p = h.processor.apvts.getParameter ("compStyle"))
-                    p->setValueNotifyingHost (p->convertTo0to1 ((float) (int) style));
+                const bool shld = index >= cs::kNumCompStyles;
+                auto* style = h.processor.apvts.getParameter (shld ? "chordRhythm" : "compStyle");
+                const int choice = shld ? index - cs::kNumCompStyles + 1 : index;
+                style->setValueNotifyingHost (style->convertTo0to1 ((float) choice));
+                if (shld)
+                    h.processor.edit ([] (cs::Progression& p, cs::Rng&) { p.slots[1].start = 30; }, false);
                 if (auto* p = h.processor.apvts.getParameter ("splitMidi"))
                     p->setValueNotifyingHost (split ? 1.0f : 0.0f);
                 if (auto* p = h.processor.apvts.getParameter ("strum"))
@@ -1616,7 +1695,7 @@ void testExportPlaybackParity()
                     if (! found)
                     {
                         std::printf ("Mismatch in style %d split %d strum %.1f: exp ch%d note%d on%d vel%d tick%.2f (matched %d/%zu)\n",
-                                     (int) style, (int) split, (double) strum,
+                                     index, (int) split, (double) strum,
                                      exp.channel, exp.note, (int) exp.on, exp.velocity, exp.tick,
                                      matchCount, exportEvents.size());
                         break;
@@ -1908,6 +1987,9 @@ int main (int argc, char** argv)
     testHostSyncedPlayback();
     testGateAndRelocation();
     testPreviewAndAudition();
+    testCompStyleAudition();
+    testShldRhythmStateAndPhase();
+    testBassAndArpAuditions();
     testSeparatorLocksAndAlternativeAudition();
     testEditWhilePlaying();
     testStateRoundTrip();

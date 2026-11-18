@@ -29,3 +29,32 @@ Excluded partitions include JAAH, Chordify and Mozart Piano Sonatas (CC BY-NC-SA
 Band-in-a-Box (non-commercial), Isophonics, Robbie Williams, USPOP2002, RWC Pop,
 Real Book, Jazz Corpus and Nottingham (unspecified in the handoff), Weimar
 (ODbL), When in Rome (CC BY-SA), Wikifonia and iReal Pro (unclear terms).
+
+## SHLD chord rhythms
+
+ChordSlots adapts the `pop`, `pop2`, `soul`, and `hiphop2` timing definitions from
+[SHLD Free MIDI Chord Packs](https://github.com/ldrolez/free-midi-chords/blob/95533fae2c1a2aae032211b9abed0441ac8ba298/src/chords2midi/c2mpatterns.py).
+The beat durations are converted to ChordSlots steps, and the source chord
+instructions are replaced with strikes on the current ChordSlots voicing.
+
+MIT License
+
+Copyright (c) 2019 Ludovic Drolez
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

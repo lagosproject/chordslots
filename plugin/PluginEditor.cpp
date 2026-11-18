@@ -22,6 +22,150 @@ juce::PropertiesFile& editorSettings()
     return settings;
 }
 
+constexpr const char* bassPatternNames[] { "Sustain", "Octave pump", "Offbeat 8ths", "808 legato", "Walking" };
+
+struct PreviewNote
+{
+    int start, duration;
+    float velocity;
+    int pitch = -1;
+};
+
+struct PatternPreview
+{
+    int steps;
+    std::vector<PreviewNote> notes;
+};
+
+PatternPreview compPreview (cs::CompStyle style, int voices)
+{
+    PatternPreview preview { cs::compPreviewBars (style) * cs::kStepsPerBar, {} };
+    for (const auto& hit : cs::getCompHits (style, preview.steps))
+        preview.notes.push_back ({ hit.stepOffset, hit.durationSteps, hit.velScale, hit.selectedVoice (0, voices) });
+    return preview;
+}
+
+PatternPreview bassPreview (const cs::Progression& progression)
+{
+    const auto play = cs::toPlayData (progression);
+    PatternPreview preview { play.lengthSteps, {} };
+    for (int i = 0; i < play.numSlots; ++i)
+    {
+        const auto& slot = play.slots[i];
+        if (play.bassStyle == cs::BassStyle::Sustain)
+            preview.notes.push_back ({ slot.start, slot.end - slot.start, 1.0f, slot.primaryBass });
+        else
+            for (int h = 0; h < slot.numBassHits; ++h)
+            {
+                const auto& hit = slot.bassHits[h];
+                const int start = slot.start + hit.stepOffset;
+                preview.notes.push_back ({ start, std::min (hit.durationSteps, play.lengthSteps - start),
+                                           hit.velocityScale, hit.pitch });
+            }
+    }
+    return preview;
+}
+
+class PerformancePreviewButton final : public juce::Button
+{
+public:
+    PerformancePreviewButton (juce::String name, PatternPreview pattern)
+        : juce::Button ("Audition " + name), preview (std::move (pattern))
+    {
+        setTooltip ("Click to audition at the current tempo while playback is stopped.");
+        for (const auto& note : preview.notes)
+        {
+            lowPitch = std::min (lowPitch, note.pitch);
+            highPitch = std::max (highPitch, note.pitch);
+        }
+    }
+
+    void paintButton (juce::Graphics& g, bool hovered, bool pressed) override
+    {
+        const auto area = getLocalBounds().toFloat();
+        g.setColour (ui::energy.withAlpha (pressed ? 0.24f : hovered ? 0.15f : 0.07f));
+        g.fillRoundedRectangle (area, 4.0f);
+
+        g.setColour (ui::energy);
+        juce::Path play;
+        play.addTriangle (9.0f, area.getCentreY() - 4.5f, 16.0f, area.getCentreY(),
+                          9.0f, area.getCentreY() + 4.5f);
+        g.fillPath (play);
+
+        const auto grid = area.withTrimmedLeft (25.0f).withTrimmedRight (8.0f).reduced (0.0f, 5.0f);
+        const auto xAt = [&] (int step) { return grid.getX() + grid.getWidth() * step / preview.steps; };
+        for (int beat = 0; beat <= preview.steps; beat += cs::kStepsPerQuarter)
+        {
+            g.setColour (ui::textDim.withAlpha (beat % cs::kStepsPerBar == 0 ? 0.45f : 0.22f));
+            g.drawVerticalLine (juce::roundToInt (xAt (beat)), grid.getY(), grid.getBottom());
+        }
+        for (const auto& note : preview.notes)
+        {
+            const auto height = note.pitch < 0 ? grid.getHeight() * note.velocity : 3.0f;
+            const auto y = note.pitch < 0 ? grid.getBottom() - height
+                : grid.getY() + (grid.getHeight() - height)
+                    * (lowPitch == highPitch ? 0.5f : (float) (highPitch - note.pitch) / (highPitch - lowPitch));
+            const auto width = xAt (note.start + note.duration) - xAt (note.start);
+            g.setColour (ui::energy.withAlpha (note.velocity));
+            g.fillRoundedRectangle (xAt (note.start), y,
+                                    std::max (1.0f, width - 1.0f), height, 2.0f);
+        }
+        if (hasKeyboardFocus (false))
+        {
+            g.setColour (ui::energy);
+            g.drawRoundedRectangle (area.reduced (0.5f), 4.0f, 1.0f);
+        }
+    }
+
+private:
+    const PatternPreview preview;
+    int lowPitch = 128, highPitch = -1;
+};
+
+class PerformanceBrowser final : public juce::Component
+{
+public:
+    PerformanceBrowser (int selected, int numStyles, const std::function<const char* (int)>& nameFor,
+                        const std::function<PatternPreview (int)>& patternFor,
+                        std::function<void (int)> apply, std::function<void (int)> audition)
+    {
+        for (int i = 0; i < numStyles; ++i)
+        {
+            const juce::String label (nameFor (i));
+            auto* name = names.add (new juce::TextButton (i == selected
+                ? juce::String::charToString (0x2713) + " " + label : label));
+            name->setToggleState (i == selected, juce::dontSendNotification);
+            name->setTooltip ("Apply this performance to the progression");
+            name->onClick = [this, apply, i]
+            {
+                apply (i);
+                if (auto* callout = findParentComponentOfClass<juce::CallOutBox>())
+                    callout->dismiss();
+            };
+            addAndMakeVisible (*name);
+
+            auto* preview = previews.add (new PerformancePreviewButton (label, patternFor (i)));
+            preview->onClick = [audition, i] { audition (i); };
+            addAndMakeVisible (*preview);
+        }
+        setSize (350, 12 + 28 * numStyles);
+    }
+
+    void resized() override
+    {
+        auto rows = getLocalBounds().reduced (6);
+        for (int i = 0; i < names.size(); ++i)
+        {
+            auto row = rows.removeFromTop (28).reduced (0, 2);
+            names[i]->setBounds (row.removeFromLeft (122));
+            previews[i]->setBounds (row.withTrimmedLeft (8));
+        }
+    }
+
+private:
+    juce::OwnedArray<juce::TextButton> names;
+    juce::OwnedArray<PerformancePreviewButton> previews;
+};
 }
 
 bool editorPreferences::tooltipsEnabled()
@@ -328,20 +472,6 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         voicingBox.addItem (cs::voicingStyleName ((cs::VoicingStyle) i), i + 1);
     voicingBox.setSelectedId ((int) cs::VoicingStyle::Piano + 1, juce::dontSendNotification);
 
-    setupCombo (bassPatternBox, bassPatternLabel, "BASS PATTERN",
-              "Choose how the bass plays under each chord.");
-    bassPatternBox.addItem ("Sustain", (int) cs::BassStyle::Sustain + 1);
-    bassPatternBox.addItem ("Octave pump", (int) cs::BassStyle::OctavePump + 1);
-    bassPatternBox.addItem ("Offbeat 8ths", (int) cs::BassStyle::OffbeatEighths + 1);
-    bassPatternBox.addItem ("808 legato", (int) cs::BassStyle::Legato808 + 1);
-    bassPatternBox.addItem ("Walking", (int) cs::BassStyle::Walking + 1);
-    bassPatternBox.onChange = [this]
-    {
-        if (refreshing || bassPatternBox.getSelectedId() == 0) return;
-        const auto bassStyle = (cs::BassStyle) (bassPatternBox.getSelectedId() - 1);
-        processor.edit ([bassStyle] (cs::Progression& pr, cs::Rng&) { pr.bassStyle = bassStyle; });
-    };
-
     shapeLabel.setText ("SHAPES", juce::dontSendNotification);
     shapeLabel.setFont (ui::font (10.0f, true));
     shapeLabel.setColour (juce::Label::textColourId, ui::textDim);
@@ -365,6 +495,13 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         });
     };
 
+    bassPatternLabel.setText ("BASS PATTERN", juce::dontSendNotification);
+    bassPatternLabel.setFont (ui::font (10.0f, true));
+    bassPatternLabel.setColour (juce::Label::textColourId, ui::textDim);
+    addAndMakeVisible (bassPatternLabel);
+    addAndMakeVisible (bassPatternBox);
+    bassPatternBox.setTooltip ("Browse and audition bass patterns");
+    bassPatternBox.onClick = [this] { showBassPatternBrowser(); };
     resetCurvesBtn.setTooltip ("Set all three target curves to 50% and roll chords to fit them.");
     resetCurvesBtn.onClick = [this]
     {
@@ -539,16 +676,16 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         processor.edit ([val] (cs::Progression& pr, cs::Rng&) { pr.bassMotion = val; }, false);
     };
 
-    // Groove comping combo
-    setupCombo (compBox, compLabel, "COMPING", "Choose the rhythm used to play the chords.");
-    compBox.addItem ("Sustain", 1);
-    compBox.addItem ("1/4 Pulse", 2);
-    compBox.addItem ("1/8 Pulse", 3);
-    compBox.addItem ("Offbeat Reggae", 4);
-    compBox.addItem ("Ballad Stabs", 5);
-    compBox.addItem ("Trap Stabs", 6);
-    compBox.addItem ("Triplet Swing", 7);
-    compAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "compStyle", compBox);
+    compLabel.setText ("COMPING", juce::dontSendNotification);
+    compLabel.setFont (ui::font (10.0f, true));
+    compLabel.setColour (juce::Label::textColourId, ui::textDim);
+    addAndMakeVisible (compLabel);
+    addAndMakeVisible (compBox);
+    compBox.setTooltip ("Browse comping performances and audition their rhythms");
+    compBox.onClick = [this] { showPerformanceBrowser(); };
+    compAttachment = std::make_unique<juce::ParameterAttachment> (*p.apvts.getParameter ("compStyle"), nullptr);
+    chordRhythmAttachment = std::make_unique<juce::ParameterAttachment> (*p.apvts.getParameter ("chordRhythm"), nullptr);
+    refreshCompingSelection();
 
     // Synth sound model combo
     setupCombo (synthModelBox, synthModelLabel, "SOUND",
@@ -677,6 +814,93 @@ ChordSlotsEditor::~ChordSlotsEditor()
     stopTimer();
     processor.removeChangeListener (this);
     setLookAndFeel (nullptr);
+}
+
+void ChordSlotsEditor::showPerformanceBrowser()
+{
+    refreshCompingSelection();
+    const auto progression = processor.getProgression();
+    const auto& voicing = progression.slots.front().voicing;
+    const int bass = voicing.bassCount > 0 ? voicing.bassCount : voicing.computeBassCount();
+    const int voices = std::min (voicing.n, cs::kPerfMaxNotes) - bass;
+    const auto safe = juce::Component::SafePointer<ChordSlotsEditor> (this);
+    auto browser = std::make_unique<PerformanceBrowser> (static_cast<int> (processor.getPerformanceParams().compStyle),
+        cs::kNumCompStyles + cs::kNumExtraCompStyles, cs::compStyleName,
+        [voices] (int index) { return compPreview (static_cast<cs::CompStyle> (index), voices); },
+        [safe] (int index)
+        {
+            if (auto* editor = safe.getComponent())
+            {
+                if (index < cs::kNumCompStyles)
+                {
+                    editor->compAttachment->setValueAsCompleteGesture ((float) index);
+                    editor->chordRhythmAttachment->setValueAsCompleteGesture (0.0f);
+                }
+                else
+                {
+                    editor->chordRhythmAttachment->setValueAsCompleteGesture ((float) (index - cs::kNumCompStyles + 1));
+                }
+                editor->refreshCompingSelection();
+            }
+        },
+        [safe] (int index)
+        {
+            if (auto* editor = safe.getComponent())
+                editor->processor.auditionCompStyle (static_cast<cs::CompStyle> (index));
+        });
+    auto& callout = juce::CallOutBox::launchAsynchronously (std::move (browser), compBox.getBounds(), this);
+    callout.setDismissalMouseClicksAreAlwaysConsumed (true);
+}
+
+void ChordSlotsEditor::showBassPatternBrowser()
+{
+    auto preview = processor.getProgression();
+    if (preview.numSlots <= 0)
+        return;
+
+    const int selected = static_cast<int> (preview.bassStyle);
+    if (preview.numSlots == 1)
+        preview.slots[1] = preview.slots[0];
+    preview.numSlots = 2;
+    preview.bars = 2;
+    preview.timeSigNum = preview.timeSigDen = 4;
+    preview.slots[0].start = 0;
+    preview.slots[1].start = cs::kStepsPerBar;
+
+    const auto safe = juce::Component::SafePointer<ChordSlotsEditor> (this);
+    auto browser = std::make_unique<PerformanceBrowser> (selected, (int) std::size (bassPatternNames),
+        [] (int index) { return bassPatternNames[index]; },
+        [&preview] (int index)
+        {
+            auto pattern = preview;
+            pattern.bassStyle = static_cast<cs::BassStyle> (index);
+            return bassPreview (pattern);
+        },
+        [safe] (int index)
+        {
+            if (auto* editor = safe.getComponent())
+            {
+                editor->processor.edit ([index] (cs::Progression& p, cs::Rng&) { p.bassStyle = static_cast<cs::BassStyle> (index); });
+                editor->refresh();
+            }
+        },
+        [safe, preview] (int index) mutable
+        {
+            if (auto* editor = safe.getComponent())
+            {
+                preview.bassStyle = static_cast<cs::BassStyle> (index);
+                editor->processor.auditionBassPattern (preview);
+            }
+        });
+    auto& callout = juce::CallOutBox::launchAsynchronously (std::move (browser), bassPatternBox.getBounds(), this);
+    callout.setDismissalMouseClicksAreAlwaysConsumed (true);
+}
+
+void ChordSlotsEditor::refreshCompingSelection()
+{
+    const auto* name = cs::compStyleName (static_cast<int> (processor.getPerformanceParams().compStyle));
+    if (compBox.getButtonText() != name)
+        compBox.setButtonText (name);
 }
 
 void ChordSlotsEditor::setupCombo (juce::ComboBox& box, juce::Label& label, const juce::String& caption,
@@ -933,7 +1157,7 @@ void ChordSlotsEditor::refresh()
     moodBox.setSelectedId (p.mood + 1, juce::dontSendNotification);
     styleBox.setSelectedId (p.style == -1 ? 1 : p.style + 2, juce::dontSendNotification);
     voicingBox.setSelectedId (p.voicingStyle + 1, juce::dontSendNotification);
-    bassPatternBox.setSelectedId ((int) p.bassStyle + 1, juce::dontSendNotification);
+    bassPatternBox.setButtonText (bassPatternNames[static_cast<int> (p.bassStyle)]);
     songButton.setToggleState (processor.isSongEnabled(), juce::dontSendNotification);
 
     lockRhythm.setToggleState (p.locks.rhythm, juce::dontSendNotification);
@@ -1087,6 +1311,7 @@ void ChordSlotsEditor::timerCallback()
     if (playButton.getButtonText() != text)
         playButton.setButtonText (text);
     playButton.setToggleState (processor.isPreviewPlaying(), juce::dontSendNotification);
+    refreshCompingSelection();
     if (processor.getTriggeredSlot() >= 0)
         timeline.repaint();
 

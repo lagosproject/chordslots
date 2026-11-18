@@ -240,8 +240,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout ChordSlotsProcessor::createL
                                                              juce::StringArray { "A", "B", "C", "D" }, 0));
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "quantizeSwitch", 1 }, "Switch Quantize",
                                                              juce::StringArray { "Next Bar", "Next Slot", "Immediate" }, 0));
+    juce::StringArray compStyles;
+    for (auto* name : cs::kCompStyleNames)
+        compStyles.add (name);
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "compStyle", 1 }, "Comping Style",
-                                                             juce::StringArray { "Sustain", "1/4 Pulse", "1/8 Pulse", "Offbeat Reggae", "Ballad Stabs", "Trap Stabs", "Triplet Swing" }, 0));
+                                                             compStyles, 0));
+    juce::StringArray chordRhythms { "Off" };
+    for (auto* name : cs::kExtraCompStyleNames)
+        chordRhythms.add (name);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "chordRhythm", 1 }, "Chord Rhythm",
+        chordRhythms, 0, juce::AudioParameterChoiceAttributes().withAutomatable (false)));
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "synthModel", 1 }, "Synth Model",
                                                              juce::StringArray { "Clean Saw", "Rhodes EP", "Felt Piano" }, 0));
     return layout;
@@ -270,6 +278,7 @@ ChordSlotsProcessor::ChordSlotsProcessor()
     variationParam = apvts.getRawParameterValue ("variation");
     quantizeSwitchParam = apvts.getRawParameterValue ("quantizeSwitch");
     compStyleParam = apvts.getRawParameterValue ("compStyle");
+    chordRhythmParam = apvts.getRawParameterValue ("chordRhythm");
     synthModelParam = apvts.getRawParameterValue ("synthModel");
 
     apvts.addParameterListener ("gate", this);
@@ -279,6 +288,7 @@ ChordSlotsProcessor::ChordSlotsProcessor()
     apvts.addParameterListener ("triggerMode", this);
     apvts.addParameterListener ("splitMidi", this);
     apvts.addParameterListener ("compStyle", this);
+    apvts.addParameterListener ("chordRhythm", this);
     apvts.addParameterListener ("synthModel", this);
 
     variations[0] = cs::makeDefaultProgression (rng);
@@ -300,6 +310,7 @@ ChordSlotsProcessor::~ChordSlotsProcessor()
     apvts.removeParameterListener ("triggerMode", this);
     apvts.removeParameterListener ("splitMidi", this);
     apvts.removeParameterListener ("compStyle", this);
+    apvts.removeParameterListener ("chordRhythm", this);
     apvts.removeParameterListener ("synthModel", this);
 }
 
@@ -349,7 +360,10 @@ cs::PerformanceParams ChordSlotsProcessor::getPerformanceParams() const noexcept
     if (accentParam != nullptr) p.accent = accentParam->load();
     if (humanizeParam != nullptr) p.humanize = humanizeParam->load();
     if (compStyleParam != nullptr)
-        p.compStyle = static_cast<cs::CompStyle> (juce::jlimit (0, 6, juce::roundToInt (compStyleParam->load())));
+        p.compStyle = static_cast<cs::CompStyle> (juce::jlimit (0, cs::kNumCompStyles - 1, juce::roundToInt (compStyleParam->load())));
+    const int rhythm = chordRhythmParam != nullptr ? juce::roundToInt (chordRhythmParam->load()) : 0;
+    if (rhythm > 0 && rhythm <= cs::kNumExtraCompStyles)
+        p.compStyle = static_cast<cs::CompStyle> (cs::kNumCompStyles + rhythm - 1);
     p.seed = perfSeed.load();
     return p;
 }
@@ -1115,7 +1129,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             const int bassVel = (s.bassCount > 0 && s.velocities[(size_t) (s.bassCount - 1)] > 0) ? s.velocities[(size_t) (s.bassCount - 1)] : s.velocity;
             triggerNote (bassNote, bassVel, sample, kMidiChannelBass, true);
         }
-        else if (s.numHits > 1)
+        else if (s.sustainBassUnderComping)
         {
             for (int i = 0; i < s.bassCount && i < s.n && i < cs::kMaxNotes; ++i)
             {
@@ -1138,7 +1152,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         if (hitStartStep >= 0.0 && currentPlayStep > hitStartStep)
             elapsedTicks = (currentPlayStep - hitStartStep) * (double) kTicksPerStep;
 
-        const int firstUpper = (split || patternedBass || s.numHits > 1) ? s.bassCount : 0;
+        const int firstUpper = (split || patternedBass || s.sustainBassUnderComping) ? s.bassCount : 0;
         const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * (double) kTicksPerStep * (double) gate - 1.0);
         const double hitDurationMs = (double) hit.durationSteps * (60000.0 / (bpm * (double) cs::kStepsPerQuarter));
         double maxOffsetMs = 0.0;
@@ -1148,6 +1162,9 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
         for (int i = firstUpper; i < s.n && i < cs::kMaxNotes; ++i)
         {
+            const int voice = hit.selectedVoice (firstUpper, s.n);
+            if (voice >= 0 && i != voice)
+                continue;
             const int note = s.notes[i];
             const int baseVel = s.velocities[i] > 0 ? s.velocities[i] : s.velocity;
             const int vel = juce::jlimit (1, 127, (int) std::lround ((float) baseVel * hit.velScale));
@@ -1301,7 +1318,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                         const auto& slot = section.slots[si];
                         const double slotStart = sectionStart + slot.start;
                         const bool patterned = section.bassStyle != cs::BassStyle::Sustain;
-                        const bool separateBass = split || patterned || slot.numHits > 1;
+                        const bool separateBass = split || patterned || slot.sustainBassUnderComping;
                         if (patterned)
                         {
                             for (int h = 0; h < slot.numBassHits; ++h)
@@ -1324,7 +1341,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                                     ? slot.velocities[slot.bassCount - 1] : slot.velocity;
                                 addSongNote (slotStart, slotOff, bassNote, bassVel, bassChannelForSong, true, songEntry.transpose);
                             }
-                            else if (slot.numHits > 1)
+                            else if (slot.sustainBassUnderComping)
                                 for (int n = 0; n < slot.bassCount && n < slot.n; ++n)
                                 {
                                     const int vel = slot.velocities[n] > 0 ? slot.velocities[n] : slot.velocity;
@@ -1345,6 +1362,9 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                             const double hitScale = cs::compHitOffsetScale (hitMs, maxOffsetMs);
                             for (int n = firstUpper; n < slot.n; ++n)
                             {
+                                const int voice = hit.selectedVoice (firstUpper, slot.n);
+                                if (voice >= 0 && n != voice)
+                                    continue;
                                 const double strum = std::min (hitOff - hitOn - 1.0 / kTicksPerStep,
                                     (double) slot.offsetMs[n] * hitScale * stepsPerMs);
                                 const int vel = juce::jlimit (1, 127,
@@ -1774,7 +1794,7 @@ void appendMidiSection (const cs::Progression& p, const cs::PerformanceParams& p
         markerTrack.addEvent (juce::MidiMessage::textMetaEvent (1, label), base);
         markerTrack.addEvent (juce::MidiMessage::textMetaEvent (6, label), base);
 
-        const bool separateBass = ! combined || patterned || slot.numHits > 1;
+        const bool separateBass = ! combined || patterned || slot.sustainBassUnderComping;
         if (bass != nullptr)
         {
             if (patterned)
@@ -1815,6 +1835,9 @@ void appendMidiSection (const cs::Progression& p, const cs::PerformanceParams& p
             const double scale = cs::compHitOffsetScale (hitMs, maxOffset);
             for (int j = firstUpper; j < slot.n; ++j)
             {
+                const int voice = hit.selectedVoice (firstUpper, slot.n);
+                if (voice >= 0 && j != voice)
+                    continue;
                 const double noteOn = std::min (end - 1.0, on + slot.offsetMs[j] * scale * msToTicks);
                 const int velocity = (int) std::lround (slot.velocities[j] * hit.velScale);
                 notePair (*chords, kMidiChannelChords, slot.notes[j], velocity, noteOn, end);
@@ -1830,6 +1853,43 @@ void closeMidiTrack (juce::MidiFile& file, juce::MidiMessageSequence& sequence, 
     file.addTrack (sequence);
 }
 } // namespace
+
+void ChordSlotsProcessor::auditionCompStyle (cs::CompStyle style)
+{
+    auto p = getProgression();
+    if (p.numSlots <= 0)
+        return;
+
+    p.numSlots = 1;
+    p.slots[0].start = 0;
+    p.bars = cs::compPreviewBars (style);
+    p.timeSigNum = p.timeSigDen = 4;
+    p.bassStyle = cs::BassStyle::Sustain;
+
+    auto perf = getPerformanceParams();
+    perf.compStyle = style;
+    const auto bpm = lastBpm.load();
+    const auto end = p.lengthSteps() * (double) kTicksPerStep;
+    auto preview = std::make_unique<AlternativePreview>();
+    preview->secondsPerTick = 60.0 / (bpm * kTicksPerQuarter);
+    auto& notes = preview->notes;
+    juce::MidiMessageSequence bass;
+    appendMidiSection (p, perf, bpm, gateParam->load(), 0.0, end, 0, &notes, isSplitMidi() ? &bass : &notes);
+    notes.addSequence (bass, 0.0);
+    notes.addEvent (juce::MidiMessage::endOfTrack(), end);
+    queueAudition (std::move (preview));
+}
+
+void ChordSlotsProcessor::auditionBassPattern (const cs::Progression& p)
+{
+    const auto bpm = lastBpm.load();
+    const auto end = p.lengthSteps() * (double) kTicksPerStep;
+    auto preview = std::make_unique<AlternativePreview>();
+    preview->secondsPerTick = 60.0 / (bpm * kTicksPerQuarter);
+    appendMidiSection (p, getPerformanceParams(), bpm, gateParam->load(), 0.0, end, 0, nullptr, &preview->notes);
+    preview->notes.addEvent (juce::MidiMessage::endOfTrack(), end);
+    queueAudition (std::move (preview));
+}
 
 void ChordSlotsProcessor::auditionAlternative (int slot, cs::Chord chord, bool inContext)
 {
@@ -1871,8 +1931,12 @@ void ChordSlotsProcessor::auditionAlternative (int slot, cs::Chord chord, bool i
             notes.addEvent (juce::MidiMessage::noteOff (channel, note), 0.9 / preview->secondsPerTick);
         }
     }
-    notes.updateMatchedPairs();
+    queueAudition (std::move (preview));
+}
 
+void ChordSlotsProcessor::queueAudition (std::unique_ptr<AlternativePreview> preview)
+{
+    preview->notes.updateMatchedPairs();
     const juce::SpinLock::ScopedLockType lock (alternativeLock);
     pendingAlternative.swap (preview);
     alternativeReady = true;
@@ -2061,9 +2125,24 @@ void ChordSlotsProcessor::setStateInformation (const void* data, int size)
     }
 
     // Restore parameter tree AFTER models are restored!
-    const auto params = root.getChildWithName (apvts.state.getType());
+    auto params = root.getChildWithName (apvts.state.getType()).createCopy();
     if (params.isValid())
-        apvts.replaceState (params.createCopy());
+    {
+        // APVTS retains the current value for missing entries, so migrate
+        // presets saved before the chord-rhythm parameter explicitly.
+        if (! params.getChildWithProperty ("id", "chordRhythm").isValid())
+        {
+            juce::ValueTree rhythm ("PARAM");
+            rhythm.setProperty ("id", "chordRhythm", nullptr);
+            rhythm.setProperty ("value", 0, nullptr);
+            params.appendChild (rhythm, nullptr);
+        }
+        apvts.replaceState (params);
+    }
+    else
+    {
+        apvts.getParameter ("chordRhythm")->setValueNotifyingHost (0.0f);
+    }
     pendingMidiVariation.store (-1);
 
     if (synthModelParam != nullptr)

@@ -65,8 +65,9 @@ private:
     ChordPickerOverlay pickerOverlay;
 
     // Lane Toolbar controls
-    juce::ComboBox moodBox, styleBox, voicingBox, bassPatternBox;
+    juce::ComboBox moodBox, styleBox, voicingBox;
     juce::TextButton shapeBox { juce::String::fromUTF8 ("Shape Stamps ▾") };
+    juce::TextButton bassPatternBox;
     juce::Label moodLabel, styleLabel, voicingLabel, shapeLabel, bassPatternLabel;
     juce::TextButton resetCurvesBtn { "Reset" };
     juce::TextButton analyzeMidiBtn;
@@ -83,8 +84,11 @@ private:
     juce::TextButton undoButton { "Undo" }, rollButton { "ROLL" };
 
     // Footer Panel 2: Groove & Feel
-    juce::ComboBox compBox;
+    juce::TextButton compBox;
     juce::Label compLabel;
+    void showPerformanceBrowser();
+    void showBassPatternBrowser();
+    void refreshCompingSelection();
     juce::Slider strum, accent, humanize;
     juce::Label strumLabel, accentLabel, humanizeLabel;
     juce::TextButton refeelButton { "Re-Feel" };
@@ -112,7 +116,7 @@ private:
     juce::AudioProcessorValueTreeState::SliderAttachment gateAttachment, volumeAttachment,
         strumAttachment, accentAttachment, humanizeAttachment;
     juce::AudioProcessorValueTreeState::ButtonAttachment splitMidiAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> compAttachment;
+    std::unique_ptr<juce::ParameterAttachment> compAttachment, chordRhythmAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> synthModelAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
     int keyNamesScale = -1;

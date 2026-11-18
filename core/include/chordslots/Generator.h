@@ -1778,6 +1778,7 @@ struct PlaySlot
     int bassCount = 0;
     int primaryBass = -1;
     int numHits = 0;
+    bool sustainBassUnderComping = false;
     CompHit hits[kMaxCompHitsPerSlot] = {};
     int numBassHits = 0;
     BassHit bassHits[kMaxBassHitsPerSlot] = {};
@@ -1841,7 +1842,9 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
             o.numBassHits = getBassHits (p.bassStyle, pb, nextBass, o.end - o.start, o.bassHits, kMaxBassHitsPerSlot);
         }
 
-        o.numHits = getCompHits (perf.compStyle, o.end - o.start, o.hits, kMaxCompHitsPerSlot, p.timeSigNum, p.timeSigDen);
+        o.numHits = getCompHits (perf.compStyle, o.end - o.start, o.hits, kMaxCompHitsPerSlot,
+                                 p.timeSigNum, p.timeSigDen, o.start);
+        o.sustainBassUnderComping = isArpeggio (perf.compStyle) || (o.numHits > 1 && ! isShldRhythm (perf.compStyle));
 
         PerfInput in;
         in.n = std::min (s.voicing.n, kPerfMaxNotes);

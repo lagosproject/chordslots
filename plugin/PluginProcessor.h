@@ -87,6 +87,8 @@ public:
     bool isPreviewPlaying() const noexcept { return previewOn.load(); }
     void auditionSlot (int slot) noexcept { auditionRequest.store (slot); }
     void auditionAlternative (int slot, cs::Chord chord, bool inContext);
+    void auditionCompStyle (cs::CompStyle style);
+    void auditionBassPattern (const cs::Progression& preview);
     /** Loop position in sixteenth steps, or a negative value when stopped. */
     double getPlayPosition() const noexcept { return uiStep.load(); }
 
@@ -224,6 +226,7 @@ private:
     };
     juce::SpinLock alternativeLock;
     std::unique_ptr<AlternativePreview> pendingAlternative, activeAlternative;
+    void queueAudition (std::unique_ptr<AlternativePreview> preview);
     bool alternativeReady = false;
     int alternativeEvent = -1;
     int64_t alternativeSample = 0;
@@ -291,6 +294,7 @@ private:
     std::atomic<float>* variationParam = nullptr;
     std::atomic<float>* quantizeSwitchParam = nullptr;
     std::atomic<float>* compStyleParam = nullptr;
+    std::atomic<float>* chordRhythmParam = nullptr;
     std::atomic<float>* synthModelParam = nullptr;
 
     std::atomic<int> hostTimeSigNum { 4 };
