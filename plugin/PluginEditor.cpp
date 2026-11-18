@@ -454,7 +454,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     setupCombo (moodBox, moodLabel, "MOOD PRESET",
               "Open the menu to see what each preset applies before choosing it.");
     moodBox.setTextWhenNothingSelected ("Custom");
-    moodBox.getRootMenu()->addSectionHeader ("All presets replace Brightness, Tension and Energy target curves");
+    moodBox.getRootMenu()->addSectionHeader ("All presets replace Brightness, Tension and Energy target curves and generate a progression (also runs a Roll)");
     const auto& m = cs::moods();
     for (int i = 0; i < (int) m.size(); ++i)
         moodBox.addItem (m[(size_t) i].name, i + 1);
