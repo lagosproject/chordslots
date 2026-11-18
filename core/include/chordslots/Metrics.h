@@ -245,14 +245,43 @@ inline float typeDissonance (int type)
     return 0.5f * rough + 0.5f * harmonicDissonance (type);
 }
 
-inline float tensionFromDissonance (Chord c, int tonic, int scaleIdx, float dissonance)
+/** Weight of the tritone-resolution term in Tension. Zero keeps the previous
+    behaviour. The audits in docs/audits suggest a small positive value, but it
+    stays off until it is validated on data not used to choose it (PLAN-GENERAL, R2). */
+inline constexpr float kTritoneWeight = 0.0f;
+
+/** True when the chord's own tones (intervals below one octave, so extensions
+    such as the #11 of maj7#11 are ignored) contain a tritone. These are the
+    chords with an inherent need to resolve: dominant sevenths, dim, m7b5, dim7. */
+inline bool hasChordTritone (int type)
+{
+    static const std::vector<bool> table = []
+    {
+        std::vector<bool> v;
+        for (const auto& t : chordTypes())
+        {
+            bool found = false;
+            for (size_t a = 0; a < t.iv.size(); ++a)
+                for (size_t b = a + 1; b < t.iv.size(); ++b)
+                    if (t.iv[a] < 12 && t.iv[b] < 12 && std::abs (t.iv[a] - t.iv[b]) == 6)
+                        found = true;
+            v.push_back (found);
+        }
+        return v;
+    }();
+    return table[(size_t) type];
+}
+
+inline float tensionFromDissonance (Chord c, int tonic, int scaleIdx, float dissonance,
+                                    float tritoneWeight = kTritoneWeight)
 {
     const float dist = norm01 ((float) tonalDistanceRaw (c, tonic, scaleIdx), Calibration::tonalLo, Calibration::tonalHi);
     const auto function = functionOf (c, tonic);
     const int degree = mod12 (c.root - tonic);
     const float pull = degree == 10 ? (scaleHasMinorThird (scaleIdx) ? 0.7f : 0.4f)
                                    : (function == Function::tonic ? 0.0f : (function == Function::subdominant ? 0.4f : 1.0f));
-    return clamp01 (0.45f * dissonance + 0.35f * dist + 0.20f * pull);
+    const float tritone = hasChordTritone (c.type) ? tritoneWeight : 0.0f;
+    return clamp01 (0.45f * dissonance + 0.35f * dist + 0.20f * pull + tritone);
 }
 
 /** Chord-symbol estimate for candidate pruning and the legacy listening score. */

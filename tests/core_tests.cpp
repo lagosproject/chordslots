@@ -133,6 +133,34 @@ static void testMetricOrdering()
     CHECK (T (ch (7, "")) < T (ch (7, "7")));
     CHECK (T (ch (0, "")) < T (ch (11, "dim")));
 
+    // R2: the tritone term is off by default and must not change any value then.
+    CHECK (kTritoneWeight == 0.0f);
+    for (int type = 0; type < numChordTypes(); ++type)
+    {
+        const Chord c { 7, type };
+        CHECK (tensionFromDissonance (c, C, major, typeDissonance (type))
+               == tensionFromDissonance (c, C, major, typeDissonance (type), 0.0f));
+    }
+    // Which chords carry a tritone among their own tones.
+    CHECK (hasChordTritone (ch (7, "7").type) && hasChordTritone (ch (7, "dim").type));
+    CHECK (hasChordTritone (ch (7, "m7b5").type) && hasChordTritone (ch (7, "dim7").type));
+    CHECK (hasChordTritone (ch (7, "9").type) && hasChordTritone (ch (7, "13").type));
+    CHECK (! hasChordTritone (ch (7, "").type) && ! hasChordTritone (ch (7, "maj7").type));
+    CHECK (! hasChordTritone (ch (7, "m7").type) && ! hasChordTritone (ch (7, "7sus4").type));
+    CHECK (! hasChordTritone (ch (7, "maj7#11").type)); // the #11 is an extension
+    // With a small positive weight a dominant seventh is more tense than the
+    // major seventh on the same root, as in a standard harmony text (resolution of the tritone).
+    {
+        const float w = 0.05f;
+        const auto tens = [&] (const char* sfx)
+        {
+            const Chord c = ch (7, sfx);
+            return tensionFromDissonance (c, C, major, typeDissonance (c.type), w);
+        };
+        CHECK (tens ("7") > tens ("maj7"));
+        CHECK (tens ("dim") > tensionFromDissonance (ch (7, "dim"), C, major, typeDissonance (ch (7, "dim").type), 0.0f));
+    }
+
     // P1.3: bVII tension functional weight depends on the scale's third
     // Major scale (C major, scale 0): degree 10 (Bb) has subdominant functional weight 0.4
     const Chord cbVII_c = ch (10, ""); // Bb in C

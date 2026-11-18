@@ -94,6 +94,21 @@ Cuatro análisis de solo lectura se ejecutaron el 18 de noviembre de 2026 con sc
 | **H7** | Lista de los 13 puntos y de los efectos en pruebas (ver H7). La lectura es estática: no se invirtió la constante ni se ejecutó `eval`, así que se desconoce cuánto se mueven las líneas base. | Medir el efecto en `eval` de Epic y Hard antes de R8. |
 | **H8** | Sin discrepancias en 32 tipos (ver H8). | Prueba que falle si se añade un tipo cuya clasificación depende de la convención. |
 
+### Avance de R2: término de tritono
+
+La rama `r2-tritone-term` añade `kTritoneWeight` en `Metrics.h`, con valor 0, y `hasChordTritone`, que marca los acordes con un tritono entre sus notas propias (séptimas de dominante, dim, m7b5, dim7; no cuenta el ♯11 de maj7#11). Con peso 0 los valores no cambian: las cuatro pruebas de CTest del núcleo, incluida `eval`, pasan.
+
+Barrido sobre una copia de los encabezados con el motor de la auditoría, reproducido en Linux con las mismas tablas publicadas (11 progresiones, Pearson medio con la región estable):
+
+| Peso | G7 frente a Gmaj7 | Estático con voicing | Contextual |
+|---|---|---|---|
+| 0.00 | 0.743 frente a 0.760 | 0.686 | 0.665 |
+| 0.04 | 0.783 frente a 0.760 | 0.696 | 0.676 |
+| 0.06 | 0.803 frente a 0.760 | 0.699 | 0.681 |
+| 0.10 | 0.843 frente a 0.760 | 0.704 | 0.687 |
+
+El Pearson sube de forma monótona en los tres modelos, pero el aumento es de unos 0.02 con solo 11 progresiones y una cohorte. Los datos no permiten elegir el peso, y el aumento sin tope hasta 0.10 sugiere que se ajusta a estos estímulos. Por eso el valor por defecto sigue en 0. **Pendiente:** fijar el peso con un criterio razonado (separar G7 de Gmaj7 por una diferencia comparable a la de disonancia entre ambos, de 0.04 a 0.06) y validarlo con el conjunto independiente de Barratt-Fitzgerald et al. antes de activarlo. El cambio también mueve Bdim, Cdim y los moods, así que habrá que volver a ejecutar `eval`.
+
 ### Cómo validar sin depender de una sola persona
 
 Quien desarrolla el VST no es productor profesional y tampoco hace falta serlo para la mayor parte de las pruebas. Conviene separar dos preguntas:
