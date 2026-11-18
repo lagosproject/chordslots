@@ -1,0 +1,16 @@
+Bb5 0.2%
+Bb7sus4 1.2%
+Bb9sus4 0.4%
+Bbdim 0.1%
+Bbdim7 0.2%
+Bbm 11.2%
+Bbm11 2.0%
+Bbm13 0.2%
+Bbm6 0.0%
+Bbm7 9.9%
+Bbm7b5 0.0%
+Bbm9 0.8%
+Bbmadd9 0.8%
+Bbquartal 0.8%
+Bbsus4 1.1%
+all root-10: 29.0% of 2400

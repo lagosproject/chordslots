@@ -1,0 +1,108 @@
+
+== Dark  scale Phrygian adv 0.50  pool 173
+ slot 0 targetB 0.25 targetT 0.25 | best cost -0.0094 (Cm)
+    i     rank  1 cost -0.0094  B 0.28 T 0.21
+    iv    rank 13 cost 0.0798  B 0.24 T 0.53
+    v     rank 84 cost 0.2067  B 0.33 T 0.67
+    bVII  rank 149 cost 0.3554  B 0.67 T 0.65
+    bVI   rank 49 cost 0.1499  B 0.57 T 0.46
+    bIII  rank 46 cost 0.1476  B 0.62 T 0.35
+    iio   rank 110 cost 0.2613  B 0.00 T 0.65
+    bVII7 rank 140 cost 0.3284  B 0.48 T 0.74
+    bII   rank 82 cost 0.1994  B 0.53 T 0.60
+    bII7  rank 148 cost 0.3543  B 0.70 T 0.62
+    bvii  rank 51 cost 0.1506  B 0.19 T 0.63
+ slot 1 targetB 0.15 targetT 0.60 | best cost 0.0030 (Bbm)
+    i     rank 109 cost 0.1684  B 0.28 T 0.21
+    iv    rank  2 cost 0.0124  B 0.24 T 0.53
+    v     rank 32 cost 0.0577  B 0.33 T 0.67
+    bVII  rank 144 cost 0.2886  B 0.67 T 0.65
+    bVI   rank 123 cost 0.1995  B 0.57 T 0.46
+    bIII  rank 141 cost 0.2816  B 0.62 T 0.35
+    iio   rank 36 cost 0.0605  B 0.00 T 0.65
+    bVII7 rank 107 cost 0.1635  B 0.48 T 0.74
+    bII   rank 99 cost 0.1437  B 0.53 T 0.60
+    bII7  rank 149 cost 0.3157  B 0.70 T 0.62
+    bvii  rank  1 cost 0.0030  B 0.19 T 0.63
+ slot 2 targetB 0.30 targetT 0.55 | best cost 0.0041 (Fm)
+    i     rank 112 cost 0.1145  B 0.28 T 0.21
+    iv    rank  1 cost 0.0041  B 0.24 T 0.53
+    v     rank 22 cost 0.0364  B 0.33 T 0.67
+    bVII  rank 142 cost 0.1643  B 0.67 T 0.65
+    bVI   rank 81 cost 0.0833  B 0.57 T 0.46
+    bIII  rank 131 cost 0.1410  B 0.62 T 0.35
+    iio   rank 125 cost 0.1360  B 0.00 T 0.65
+    bVII7 rank 100 cost 0.1036  B 0.48 T 0.74
+    bII   rank 47 cost 0.0548  B 0.53 T 0.60
+    bII7  rank 147 cost 0.1786  B 0.70 T 0.62
+    bvii  rank  3 cost 0.0185  B 0.19 T 0.63
+ slot 3 targetB 0.10 targetT 0.75 | best cost 0.0186 (Bbm7)
+    i     rank 134 cost 0.3232  B 0.28 T 0.21
+    iv    rank 23 cost 0.0665  B 0.24 T 0.53
+    v     rank 31 cost 0.0781  B 0.33 T 0.67
+    bVII  rank 142 cost 0.3490  B 0.67 T 0.65
+    bVI   rank 129 cost 0.3087  B 0.57 T 0.46
+    bIII  rank 149 cost 0.4275  B 0.62 T 0.35
+    iio   rank 11 cost 0.0541  B 0.00 T 0.65
+    bVII7 rank 87 cost 0.1793  B 0.48 T 0.74
+    bII   rank 102 cost 0.2071  B 0.53 T 0.60
+    bII7  rank 146 cost 0.3888  B 0.70 T 0.62
+    bvii  rank  2 cost 0.0221  B 0.19 T 0.63
+
+== Melancholic  scale Minor adv 0.40  pool 173
+ slot 0 targetB 0.30 targetT 0.25 | best cost -0.0102 (Cm)
+    i     rank  1 cost -0.0102  B 0.28 T 0.21
+    iv    rank 11 cost 0.0784  B 0.24 T 0.52
+    v     rank 45 cost 0.1636  B 0.33 T 0.65
+    V     rank 159 cost 0.4869  B 0.80 T 0.70
+    V7    rank 157 cost 0.4320  B 0.62 T 0.78
+    bVII  rank 107 cost 0.2759  B 0.67 T 0.63
+    bVI   rank 29 cost 0.1204  B 0.57 T 0.46
+    bIII  rank 25 cost 0.1151  B 0.62 T 0.36
+    iio   rank 101 cost 0.2596  B 0.00 T 0.63
+    bVII7 rank 104 cost 0.2727  B 0.48 T 0.72
+    bII   rank 84 cost 0.2181  B 0.53 T 0.62
+    bII7  rank 140 cost 0.3611  B 0.70 T 0.64
+    bvii  rank 81 cost 0.2085  B 0.19 T 0.66
+ slot 1 targetB 0.25 targetT 0.50 | best cost 0.0007 (Fm)
+    i     rank 51 cost 0.0848  B 0.28 T 0.21
+    iv    rank  1 cost 0.0007  B 0.24 T 0.52
+    v     rank  4 cost 0.0298  B 0.33 T 0.65
+    V     rank 159 cost 0.3750  B 0.80 T 0.70
+    V7    rank 144 cost 0.2632  B 0.62 T 0.78
+    bVII  rank 126 cost 0.1888  B 0.67 T 0.63
+    bVI   rank 63 cost 0.1068  B 0.57 T 0.46
+    bIII  rank 102 cost 0.1557  B 0.62 T 0.36
+    iio   rank 61 cost 0.1023  B 0.00 T 0.63
+    bVII7 rank 76 cost 0.1218  B 0.48 T 0.72
+    bII   rank 74 cost 0.1211  B 0.53 T 0.62
+    bII7  rank 147 cost 0.2707  B 0.70 T 0.64
+    bvii  rank 24 cost 0.0577  B 0.19 T 0.66
+ slot 2 targetB 0.55 targetT 0.42 | best cost 0.0024 (Ab)
+    i     rank 74 cost 0.1147  B 0.28 T 0.21
+    iv    rank 68 cost 0.1079  B 0.24 T 0.52
+    v     rank 64 cost 0.1033  B 0.33 T 0.65
+    V     rank 114 cost 0.1730  B 0.80 T 0.70
+    V7    rank 120 cost 0.1849  B 0.62 T 0.78
+    bVII  rank 21 cost 0.0563  B 0.67 T 0.63
+    bVI   rank  1 cost 0.0024  B 0.57 T 0.46
+    bIII  rank  2 cost 0.0082  B 0.62 T 0.36
+    iio   rank 162 cost 0.3702  B 0.00 T 0.63
+    bVII7 rank 77 cost 0.1152  B 0.48 T 0.72
+    bII   rank 32 cost 0.0692  B 0.53 T 0.62
+    bII7  rank 81 cost 0.1208  B 0.70 T 0.64
+    bvii  rank 128 cost 0.2141  B 0.19 T 0.66
+ slot 3 targetB 0.28 targetT 0.60 | best cost 0.0053 (Gm)
+    i     rank 114 cost 0.1515  B 0.28 T 0.21
+    iv    rank  2 cost 0.0077  B 0.24 T 0.52
+    v     rank  1 cost 0.0053  B 0.33 T 0.65
+    V     rank 159 cost 0.3120  B 0.80 T 0.70
+    V7    rank 138 cost 0.1960  B 0.62 T 0.78
+    bVII  rank 113 cost 0.1493  B 0.67 T 0.63
+    bVI   rank 78 cost 0.1057  B 0.57 T 0.46
+    bIII  rank 128 cost 0.1719  B 0.62 T 0.36
+    iio   rank 74 cost 0.1012  B 0.00 T 0.63
+    bVII7 rank 41 cost 0.0754  B 0.48 T 0.72
+    bII   rank 60 cost 0.0912  B 0.53 T 0.62
+    bII7  rank 144 cost 0.2267  B 0.70 T 0.64
+    bvii  rank  9 cost 0.0400  B 0.19 T 0.66
