@@ -38,7 +38,7 @@ private:
     class AuditionButton final : public juce::TextButton, private juce::Timer
     {
     public:
-        AuditionButton();
+        explicit AuditionButton (const juce::String& label);
         void mouseDown (const juce::MouseEvent&) override;
         void mouseUp (const juce::MouseEvent&) override;
         std::function<void(bool)> onAudition;
@@ -48,13 +48,12 @@ private:
         bool fired = false;
     };
 
-    juce::TextButton closeBtn { "Close" }, swapBtn { "Swap" }, inspectorBtn { "Inspect" };
-    AuditionButton auditionBtn;
+    juce::TextButton closeBtn { "Close" }, swapBtn { "Swap" }, switchViewBtn { "Alternatives" };
     juce::Label selectionLabel;
     bool plotMode = false;
     int selectedCandidate = -1;
-    juce::Rectangle<int> plotArea;
-    juce::Point<float> currentPoint;
+    juce::Rectangle<int> plotArea, plotCentres;
+    juce::Point<float> currentPoint, plotMin, plotMax;
     juce::Label titleLabel;
 
     // 12 Chromatic Roots
@@ -77,7 +76,7 @@ private:
     {
         std::unique_ptr<juce::TextButton> btn;
         cs::Chord chord;
-        juce::Point<float> metrics, point;
+        juce::Point<float> metrics;
         CandidateItem (std::unique_ptr<juce::TextButton> b, cs::Chord c, juce::Point<float> m)
             : btn (std::move (b)), chord (c), metrics (m) {}
     };

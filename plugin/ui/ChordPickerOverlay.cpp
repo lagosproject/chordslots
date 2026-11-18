@@ -6,8 +6,9 @@ namespace
 inline juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 }
 
-ChordPickerOverlay::AuditionButton::AuditionButton() : juce::TextButton ("Listen")
+ChordPickerOverlay::AuditionButton::AuditionButton (const juce::String& label) : juce::TextButton (label)
 {
+    setTooltip ("Click to hear this chord. Hold to hear it in the progression.");
     onClick = [this]
     {
         if (! fired && onAudition)
@@ -51,22 +52,16 @@ ChordPickerOverlay::ChordPickerOverlay (ChordSlotsProcessor& proc)
             onClose();
     };
     addAndMakeVisible (closeBtn);
-    addChildComponent (inspectorBtn);
+    addAndMakeVisible (switchViewBtn);
     addChildComponent (swapBtn);
-    addChildComponent (auditionBtn);
     addChildComponent (selectionLabel);
     selectionLabel.setFont (ui::font (13.0f, true));
-    auditionBtn.onAudition = [this] (bool inContext)
-    {
-        if (selectedCandidate >= 0)
-            processor.auditionAlternative (currentSlot, candidateButtons[(size_t) selectedCandidate].chord, inContext);
-    };
     swapBtn.onClick = [this]
     {
         if (selectedCandidate >= 0)
             applyChord (candidateButtons[(size_t) selectedCandidate].chord);
     };
-    inspectorBtn.onClick = [this] { open (currentSlot, false); };
+    switchViewBtn.onClick = [this] { open (currentSlot, ! plotMode); };
 
     titleLabel.setFont (ui::font (13.0f, true));
     titleLabel.setColour (juce::Label::textColourId, ui::text);
@@ -189,15 +184,23 @@ void ChordPickerOverlay::rebuildCandidates()
         if (! plotMode)
             label += "  " + juce::String (delta >= 0.0f ? "+" : "") + juce::String (delta, 2);
 
-        auto button = std::make_unique<juce::TextButton> (label);
         const int index = (int) candidateButtons.size();
-        button->onClick = [this, index, chord]
+        std::unique_ptr<juce::TextButton> button;
+        if (plotMode)
         {
-            if (plotMode)
+            auto preview = std::make_unique<AuditionButton> (label);
+            preview->onAudition = [this, index, chord] (bool inContext)
+            {
                 selectCandidate (index);
-            else
-                applyChord (chord);
-        };
+                processor.auditionAlternative (currentSlot, chord, inContext);
+            };
+            button = std::move (preview);
+        }
+        else
+        {
+            button = std::make_unique<juce::TextButton> (label);
+            button->onClick = [this, chord] { applyChord (chord); };
+        }
         if (chord == previous)
             selectedCandidate = index;
         addAndMakeVisible (button.get());
@@ -210,7 +213,6 @@ void ChordPickerOverlay::rebuildCandidates()
 void ChordPickerOverlay::selectCandidate (int index)
 {
     selectedCandidate = index;
-    auditionBtn.setEnabled (index >= 0);
     swapBtn.setEnabled (index >= 0);
     for (int i = 0; i < (int) candidateButtons.size(); ++i)
         candidateButtons[(size_t) i].btn->setToggleState (i == index, juce::dontSendNotification);
@@ -239,8 +241,6 @@ void ChordPickerOverlay::layoutPlot (juce::Rectangle<int> area)
     auto controls = area.removeFromBottom (27);
     swapBtn.setBounds (controls.removeFromRight (70));
     controls.removeFromRight (6);
-    auditionBtn.setBounds (controls.removeFromRight (175));
-    auditionBtn.setButtonText ("Listen (hold for loop)");
     controls.removeFromRight (8);
     selectionLabel.setBounds (controls);
     plotArea = area.withTrimmedLeft (60).withTrimmedRight (12).withTrimmedTop (12).withTrimmedBottom (29);
@@ -248,34 +248,60 @@ void ChordPickerOverlay::layoutPlot (juce::Rectangle<int> area)
     if (currentSlot < 0 || currentSlot >= prog.numSlots || plotArea.isEmpty())
         return;
 
-    auto position = [this] (float brightness, float tension)
-    {
-        return juce::Point<float> { plotArea.getX() + juce::jlimit (0.0f, 1.0f, brightness) * plotArea.getWidth(),
-                                    plotArea.getBottom() - juce::jlimit (0.0f, 1.0f, tension) * plotArea.getHeight() };
-    };
     const auto& current = prog.slots[(size_t) currentSlot];
-    currentPoint = position (current.brightness, current.tension);
+    plotMin = plotMax = { current.brightness, current.tension };
+    for (const auto& candidate : candidateButtons)
+    {
+        plotMin.x = std::min (plotMin.x, candidate.metrics.x);
+        plotMin.y = std::min (plotMin.y, candidate.metrics.y);
+        plotMax.x = std::max (plotMax.x, candidate.metrics.x);
+        plotMax.y = std::max (plotMax.y, candidate.metrics.y);
+    }
 
-    // Keep the metric coordinates exact and move only labels that would overlap.
-    const auto bounds = plotArea.expanded (14, 8).getIntersection (area);
+    // Round outwards and leave room on axes with tied or nearly tied scores.
+    auto padAxis = [] (float& low, float& high)
+    {
+        low = std::max (0.0f, std::floor (low * 100.0f - 1.0f) / 100.0f);
+        high = std::min (1.0f, std::ceil (high * 100.0f + 1.0f) / 100.0f);
+    };
+    padAxis (plotMin.x, plotMax.x);
+    padAxis (plotMin.y, plotMax.y);
+
+    constexpr int labelWidth = 86;
+    constexpr int labelHeight = 22;
+    const auto bounds = plotArea.reduced (4);
+    plotCentres = bounds.reduced (labelWidth / 2, labelHeight / 2);
+    auto position = [this] (juce::Point<float> metrics)
+    {
+        return juce::Point<float> {
+            plotCentres.getX() + (metrics.x - plotMin.x) / (plotMax.x - plotMin.x) * plotCentres.getWidth(),
+            plotCentres.getBottom() - (metrics.y - plotMin.y) / (plotMax.y - plotMin.y) * plotCentres.getHeight()
+        };
+    };
+    currentPoint = position ({ current.brightness, current.tension });
+
+    // The buttons are the plot markers. Shift any colliding markers to nearby free space.
     std::vector<juce::Rectangle<int>> occupied { juce::Rectangle<int> (20, 20).withCentre (currentPoint.roundToInt()) };
     for (auto& candidate : candidateButtons)
     {
-        candidate.point = position (candidate.metrics.x, candidate.metrics.y);
+        const auto point = position (candidate.metrics);
         juce::Rectangle<int> best;
         float distance = std::numeric_limits<float>::max();
-        for (int y = bounds.getY(); y + 22 <= bounds.getBottom(); y += 12)
-            for (int x = bounds.getX(); x + 86 <= bounds.getRight(); x += 12)
+        auto consider = [&] (juce::Rectangle<int> label)
+        {
+            const float d = point.getDistanceSquaredFrom (label.getCentre().toFloat());
+            if (d < distance && std::none_of (occupied.begin(), occupied.end(),
+                                              [&] (auto other) { return other.expanded (3).intersects (label); }))
             {
-                const juce::Rectangle<int> label (x, y, 86, 22);
-                const float d = candidate.point.getDistanceSquaredFrom (label.getCentre().toFloat());
-                if (d < distance && std::none_of (occupied.begin(), occupied.end(),
-                                                  [&] (auto other) { return other.expanded (3).intersects (label); }))
-                {
-                    best = label;
-                    distance = d;
-                }
+                best = label;
+                distance = d;
             }
+        };
+        consider (juce::Rectangle<int> (labelWidth, labelHeight).withCentre (point.roundToInt()));
+        if (best.isEmpty())
+            for (int y = bounds.getY(); y + labelHeight <= bounds.getBottom(); y += 12)
+                for (int x = bounds.getX(); x + labelWidth <= bounds.getRight(); x += 12)
+                    consider ({ x, y, labelWidth, labelHeight });
         occupied.push_back (best);
         candidate.btn->setBounds (best);
     }
@@ -294,21 +320,14 @@ void ChordPickerOverlay::paintPlot (juce::Graphics& g)
     g.setFont (ui::font (11.0f));
     g.setColour (ui::textDim);
     g.drawText ("Tension", plotArea.getX() - 60, plotArea.getY(), 52, 15, juce::Justification::centredRight);
-    g.drawText ("100", plotArea.getX() - 31, plotArea.getY() + 12, 22, 14, juce::Justification::centredRight);
-    g.drawText ("0", plotArea.getX() - 31, plotArea.getBottom() - 13, 22, 14, juce::Justification::centredRight);
+    auto score = [] (float value) { return juce::String (juce::roundToInt (value * 100.0f)); };
+    g.drawText (score (plotMax.y), plotArea.getX() - 31, plotCentres.getY() - 7, 22, 14, juce::Justification::centredRight);
+    g.drawText (score (plotMin.y), plotArea.getX() - 31, plotCentres.getBottom() - 7, 22, 14, juce::Justification::centredRight);
     const auto xAxis = plotArea.withY (plotArea.getBottom() + 4).withHeight (15);
-    g.drawText ("0", xAxis, juce::Justification::centredLeft);
+    g.drawText (score (plotMin.x), xAxis.withX (plotCentres.getX() - 15).withWidth (30), juce::Justification::centred);
     g.drawText ("Brightness", xAxis, juce::Justification::centred);
-    g.drawText ("100", xAxis, juce::Justification::centredRight);
+    g.drawText (score (plotMax.x), xAxis.withX (plotCentres.getRight() - 15).withWidth (30), juce::Justification::centred);
 
-    for (int i = 0; i < (int) candidateButtons.size(); ++i)
-    {
-        const auto& candidate = candidateButtons[(size_t) i];
-        const auto colour = i == selectedCandidate ? ui::accent.brighter (0.5f) : ui::textDim;
-        g.setColour (colour);
-        g.drawLine ({ candidate.point, candidate.btn->getBounds().getCentre().toFloat() }, 1.0f);
-        g.fillEllipse (candidate.point.x - 3.0f, candidate.point.y - 3.0f, 6.0f, 6.0f);
-    }
     g.setColour (juce::Colours::white);
     g.drawEllipse (currentPoint.x - 5.0f, currentPoint.y - 5.0f, 10.0f, 10.0f, 2.0f);
 }
@@ -383,12 +402,9 @@ void ChordPickerOverlay::resized()
 
     auto topRow = area.removeFromTop (26);
     closeBtn.setBounds (topRow.removeFromRight (64));
-    inspectorBtn.setVisible (plotMode);
-    if (plotMode)
-    {
-        topRow.removeFromRight (6);
-        inspectorBtn.setBounds (topRow.removeFromRight (74));
-    }
+    topRow.removeFromRight (6);
+    switchViewBtn.setButtonText (plotMode ? "Inspect" : "Alternatives");
+    switchViewBtn.setBounds (topRow.removeFromRight (100));
     titleLabel.setBounds (topRow);
 
     for (auto& button : rootButtons)
@@ -397,7 +413,6 @@ void ChordPickerOverlay::resized()
         quality.btn->setVisible (! plotMode);
     for (auto& button : bassButtons)
         button->setVisible (! plotMode);
-    auditionBtn.setVisible (plotMode);
     swapBtn.setVisible (plotMode);
     selectionLabel.setVisible (plotMode);
     if (plotMode)
