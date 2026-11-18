@@ -1,0 +1,268 @@
+{
+  "tempo_bpm": 80,
+  "meter": "4/4",
+  "program": 0,
+  "program_name": "Acoustic Grand Piano (GM 0)",
+  "velocity": 80,
+  "ticks_per_quarter": 480,
+  "register": "C3 (MIDI 48) to C5 (MIDI 72); root in bass, close position above",
+  "operator_only": "Do not give this file to listeners. The A/B content key is here.",
+  "pairs": [
+    {
+      "pair_id": "pair01",
+      "type": "isolated",
+      "label": "G7 vs Gmaj7",
+      "contrast": "Same bass G and same upper voices except the seventh (F vs F#). G7 contains the tritone B-F; Gmaj7 does not.",
+      "files": {
+        "A": {
+          "file": "r10_pair01_A.mid",
+          "name": "G7",
+          "segments": [
+            {
+              "chord": "G7",
+              "midi": [
+                55,
+                59,
+                62,
+                65
+              ],
+              "beats": 2,
+              "contains_tritone": true
+            }
+          ],
+          "contains_tritone": true,
+          "duration_beats": 2,
+          "duration_seconds": 1.5
+        },
+        "B": {
+          "file": "r10_pair01_B.mid",
+          "name": "Gmaj7",
+          "segments": [
+            {
+              "chord": "Gmaj7",
+              "midi": [
+                55,
+                59,
+                62,
+                66
+              ],
+              "beats": 2,
+              "contains_tritone": false
+            }
+          ],
+          "contains_tritone": false,
+          "duration_beats": 2,
+          "duration_seconds": 1.5
+        }
+      }
+    },
+    {
+      "pair_id": "pair02",
+      "type": "isolated",
+      "label": "Bdim vs Bm7b5",
+      "contrast": "Both contain the tritone B-F. They differ by the added seventh A in Bm7b5, so this pair does not vary the tritone itself.",
+      "files": {
+        "A": {
+          "file": "r10_pair02_A.mid",
+          "name": "Bdim",
+          "segments": [
+            {
+              "chord": "Bdim",
+              "midi": [
+                59,
+                62,
+                65
+              ],
+              "beats": 2,
+              "contains_tritone": true
+            }
+          ],
+          "contains_tritone": true,
+          "duration_beats": 2,
+          "duration_seconds": 1.5
+        },
+        "B": {
+          "file": "r10_pair02_B.mid",
+          "name": "Bm7b5",
+          "segments": [
+            {
+              "chord": "Bm7b5",
+              "midi": [
+                59,
+                62,
+                65,
+                69
+              ],
+              "beats": 2,
+              "contains_tritone": true
+            }
+          ],
+          "contains_tritone": true,
+          "duration_beats": 2,
+          "duration_seconds": 1.5
+        }
+      }
+    },
+    {
+      "pair_id": "pair03",
+      "type": "cadence",
+      "label": "V7 vs IV, resolving to C",
+      "contrast": "Key of C. The first bar is G7 (tritone B-F) or F (no tritone); the second bar is C in both files.",
+      "files": {
+        "A": {
+          "file": "r10_pair03_A.mid",
+          "name": "G7-C",
+          "segments": [
+            {
+              "chord": "G7",
+              "midi": [
+                55,
+                59,
+                62,
+                65
+              ],
+              "beats": 4,
+              "contains_tritone": true
+            },
+            {
+              "chord": "C",
+              "midi": [
+                48,
+                52,
+                55,
+                60
+              ],
+              "beats": 4,
+              "contains_tritone": false
+            }
+          ],
+          "contains_tritone": true,
+          "duration_beats": 8,
+          "duration_seconds": 6.0
+        },
+        "B": {
+          "file": "r10_pair03_B.mid",
+          "name": "F-C",
+          "segments": [
+            {
+              "chord": "F",
+              "midi": [
+                53,
+                57,
+                60,
+                65
+              ],
+              "beats": 4,
+              "contains_tritone": false
+            },
+            {
+              "chord": "C",
+              "midi": [
+                48,
+                52,
+                55,
+                60
+              ],
+              "beats": 4,
+              "contains_tritone": false
+            }
+          ],
+          "contains_tritone": false,
+          "duration_beats": 8,
+          "duration_seconds": 6.0
+        }
+      }
+    },
+    {
+      "pair_id": "pair04",
+      "type": "cadence",
+      "label": "V7 vs V, I-V-I in C",
+      "contrast": "Key of C, I-V-I with the dominant as seventh chord (A) or triad (B). Only the middle bar differs.",
+      "files": {
+        "A": {
+          "file": "r10_pair04_A.mid",
+          "name": "C-G7-C",
+          "segments": [
+            {
+              "chord": "C",
+              "midi": [
+                48,
+                52,
+                55,
+                60
+              ],
+              "beats": 4,
+              "contains_tritone": false
+            },
+            {
+              "chord": "G7",
+              "midi": [
+                55,
+                59,
+                62,
+                65
+              ],
+              "beats": 4,
+              "contains_tritone": true
+            },
+            {
+              "chord": "C",
+              "midi": [
+                48,
+                52,
+                55,
+                60
+              ],
+              "beats": 4,
+              "contains_tritone": false
+            }
+          ],
+          "contains_tritone": true,
+          "duration_beats": 12,
+          "duration_seconds": 9.0
+        },
+        "B": {
+          "file": "r10_pair04_B.mid",
+          "name": "C-G-C",
+          "segments": [
+            {
+              "chord": "C",
+              "midi": [
+                48,
+                52,
+                55,
+                60
+              ],
+              "beats": 4,
+              "contains_tritone": false
+            },
+            {
+              "chord": "G",
+              "midi": [
+                55,
+                59,
+                62
+              ],
+              "beats": 4,
+              "contains_tritone": false
+            },
+            {
+              "chord": "C",
+              "midi": [
+                48,
+                52,
+                55,
+                60
+              ],
+              "beats": 4,
+              "contains_tritone": false
+            }
+          ],
+          "contains_tritone": false,
+          "duration_beats": 12,
+          "duration_seconds": 9.0
+        }
+      }
+    }
+  ]
+}
