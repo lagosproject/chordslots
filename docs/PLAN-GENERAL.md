@@ -59,7 +59,7 @@ Una lectura de `Theory.h`, `Metrics.h`, `SpiralTension.h`, `Generator.h` y `Corp
 
 ### Tareas propuestas
 
-No alteran el orden de las tareas 1–5. R2 y R4 amplían las tareas 2 y 5 con los mismos informes y protocolos. El orden sugerido es R1, R3, R5, R2/R4, R6, R7 y R8.
+No alteran el orden de las tareas 1–5. R2 y R4 amplían las tareas 2 y 5 con los mismos informes y protocolos. El orden sugerido es R1, R3, R5, R2/R4, R6, R7 y R8. R10 depende de listeners y se agrupa con la tarea 5.
 
 | Id | Tarea | Se da por hecha cuando… |
 |---|---|---|
@@ -72,6 +72,7 @@ No alteran el orden de las tareas 1–5. R2 y R4 amplían las tareas 2 y 5 con l
 | **R7** | **Panel ciego de jueces.** Varias personas, incluida al menos una con formación teórica, valoran a ciegas progresiones de ChordSlots, progresiones aleatorias y progresiones reales del corpus. | Hay una tabla con acuerdo entre jueces y una conclusión sobre qué condiciones se distinguen. |
 | **R8** | **Valor por defecto del contextual (H7).** Fijar `kUseContextualTension` y las curvas de Epic y Hard según el resultado de la tarea 2. | La constante y las curvas se cambian juntas en un solo diff con el informe enlazado. |
 | **R9** | **Informes de auditoría dentro del repositorio.** Hecha en `e39b0ca`: los informes, scripts y tablas están en [docs/audits](audits/README.md). Las cifras citadas en este plan (11 progresiones, 63 posiciones, 195 de 240, 288 casos) se comprobaron en los informes. Los informes examinaron el commit `7dc1ef0`. El núcleo (`core/`) no ha cambiado desde entonces. | Hecha. Los scripts de Windows (`.cmd`, `.ps1`) no se han probado en Linux. |
+| **R10** | **Prueba de pares para el término de tritono (necesita oyentes).** Acordes aislados y cadencias cortas con el mismo instrumento, tempo y registro: G7 frente a Gmaj7, dim frente a m7b5, V7 frente a IV, V7 frente a V. Preguntas: cuál suena más tenso, cuál pide resolver, y sin diferencia o no sé. Se agrupa con la sesión de la tarea 5 para reclutar una sola vez, y admite oyentes que no son productores. | Hay respuestas por persona y par, y un peso de `kTritoneWeight` elegido a partir de ellas (probablemente entre 0.04 y 0.06) o la decisión de dejarlo en 0. Los estímulos y la hoja de respuestas se pueden preparar antes de reclutar. |
 
 ### Resultados preliminares de R1, R3, R4 y R5
 
