@@ -2,6 +2,8 @@
 
 Actualizado el 18 de noviembre de 2026. Este documento reúne el estado de la revisión del VST, el orden de trabajo y las decisiones pendientes. Los informes enlazados conservan los métodos y resultados.
 
+La [base de investigación](BASE-DE-INVESTIGACION.md) recoge la evidencia y las referencias que guiaron las auditorías y decisiones de diseño.
+
 ## Objetivo
 
 Conseguir que cada control del VST tenga un efecto comprensible y predecible al editar un loop. Usaremos las pruebas del motor y del MIDI para medir qué hace el producto y la escucha externa para decidir qué efectos se perciben y cuáles merece la pena controlar desde la interfaz.
