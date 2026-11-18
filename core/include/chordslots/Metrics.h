@@ -328,16 +328,42 @@ inline float blendContextualTension (float staticTension, float strain, float mo
     Off until validated (PLAN-GENERAL, H9 and R11). */
 inline constexpr float kMinorDominantContext = 0.0f;
 
-/** Quality term of Brightness, with the minor-key dominant context applied. */
+/** Same idea for the other major chords that are native to a minor key: the
+    major triads on bIII, bVI and bVII that lie inside a minor-third scale
+    (natural minor, Dorian, Phrygian...). Their major third reads as bright in
+    `qualityBrightness`, which is context-free, so dark moods never choose them,
+    although bVII is the most frequent upper-degree chord of minor-key songs in
+    the corpora (13-16 %). 0 keeps the previous behaviour. Off until validated
+    (PLAN-GENERAL, "Mecanismo del exceso de v menor y de la falta de bVII"). */
+inline constexpr float kMinorDiatonicMajorContext = 0.0f;
+
+/** True for a chord with a major third whose root is bIII, bVI or bVII of the
+    tonic and whose triad (root, major third, fifth) lies inside the scale, in a
+    scale with a minor third. */
+inline bool isMinorDiatonicMajorChord (Chord c, int tonic, int scaleIdx)
+{
+    if (! scaleHasMinorThird (scaleIdx) || ! hasMajorThird (c.type))
+        return false;
+    const int d = mod12 (c.root - tonic);
+    if (d != 3 && d != 8 && d != 10)
+        return false;
+    const unsigned sm = scaleMask (scaleIdx);
+    return (sm & (1u << d)) != 0 && (sm & (1u << mod12 (d + 4))) != 0 && (sm & (1u << mod12 (d + 7))) != 0;
+}
+
+/** Quality term of Brightness, with the minor-key contexts applied. */
 inline float contextQualityBrightness (Chord c, int tonic, int scaleIdx,
-                                       float context = kMinorDominantContext)
+                                       float context = kMinorDominantContext,
+                                       float diatonicContext = kMinorDiatonicMajorContext)
 {
     const float q = qualityBrightness (c.type);
-    if (context <= 0.0f || ! scaleHasMinorThird (scaleIdx)
-        || mod12 (c.root - tonic) != 7 || ! hasMajorThird (c.type))
-        return q;
     constexpr int kMinorTriad = 1; // chordTypes()[1] is "m", checked in core_tests
-    return q + clamp01 (context) * (qualityBrightness (kMinorTriad) - q);
+    if (context > 0.0f && scaleHasMinorThird (scaleIdx)
+        && mod12 (c.root - tonic) == 7 && hasMajorThird (c.type))
+        return q + clamp01 (context) * (qualityBrightness (kMinorTriad) - q);
+    if (diatonicContext > 0.0f && isMinorDiatonicMajorChord (c, tonic, scaleIdx))
+        return q + clamp01 (diatonicContext) * (qualityBrightness (kMinorTriad) - q);
+    return q;
 }
 
 /** Metrics for a chord with a neutral register (used while choosing chords,

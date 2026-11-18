@@ -179,6 +179,51 @@ static void testMetricOrdering()
         CHECK (contextQualityBrightness (V, 0, 0, 1.0f) == qualityBrightness (V.type)); // major key untouched
     }
 
+    // Diatonic major chords on bIII, bVI, bVII in minor-third scales: off by default, identity then.
+    CHECK (kMinorDiatonicMajorContext == 0.0f);
+    for (int type = 0; type < numChordTypes(); ++type)
+        for (int scale = 0; scale < numScales(); ++scale)
+            for (int root = 0; root < 12; ++root)
+                CHECK (contextQualityBrightness ({ root, type, 0 }, 0, scale)
+                       == contextQualityBrightness ({ root, type, 0 }, 0, scale, 0.0f, 0.0f));
+    {
+        const int minorScale = 1;
+        int changed = 0;
+        for (int type = 0; type < numChordTypes(); ++type)
+            for (int scale = 0; scale < numScales(); ++scale)
+                for (int root = 0; root < 12; ++root)
+                {
+                    const Chord c { root, type, 0 };
+                    const float on = contextQualityBrightness (c, 0, scale, 0.0f, 1.0f);
+                    const float off = qualityBrightness (type);
+                    if (on != off)
+                    {
+                        ++changed;
+                        CHECK (on < off); // only downwards
+                        CHECK (isMinorDiatonicMajorChord (c, 0, scale));
+                        CHECK (scaleHasMinorThird (scale) && hasMajorThird (type));
+                        const int d = root; // tonic is 0
+                        CHECK (d == 3 || d == 8 || d == 10);
+                    }
+                    else
+                        CHECK (! isMinorDiatonicMajorChord (c, 0, scale) || off == qualityBrightness (1));
+                }
+        CHECK (changed > 0);
+        CHECK (contextQualityBrightness (ch (10, ""), 0, minorScale, 0.0f, 1.0f) < qualityBrightness (ch (10, "").type));
+        CHECK (std::abs (contextQualityBrightness (ch (10, ""), 0, minorScale, 0.0f, 1.0f) - qualityBrightness (1)) < 1.0e-6f);
+        CHECK (contextQualityBrightness (ch (8, ""), 0, minorScale, 0.0f, 0.5f) > contextQualityBrightness (ch (8, ""), 0, minorScale, 0.0f, 1.0f));
+        CHECK (contextQualityBrightness (ch (3, ""), 0, minorScale, 0.0f, 1.0f) < qualityBrightness (ch (3, "").type));
+        // Untouched: the dominant, minor chords, non-diatonic roots, and major keys.
+        CHECK (contextQualityBrightness (ch (7, ""), 0, minorScale, 0.0f, 1.0f) == qualityBrightness (ch (7, "").type));
+        CHECK (contextQualityBrightness (ch (10, "m"), 0, minorScale, 0.0f, 1.0f) == qualityBrightness (ch (10, "m").type));
+        CHECK (contextQualityBrightness (ch (1, ""), 0, minorScale, 0.0f, 1.0f) == qualityBrightness (ch (1, "").type));
+        CHECK (contextQualityBrightness (ch (10, ""), 0, 0, 0.0f, 1.0f) == qualityBrightness (ch (10, "").type));
+        // Harmonic minor has no flat seventh, so bVII is not diatonic there.
+        for (int sc = 0; sc < numScales(); ++sc)
+            if (std::string (scales()[(size_t) sc].name) == "Harmonic Minor")
+                CHECK (contextQualityBrightness (ch (10, ""), 0, sc, 0.0f, 1.0f) == qualityBrightness (ch (10, "").type));
+    }
+
     // R2: the tritone term is off by default and must not change any value then.
     CHECK (kTritoneWeight == 0.0f);
     for (int type = 0; type < numChordTypes(); ++type)
