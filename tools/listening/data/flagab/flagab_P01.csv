@@ -1,0 +1,14 @@
+participant,training,production_experience,trial,pair_id,mood_label,first_file,second_file,fits_mood,would_use,notes
+P01,none,hobby,1,flagab04,Epic,flagab04_B.mid,flagab04_A.mid,first,first,
+P01,none,hobby,2,flagab11,Dreamy,flagab11_A.mid,flagab11_B.mid,first,first,
+P01,none,hobby,3,flagab02,Melancholic,flagab02_B.mid,flagab02_A.mid,same,same,replayed
+P01,none,hobby,4,flagab06,Dark,flagab06_B.mid,flagab06_A.mid,same,second,
+P01,none,hobby,5,flagab05,Tense,flagab05_A.mid,flagab05_B.mid,same,second,
+P01,none,hobby,6,flagab07,Tense,flagab07_A.mid,flagab07_B.mid,same,first,
+P01,none,hobby,7,flagab09,Dark,flagab09_A.mid,flagab09_B.mid,second,unsure,
+P01,none,hobby,8,flagab10,Tense,flagab10_B.mid,flagab10_A.mid,same,same,
+P01,none,hobby,9,flagab01,Epic,flagab01_A.mid,flagab01_B.mid,first,first,
+P01,none,hobby,10,flagab12,Dark,flagab12_B.mid,flagab12_A.mid,same,same,
+P01,none,hobby,11,flagab08,Dark,flagab08_B.mid,flagab08_A.mid,second,second,
+P01,none,hobby,12,flagab03,Hard,flagab03_A.mid,flagab03_B.mid,unsure,second,
+P01,none,hobby,13,flagab04,Epic,flagab04_A.mid,flagab04_B.mid,second,second,repeat check of trial 1

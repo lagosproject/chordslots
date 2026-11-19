@@ -22,6 +22,9 @@ python3 tools/listening/recompute.py                  # all analyses, with the m
 
 `recompute.py` reports "trend only" below 5 participants, warns when nobody has music-theory training, and honours `data/EXCLUDE.txt` (for example the pilot). The rules were fixed before any data. See `data/README.md`.
 
+### Hosting on GitHub Pages (this repo)
+`build_page.py --docs --contact "..."` also writes `docs/listening-test.html`. After pushing, in the repo Settings > Pages choose "Deploy from a branch", branch `main`, folder `/docs`; the page is then at `https://lagosproject.github.io/chordslots/listening-test.html`. Everything in `docs/` becomes public on that site. Results come back as pasted text in a public issue (anonymous: random ID, training, answers) or by any other route you put in `--contact`.
+
 ## Analysis by hand
 
 ```

@@ -1,0 +1,24 @@
+participant,training,production_experience,trial,pair_id,mood_label,first_file,second_file,brighter,lighter_open_use,notes
+P01,none,hobby,1,pair02,,pair02_B.mid,pair02_A.mid,first,first,
+P01,none,hobby,2,pair16,,pair16_B.mid,pair16_A.mid,first,first,
+P01,none,hobby,3,pair08,,pair08_B.mid,pair08_A.mid,first,first,
+P01,none,hobby,4,pair05,,pair05_A.mid,pair05_B.mid,second,first,replayed
+P01,none,hobby,5,pair11,,pair11_A.mid,pair11_B.mid,first,first,replayed
+P01,none,hobby,6,pair19,,pair19_A.mid,pair19_B.mid,second,second,
+P01,none,hobby,7,pair22,,pair22_B.mid,pair22_A.mid,second,second,replayed
+P01,none,hobby,8,pair20,,pair20_B.mid,pair20_A.mid,second,second,
+P01,none,hobby,9,pair06,,pair06_B.mid,pair06_A.mid,first,first,
+P01,none,hobby,10,pair13,,pair13_A.mid,pair13_B.mid,first,first,
+P01,none,hobby,11,pair04,,pair04_B.mid,pair04_A.mid,second,second,replayed
+P01,none,hobby,12,pair01,,pair01_A.mid,pair01_B.mid,first,first,
+P01,none,hobby,13,pair15,,pair15_A.mid,pair15_B.mid,first,first,
+P01,none,hobby,14,pair10,,pair10_B.mid,pair10_A.mid,second,first,replayed
+P01,none,hobby,15,pair18,,pair18_B.mid,pair18_A.mid,second,first,
+P01,none,hobby,16,pair17,,pair17_A.mid,pair17_B.mid,first,first,
+P01,none,hobby,17,pair12,,pair12_B.mid,pair12_A.mid,first,second,
+P01,none,hobby,18,pair14,,pair14_B.mid,pair14_A.mid,second,second,replayed
+P01,none,hobby,19,pair21,,pair21_A.mid,pair21_B.mid,second,second,
+P01,none,hobby,20,pair09,,pair09_A.mid,pair09_B.mid,first,first,
+P01,none,hobby,21,pair07,,pair07_A.mid,pair07_B.mid,first,first,
+P01,none,hobby,22,pair03,,pair03_A.mid,pair03_B.mid,first,first,
+P01,none,hobby,23,pair17,,pair17_B.mid,pair17_A.mid,second,second,repeat check of trial 16

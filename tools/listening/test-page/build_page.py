@@ -35,6 +35,7 @@ def pairs_from(keys, midi_dir, media, with_mood=False):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--contact", default="", help="text shown to listeners: where to send the results file, e.g. an email address")
+    ap.add_argument("--docs", action="store_true", help="also write the page to docs/listening-test.html (served by GitHub Pages when Pages uses the docs folder)")
     args = ap.parse_args()
     media = {}
     blocks = {
@@ -54,6 +55,11 @@ def main():
     out = os.path.join(L, "listening-test.html")
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(html)
+    if args.docs:
+        dd = os.path.join(os.path.dirname(os.path.dirname(L)), "docs", "listening-test.html")
+        with open(dd, "w", encoding="utf-8") as fh:
+            fh.write(html)
+        print(f"wrote {dd}")
     print(f"wrote {out}: {len(media)} sound files, {sum(len(b.get('pairs', b.get('items', []))) for b in blocks.values())} pairs/items, {len(html) // 1024} KB")
 
 

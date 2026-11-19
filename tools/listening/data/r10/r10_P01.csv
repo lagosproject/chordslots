@@ -1,0 +1,6 @@
+participant,training,production_experience,trial,pair_id,mood_label,first_file,second_file,more_tense,asks_to_resolve,notes
+P01,none,hobby,1,pair03,,r10_pair03_A.mid,r10_pair03_B.mid,second,second,
+P01,none,hobby,2,pair04,,r10_pair04_B.mid,r10_pair04_A.mid,second,unsure,
+P01,none,hobby,3,pair02,,r10_pair02_B.mid,r10_pair02_A.mid,first,first,
+P01,none,hobby,4,pair01,,r10_pair01_A.mid,r10_pair01_B.mid,first,second,
+P01,none,hobby,5,pair03,,r10_pair03_B.mid,r10_pair03_A.mid,first,first,repeat check of trial 1
