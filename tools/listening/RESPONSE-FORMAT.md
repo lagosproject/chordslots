@@ -1,5 +1,7 @@
 # Response format for an interactive listening test
 
+A ready page that follows this format is in `test-page/` (see its README).
+
 If you build the listening session as an HTML page, make it **export the same CSV files that the paper sheets use**. Then `analyse_pairs.py` (blocks 1, 2, 4) and `blindpanel/analyse_panel.py` (block 3) work unchanged.
 
 ## Design calls

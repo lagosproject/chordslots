@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChordSlots listening test</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#d9d7d1;--accent:#2f6fed;--accent-ink:#fff;--ok:#1e8e4e;--warn:#b45309}
+@media (prefers-color-scheme:dark){:root{--bg:#161618;--card:#212124;--ink:#f1f1f3;--mute:#9a9aa2;--line:#3a3a40;--accent:#6c9bff;--accent-ink:#0b0b0d;--ok:#4cc58a;--warn:#f0a050}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:1.25rem;margin:.2rem 0 1rem}
+h2{font-size:1.05rem;margin:0 0 .6rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+label{display:block;margin:.7rem 0 .25rem;font-weight:600;font-size:.92rem}
+input[type=text],select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+button{font:inherit;padding:12px 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;min-height:46px}
+button:hover:not(:disabled){border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>*{flex:1 1 120px}
+.opts button.sel{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.scale button{flex:1 1 0;min-width:44px;padding:12px 0}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-bottom:14px}
+.bar>i{display:block;height:100%;background:var(--accent);width:0}
+.q{margin-top:16px}
+.q p{margin:0 0 .5rem;font-weight:600}
+.note{color:var(--mute);font-size:.88rem}
+.err{color:var(--warn);font-size:.92rem;white-space:pre-wrap}
+.status{min-height:1.5em;color:var(--mute);margin:.6rem 0}
+.label-chip{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:3px 12px;font-weight:600}
+.drag{cursor:grab;user-select:none;text-align:center}
+.hidden{display:none!important}
+.legend{display:flex;justify-content:space-between;color:var(--mute);font-size:.8rem;margin-top:4px}
+</style>
+</head>
+<body>
+<main>
+<h1>ChordSlots listening test</h1>
+
+<!-- ============ SETUP ============ -->
+<section id="setup" class="card">
+  <h2>Setup (facilitator)</h2>
+  <label for="sheetFile">1. Listener sheet (CSV made by the generator)</label>
+  <input id="sheetFile" type="file" accept=".csv,text/csv">
+  <label for="mediaFiles">2. Folder with the sound files (.mid, or rendered .mp3 / .wav)</label>
+  <input id="mediaFiles" type="file" webkitdirectory multiple>
+  <p class="note">Rendered audio is used when present; otherwise the page plays the .mid files with its own built-in synth, which is the same for every listener but is not a real piano.</p>
+  <label for="training">Musical training</label>
+  <select id="training"><option value="">(leave the sheet value)</option><option>music theory</option><option>none</option></select>
+  <label for="prod">Production experience (free text, e.g. "none", "hobby", "pro")</label>
+  <input id="prod" type="text" placeholder="none">
+  <label><input id="producerMode" type="checkbox"> Producer mode: after each answer, allow dragging the loops into a DAW</label>
+  <div id="setupErr" class="err"></div>
+  <div id="mediaErr" class="err"></div>
+  <div class="row" style="margin-top:14px">
+    <button id="practiceBtn" disabled>Practice trial (not recorded)</button>
+    <button id="startBtn" class="primary" disabled>Start</button>
+  </div>
+  <p class="note" id="resumeNote"></p>
+</section>
+
+<!-- ============ TRIAL ============ -->
+<section id="trial" class="hidden">
+  <div class="bar"><i id="barFill"></i></div>
+  <div class="card">
+    <div class="note" id="counter"></div>
+    <p id="intro" class="hidden" style="margin:.4rem 0 0"></p>
+    <div class="row" style="margin-top:12px">
+      <button id="playBtn" class="primary">▶ Play</button>
+      <button id="stopBtn" disabled>■ Stop</button>
+    </div>
+    <div class="status" id="status"></div>
+
+    <div id="qs" class="hidden">
+      <div class="q"><p id="q1text"></p><div class="row opts" id="q1opts"></div></div>
+      <div class="q"><p id="q2text"></p><div class="row opts" id="q2opts"></div></div>
+    </div>
+
+    <div id="dragBox" class="hidden q">
+      <p>Producer mode: drag a loop into your DAW (optional).</p>
+      <div class="row">
+        <div class="drag card" id="drag1" draggable="true">⠿ Loop 1</div>
+        <div class="drag card" id="drag2" draggable="true">⠿ Loop 2</div>
+      </div>
+      <p class="note">If dragging does not work in your browser, use the links: <a id="dl1" href="#">download loop 1</a> · <a id="dl2" href="#">download loop 2</a></p>
+    </div>
+
+    <div class="row" style="margin-top:18px">
+      <button id="nextBtn" class="primary" disabled>Next ›</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ DONE ============ -->
+<section id="done" class="card hidden">
+  <h2>Finished</h2>
+  <p id="doneMsg"></p>
+  <div class="row"><button id="downloadBtn" class="primary">Download answers (CSV)</button></div>
+  <p class="note">Send this CSV to the person who analyses the test. Do not tell the listener which file was which until everyone has finished.</p>
+</section>
+</main>
+
+<script>
+// ============================================================================
+// Pure functions (tested in node by test_page_logic.js; no DOM here)
+// PURE-BEGIN
+// ============================================================================
+function parseCsv(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
+      else f += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(f); f = ''; rows.push(row); row = [];
+    } else f += c;
+  }
+  if (f !== '' || row.length) { row.push(f); rows.push(row); }
+  return rows.filter(r => !(r.length === 1 && r[0] === ''));
+}
+function csvField(v) {
+  v = v == null ? '' : String(v);
+  return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function writeCsv(header, objs) {
+  const lines = [header.map(csvField).join(',')];
+  for (const o of objs) lines.push(header.map(h => csvField(o[h])).join(','));
+  return lines.join('\r\n') + '\r\n';
+}
+function sheetFromCsv(text) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) throw new Error('The sheet has no trials.');
+  const header = rows[0];
+  const objs = rows.slice(1).map(r => { const o = {}; header.forEach((h, i) => o[h] = r[i] == null ? '' : r[i]); return o; });
+  return { header, rows: objs };
+}
+const KINDS = {
+  r10:        { cols: ['more_tense', 'asks_to_resolve'],        type: 'pair' },
+  brightness: { cols: ['brighter', 'lighter_open_use'],         type: 'pair' },
+  flagab:     { cols: ['fits_mood', 'would_use'],               type: 'pair' },
+  panel:      { cols: ['plausibility', 'would_use'],            type: 'item' }
+};
+function detectKind(header) {
+  if (header.includes('plausibility')) return 'panel';
+  if (header.includes('more_tense')) return 'r10';
+  if (header.includes('fits_mood')) return 'flagab';
+  if (header.includes('brighter')) return 'brightness';
+  throw new Error('This CSV is not one of the listening sheets (no known answer columns).');
+}
+function baseKey(name) {            // "brightness/pairs/pair05_B.mid" -> "pair05_b"
+  const b = String(name).split(/[\\/]/).pop();
+  return b.replace(/\.[^.]+$/, '').toLowerCase();
+}
+function trialKeys(kind, row) {      // media keys needed by a sheet row
+  return KINDS[kind].type === 'item' ? [baseKey(row.item)] : [baseKey(row.first_file), baseKey(row.second_file)];
+}
+function questionTexts(kind, row) {
+  const label = (row.mood_label || '').trim();
+  switch (kind) {
+    case 'r10': return ['Which of the two sounds more tense?', 'Which one makes you want to hear something else next, more than the other?'];
+    case 'brightness': return ['Which sounds brighter?', 'Which would you use for a lighter, more open feel?'];
+    case 'flagab': return [`Which sounds more ${label}?`, `Which would you rather use for a track that should feel ${label}?`];
+    case 'panel': return ['How plausible is this as a chord progression for a song? (1 = not at all, 7 = very)', 'Would you use it as a starting point for your own music? (1 = never, 7 = certainly)'];
+  }
+}
+// Standard MIDI File -> { notes:[{t,dur,note,vel}], duration } in seconds.
+function parseMidi(buf) {
+  const d = new Uint8Array(buf); let p = 0;
+  const u32 = () => ((d[p++] << 24) | (d[p++] << 16) | (d[p++] << 8) | d[p++]) >>> 0;
+  const u16 = () => (d[p++] << 8) | d[p++];
+  const tag = () => String.fromCharCode(d[p++], d[p++], d[p++], d[p++]);
+  if (tag() !== 'MThd') throw new Error('Not a MIDI file');
+  u32(); const fmt = u16(), ntrk = u16(), div = u16();
+  if (div & 0x8000) throw new Error('SMPTE timing is not supported');
+  const tempos = [{ tick: 0, uspq: 500000 }]; const evs = [];
+  for (let t = 0; t < ntrk; t++) {
+    if (tag() !== 'MTrk') throw new Error('Bad track');
+    const len = u32(), end = p + len; let tick = 0, run = 0;
+    const vlq = () => { let v = 0, b; do { b = d[p++]; v = (v << 7) | (b & 0x7f); } while (b & 0x80); return v; };
+    while (p < end) {
+      tick += vlq(); let st = d[p];
+      if (st & 0x80) { p++; if (st < 0xF0) run = st; } else st = run;
+      if (st === 0xFF) {
+        const type = d[p++], l = vlq();
+        if (type === 0x51 && l === 3) tempos.push({ tick, uspq: (d[p] << 16) | (d[p + 1] << 8) | d[p + 2] });
+        p += l;
+      } else if (st === 0xF0 || st === 0xF7) { p += vlq(); }
+      else {
+        const hi = st & 0xF0, ch = st & 0x0F;
+        if (hi === 0xC0 || hi === 0xD0) { p += 1; }
+        else {
+          const a = d[p++], b = d[p++];
+          if (hi === 0x90 && b > 0) evs.push({ tick, on: true, ch, note: a, vel: b });
+          else if (hi === 0x80 || (hi === 0x90 && b === 0)) evs.push({ tick, on: false, ch, note: a });
+        }
+      }
+    }
+    p = end;
+  }
+  tempos.sort((a, b) => a.tick - b.tick);
+  const toSec = tick => {
+    let s = 0, last = 0, uspq = 500000;
+    for (const tm of tempos) { if (tm.tick > tick) break; s += (tm.tick - last) * uspq / 1e6 / div; last = tm.tick; uspq = tm.uspq; }
+    return s + (tick - last) * uspq / 1e6 / div;
+  };
+  evs.sort((a, b) => a.tick - b.tick || (a.on ? 1 : 0) - (b.on ? 1 : 0));
+  const open = {}, notes = []; let duration = 0;
+  for (const e of evs) {
+    if (e.ch === 9) continue;
+    const k = e.ch * 128 + e.note;
+    if (e.on) { (open[k] = open[k] || []).push(e); }
+    else if (open[k] && open[k].length) {
+      const on = open[k].shift(), t = toSec(on.tick), dur = Math.max(0.05, toSec(e.tick) - t);
+      notes.push({ t, dur, note: on.note, vel: on.vel }); duration = Math.max(duration, t + dur);
+    }
+  }
+  for (const k in open) for (const on of open[k]) { const t = toSec(on.tick); notes.push({ t, dur: 1, note: on.note, vel: on.vel }); duration = Math.max(duration, t + 1); }
+  return { notes, duration };
+}
+function mergeNote(existing, extra) {
+  existing = (existing || '').trim();
+  if (!extra || existing.split(';').map(s => s.trim()).includes(extra)) return existing;
+  return existing ? existing + '; ' + extra : extra;
+}
+// PURE-END
+
+// ============================================================================
+// UI
+// ============================================================================
+const $ = id => document.getElementById(id);
+let sheet = null, kind = null, media = {}, idx = 0, rowsOut = [];
+let ctx = null, timers = [], sources = [], clipCache = {};
+let plays = 0, heardAll = false, practice = false, dragged = false;
+
+function showSection(name) { for (const s of ['setup', 'trial', 'done']) $(s).classList.toggle('hidden', s !== name); }
+
+// ---- setup ----
+$('sheetFile').addEventListener('change', async e => {
+  $('setupErr').textContent = ''; sheet = null;
+  const f = e.target.files[0]; if (!f) return refreshSetup();
+  try {
+    sheet = sheetFromCsv(await f.text()); kind = detectKind(sheet.header);
+    if (!sheet.header.includes('participant')) throw new Error('Missing column: participant');
+    if (!sheet.header.includes('notes')) { sheet.header.push('notes'); sheet.rows.forEach(r => r.notes = ''); }
+    const who = sheet.rows[0].participant;
+    $('training').value = ['music theory', 'none'].includes(sheet.rows[0].training) ? sheet.rows[0].training : '';
+    $('prod').value = sheet.rows[0].production_experience || '';
+    let saved = null; try { saved = JSON.parse(localStorage.getItem(storeKey())); } catch (_) {}
+    $('resumeNote').textContent = saved && saved.idx > 0 ? `Saved progress found for ${who}: it will resume at trial ${saved.idx + 1}.` : '';
+  } catch (err) { sheet = null; $('setupErr').textContent = err.message; }
+  refreshSetup();
+});
+$('mediaFiles').addEventListener('change', e => {
+  media = {};
+  for (const f of e.target.files) {
+    const ext = f.name.split('.').pop().toLowerCase();
+    const k = baseKey(f.name); const slot = media[k] = media[k] || {};
+    if (ext === 'mid' || ext === 'midi') slot.mid = f;
+    else if (['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'].includes(ext)) slot.audio = f;
+  }
+  refreshSetup();
+});
+function refreshSetup() {
+  let ok = false, msg = '';
+  if (sheet && Object.keys(media).length) {
+    const need = new Set(); sheet.rows.forEach(r => trialKeys(kind, r).forEach(k => need.add(k)));
+    const missing = [...need].filter(k => !(media[k] && (media[k].audio || media[k].mid)));
+    ok = missing.length === 0;
+    if (!ok) msg = `Missing ${missing.length} of ${need.size} sound files, e.g. ${missing.slice(0, 4).join(', ')}.\nPick the folder that contains them (sub-folders are included).`;
+  }
+  $('mediaErr').textContent = msg;
+  $('startBtn').disabled = !ok; $('practiceBtn').disabled = !sheet;
+}
+function storeKey() { return 'cs_listen:' + kind + ':' + (sheet.rows[0].participant || 'P') + ':' + sheet.rows.length; }
+function save() { try { localStorage.setItem(storeKey(), JSON.stringify({ idx, rows: rowsOut })); } catch (_) {} }
+
+$('startBtn').onclick = () => {
+  rowsOut = sheet.rows.map(r => ({ ...r }));
+  const t = $('training').value, pe = $('prod').value.trim();
+  const hasTr = sheet.header.includes('training'), hasPe = sheet.header.includes('production_experience');
+  rowsOut.forEach(r => { if (t && hasTr) r.training = t; if (pe && hasPe) r.production_experience = pe; });
+  idx = 0; practice = false;
+  try {
+    const saved = JSON.parse(localStorage.getItem(storeKey()));
+    if (saved && saved.rows && saved.rows.length === rowsOut.length) { rowsOut = saved.rows; idx = Math.min(saved.idx, rowsOut.length); }
+  } catch (_) {}
+  ensureCtx(); idx >= rowsOut.length ? finish() : showTrial();
+};
+$('practiceBtn').onclick = () => { practice = true; idx = 0; ensureCtx(); showTrial(); };
+
+// ---- audio ----
+function ensureCtx() {
+  if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+  if (ctx.state === 'suspended') ctx.resume();
+}
+async function loadClip(key) {
+  if (clipCache[key]) return clipCache[key];
+  const m = media[key]; let clip;
+  if (m && m.audio) {
+    const buf = await ctx.decodeAudioData(await m.audio.arrayBuffer());
+    clip = { type: 'audio', buf, duration: buf.duration };
+  } else {
+    const mid = parseMidi(await m.mid.arrayBuffer());
+    clip = { type: 'midi', notes: mid.notes, duration: mid.duration + 1.2 };
+  }
+  return (clipCache[key] = clip);
+}
+function startClip(clip) {
+  const t0 = ctx.currentTime + 0.08;
+  if (clip.type === 'audio') {
+    const s = ctx.createBufferSource(); s.buffer = clip.buf; s.connect(ctx.destination); s.start(t0); sources.push(s);
+  } else {
+    const master = ctx.createGain(); master.gain.value = 0.22;
+    const comp = ctx.createDynamicsCompressor(); master.connect(comp); comp.connect(ctx.destination);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3800; lp.connect(master);
+    for (const n of clip.notes) {
+      const f = 440 * Math.pow(2, (n.note - 69) / 12), vel = n.vel / 127;
+      const tau = Math.max(0.6, 2.6 - (n.note - 36) * 0.03);       // low notes ring longer
+      const start = t0 + n.t, rel = start + Math.max(n.dur, 0.1), amp = 0.5 * vel;
+      [[1, 1], [2, 0.45], [3, 0.22], [4, 0.1], [5, 0.05]].forEach(([h, a]) => {
+        if (f * h > 9000) return;
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = f * h;
+        g.gain.setValueAtTime(0.0001, start);
+        g.gain.linearRampToValueAtTime(amp * a, start + 0.006);
+        g.gain.setTargetAtTime(0.0001, start + 0.006, tau / h);
+        g.gain.setTargetAtTime(0.0001, rel, 0.12);
+        o.connect(g); g.connect(lp); o.start(start); o.stop(rel + 1.0); sources.push(o);
+      });
+    }
+  }
+}
+function stopAll() {
+  timers.forEach(clearTimeout); timers = [];
+  sources.forEach(s => { try { s.stop(); } catch (_) {} }); sources = [];
+}
+const wait = ms => new Promise(res => timers.push(setTimeout(res, ms)));
+
+function currentKeys() {
+  if (practice) return null;
+  return trialKeys(kind, rowsOut[idx]);
+}
+let practiceClips = null;
+function makePracticeClips() {
+  const mk = (notes) => ({ type: 'midi', duration: 3.2, notes: notes.map(n => ({ t: 0, dur: 2.0, note: n, vel: 80 })) });
+  return [mk([48, 60, 64, 67]), mk([48, 60, 64, 67, 70])];   // C, then C7
+}
+async function playTrial() {
+  ensureCtx(); stopAll(); plays++; heardAll = false;
+  $('playBtn').disabled = true; $('stopBtn').disabled = false; $('nextBtn').disabled = true;
+  try {
+    let clips;
+    if (practice) { practiceClips = practiceClips || makePracticeClips(); clips = practiceClips; }
+    else clips = await Promise.all(currentKeys().map(loadClip));
+    const pair = clips.length === 2;
+    for (let i = 0; i < clips.length; i++) {
+      $('status').textContent = pair ? (i === 0 ? '▶ First…' : '▶ Second…') : '▶ Playing…';
+      startClip(clips[i]); await wait(clips[i].duration * 1000);
+      if (pair && i === 0) { $('status').textContent = '…'; await wait(3000); }
+    }
+    heardAll = true; $('status').textContent = '';
+    $('qs').classList.remove('hidden');
+    const left = plays < 2;
+    $('playBtn').textContent = left ? '↻ Play again (1 left)' : 'Played twice';
+    $('playBtn').disabled = !left;
+    $('stopBtn').disabled = true;
+    updateNext();
+  } catch (err) {
+    if (err && err.message && !/aborted/.test(err.message)) $('status').textContent = 'Playback problem: ' + err.message;
+    $('stopBtn').disabled = true; $('playBtn').disabled = false;
+  }
+}
+$('playBtn').onclick = playTrial;
+$('stopBtn').onclick = () => { stopAll(); $('status').textContent = 'Stopped. Press Play to hear it again.'; $('stopBtn').disabled = true; $('playBtn').disabled = false; plays = Math.max(0, plays - 1); };
+
+// ---- trial UI ----
+function showTrial() {
+  stopAll(); plays = 0; heardAll = false; dragged = false;
+  showSection('trial');
+  const total = practice ? 1 : rowsOut.length;
+  const row = practice ? { mood_label: '' } : rowsOut[idx];
+  const pk = practice ? 'r10' : kind;
+  $('counter').textContent = practice ? 'Practice (not recorded)' : `Trial ${idx + 1} of ${total}`;
+  $('barFill').style.width = (practice ? 0 : (idx / total * 100)) + '%';
+  const intro = $('intro');
+  if (!practice && kind === 'flagab' && row.mood_label) {
+    intro.classList.remove('hidden');
+    intro.innerHTML = `These two loops are meant to sound <span class="label-chip">${esc(row.mood_label)}</span>`;
+  } else intro.classList.add('hidden');
+  const [t1, t2] = questionTexts(pk, row);
+  $('q1text').textContent = t1; $('q2text').textContent = t2;
+  const cols = KINDS[pk].cols, isItem = KINDS[pk].type === 'item';
+  buildOptions('q1opts', cols[0], isItem, row); buildOptions('q2opts', cols[1], isItem, row);
+  $('qs').classList.add('hidden'); $('dragBox').classList.add('hidden'); $('status').textContent = '';
+  $('playBtn').textContent = isItem ? '▶ Play' : '▶ Play pair'; $('playBtn').disabled = false; $('stopBtn').disabled = true;
+  $('nextBtn').disabled = true; $('nextBtn').textContent = (!practice && idx === rowsOut.length - 1) ? 'Finish' : 'Next ›';
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+let current = {};
+function buildOptions(boxId, col, isItem, row) {
+  const box = $(boxId); box.innerHTML = ''; box.classList.toggle('scale', isItem);
+  const opts = isItem ? [1, 2, 3, 4, 5, 6, 7].map(n => [String(n), String(n)])
+                      : [['first', 'First'], ['second', 'Second'], ['same', 'The same'], ['unsure', 'Not sure']];
+  current[col] = practice ? '' : (row[col] || '');
+  for (const [val, text] of opts) {
+    const b = document.createElement('button'); b.textContent = text; b.dataset.v = val;
+    if (current[col] === val) b.classList.add('sel');
+    b.onclick = () => {
+      current[col] = val;
+      [...box.children].forEach(c => c.classList.toggle('sel', c === b));
+      if (!practice) { rowsOut[idx][col] = val; save(); }
+      updateNext();
+    };
+    box.appendChild(b);
+  }
+  if (isItem) { const lg = document.createElement('div'); lg.className = 'legend'; lg.style.flexBasis = '100%'; lg.innerHTML = '<span>low</span><span>high</span>'; box.appendChild(lg); }
+}
+function updateNext() {
+  const pk = practice ? 'r10' : kind, cols = KINDS[pk].cols;
+  const complete = heardAll && cols.every(c => current[c]);
+  $('nextBtn').disabled = !complete;
+  // Producer mode: loops can be dragged out only once the blind answers are given.
+  if (complete && !practice && $('producerMode').checked && KINDS[kind].type === 'pair') showDrag();
+}
+$('nextBtn').onclick = () => {
+  if (practice) { practice = false; showSection('setup'); stopAll(); return; }
+  const r = rowsOut[idx];
+  if (plays > 1) r.notes = mergeNote(r.notes, 'replayed');
+  if (dragged) r.notes = mergeNote(r.notes, 'dragged');
+  idx++; save();
+  idx >= rowsOut.length ? finish() : showTrial();
+};
+function finish() {
+  stopAll(); showSection('done'); $('barFill').style.width = '100%';
+  const answered = rowsOut.filter(r => KINDS[kind].cols.every(c => r[c])).length;
+  $('doneMsg').textContent = `Thank you. ${answered} of ${rowsOut.length} trials answered.`;
+}
+$('downloadBtn').onclick = () => {
+  const blob = new Blob([writeCsv(sheet.header, rowsOut)], { type: 'text/csv' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `${kind}_${rowsOut[0].participant}.csv`; document.body.appendChild(a); a.click(); a.remove();
+};
+
+// ---- producer mode: drag the loops (neutral names; only after the blind answer is possible) ----
+function showDrag() {
+  const keys = currentKeys(), n = idx + 1;
+  keys.forEach((k, i) => {
+    const m = media[k]; if (!m || !m.mid) return;
+    const url = URL.createObjectURL(m.mid), name = `loop_${String(n).padStart(2, '0')}_${i + 1}.mid`;
+    const el = $('drag' + (i + 1)), dl = $('dl' + (i + 1));
+    el.ondragstart = ev => { dragged = true; ev.dataTransfer.setData('DownloadURL', `audio/midi:${name}:${url}`); ev.dataTransfer.effectAllowed = 'copy'; };
+    dl.href = url; dl.download = name; dl.onclick = () => { dragged = true; };
+  });
+  if (keys.some(k => media[k] && media[k].mid)) $('dragBox').classList.remove('hidden');
+}
+</script>
+</body>
+</html>
