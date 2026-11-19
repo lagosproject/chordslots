@@ -87,7 +87,7 @@ void LanesView::paint (juce::Graphics& g)
         const juce::String text = juce::String (juce::roundToInt (100.0f * targetOf (s, readoutLane))) + "%"
                                 + "  (chord " + juce::String (juce::roundToInt (100.0f * actualOf (s, readoutLane))) + "%)";
         g.setFont (ui::font (11.0f, true));
-        const float w = juce::jmin (110.0f, juce::jmax (46.0f, g.getCurrentFont().getStringWidthFloat (text) + 10.0f));
+        const float w = juce::jmin (110.0f, juce::jmax (46.0f, (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), text) + 10.0f));
         const float cx = (x0 + x1) * 0.5f;
         const float bx = juce::jlimit (0.0f, (float) getWidth() - w, cx - w * 0.5f);
         const juce::Rectangle<float> pill (bx, lb.getY() + 3.0f, w, 16.0f);
