@@ -52,3 +52,19 @@ Continues [session 1](DAW-CHECKLIST.md#session-1-results-19-november-2026-window
 | Commit | |
 | Bug fix confirmed (N2 to N4) | yes / no / not sure |
 | Anything odd | |
+
+## Results (19 November 2026, Windows 11, Ableton Live 12.1)
+
+| Step | Result |
+|---|---|
+| N1 to N4 | **Pass.** The Energy fix works in the host: only the dragged slot changes. |
+| D2 | Pass. |
+| D6 | **Not testable.** The UI shows no Energy value and cannot set an exact percentage. Skipped. The engine audit already covers 59, 60 and 61 %. |
+| D7 | Largest Match change from an Energy edit: 3 %. |
+| D8 | A cut cannot be dragged past its neighbouring cuts. **By design** (`moveCut` keeps each cut between its neighbours, at least one step from each; a locked cut does not move). |
+| E2 | Pass. |
+| F5 | Not understood, skipped. |
+| I1 to I3, I5 | Pass. |
+| U1 | Undo went back 69 steps; Redo does not exist. The code keeps 64 steps per variation, so 69 suggests the count mixed several variations or some steps were counted twice. Not explained yet. |
+
+**Open items:** no Redo (decide whether to add it); no Energy value display (a number readout while dragging would make D6 possible); Undo depth undocumented.
