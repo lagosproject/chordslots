@@ -55,7 +55,8 @@ def build_trials(pair_ids, participant_index, table, rng):
               for p in pair_ids]
     rng.shuffle(trials)
 
-    original = rng.choice(trials)
+    # The original must leave room for a non-adjacent repeat after it.
+    original = rng.choice(trials[:len(trials) - 2])
     reversed_orient = "BA" if original["orient"] == "AB" else "AB"
     repeat = {"pair_id": original["pair_id"], "orient": reversed_orient, "notes": ""}
     # Insert from trial 3 onward so the repeat is never adjacent to its original.
