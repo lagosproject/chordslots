@@ -68,3 +68,15 @@ Continues [session 1](DAW-CHECKLIST.md#session-1-results-19-november-2026-window
 | U1 | Undo went back 69 steps; Redo does not exist. The code keeps 64 steps per variation, so 69 suggests the count mixed several variations or some steps were counted twice. Not explained yet. |
 
 **Open items:** no Redo (decide whether to add it); no Energy value display (a number readout while dragging would make D6 possible); Undo depth undocumented.
+
+## Session 3: Redo and lane readouts (new build needed)
+
+| # | Action | Expected | Result |
+|---|---|---|---|
+| R1 | Make 3 edits (for example three Rolls). Press Undo three times, then **Redo** three times (button, then Ctrl+Shift+Z, then Ctrl+Y). | Each Redo brings back one edit, in order. The Redo button is greyed out when there is nothing to redo. | |
+| R2 | Undo twice, then make a new edit. | Redo is greyed out (a new edit ends the redo branch). | |
+| R3 | Undo on variation A, switch to B, switch back to A. | Redo still available on A. B has its own Undo and Redo. | |
+| R4 | Hover over a slot in each lane (Brightness, Tension, Energy), without clicking. | A small label shows the target % and "(chord N%)", the measured value of the chord. | |
+| R5 | Drag in each lane. | The label follows the slot and shows the value live. It disappears on release. | |
+| R6 | Check the label does not hide something important and fits at the lane edges (first and last slot). | Readable, not cut off. | |
+| R7 | Count Undo steps again from a fresh project (just Rolls on one variation). | Max 64. Write the number you get. | |

@@ -712,6 +712,10 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     undoButton.onClick = [this] { processor.undo(); };
     addAndMakeVisible (undoButton);
 
+    redoButton.getProperties().set ("icon", (int) ui::ButtonIcon::Redo);
+    redoButton.onClick = [this] { processor.redo(); };
+    addAndMakeVisible (redoButton);
+
     rollButton.getProperties().set ("primary", true);
     rollButton.setTooltip ("Generate new chords for all unlocked slots");
     rollButton.onClick = [this]
@@ -1203,6 +1207,8 @@ void ChordSlotsEditor::refresh()
     const char varLetters[] = { 'A', 'B', 'C', 'D' };
     const int edVar = processor.getEditVariation();
     undoButton.setTooltip (juce::String ("Undo (Variation ") + varLetters[edVar] + ")");
+    redoButton.setEnabled (processor.canRedo());
+    redoButton.setTooltip (juce::String ("Redo (Variation ") + varLetters[edVar] + ")");
 
     timeline.setProgression (p);
     lanes.setProgression (p);
@@ -1462,6 +1468,14 @@ void ChordSlotsEditor::importMidi (bool harmonize)
 
 bool ChordSlotsEditor::keyPressed (const juce::KeyPress& key)
 {
+    // Cmd/Ctrl + Shift + Z or Cmd/Ctrl + Y: Redo
+    if (key.getModifiers().isCommandDown()
+        && ((key.getKeyCode() == 'Z' && key.getModifiers().isShiftDown()) || key.getKeyCode() == 'Y'))
+    {
+        processor.redo();
+        return true;
+    }
+
     // Cmd/Ctrl + Z: Undo
     if (key.getKeyCode() == 'Z' && key.getModifiers().isCommandDown())
     {
@@ -1564,6 +1578,8 @@ void ChordSlotsEditor::resized()
     grooveViewButton.setBounds (tabRow.removeFromLeft (112));
     tabRow.removeFromLeft (8);
     undoButton.setBounds (tabRow.removeFromLeft (62).reduced (0, 2));
+    tabRow.removeFromLeft (4);
+    redoButton.setBounds (tabRow.removeFromLeft (62).reduced (0, 2));
 
     auto sharedControls = tabRow.reduced (0, 2);
     if (optionsButton.isVisible())

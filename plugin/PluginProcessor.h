@@ -78,7 +78,9 @@ public:
     /** Stores an undo point without changing anything (call before a drag). */
     void beginGesture();
     bool undo();
+    bool redo();
     bool canUndo() const;
+    bool canRedo() const;
 
     //==============================================================================
     // Transport / audition (lock-free, safe from the UI)
@@ -177,6 +179,7 @@ private:
     std::atomic<bool> songEnabled { false };
     cs::Rng rng;
     std::array<std::vector<cs::Progression>, cs::kNumVariations> histories;
+    std::array<std::vector<cs::Progression>, cs::kNumVariations> redoStacks;
     std::atomic<int> editVariation { 0 };
     std::atomic<bool> followPlayback { false };
 

@@ -81,7 +81,7 @@ private:
     juce::Label lockCaption;
     juce::Slider adventure, variety, syncopation, bassMotion;
     juce::Label adventureLabel, varietyLabel, syncopationLabel, bassMotionLabel;
-    juce::TextButton undoButton { "Undo" }, rollButton { "ROLL" };
+    juce::TextButton undoButton { "Undo" }, redoButton { "Redo" }, rollButton { "ROLL" };
 
     // Footer Panel 2: Groove & Feel
     juce::TextButton compBox;

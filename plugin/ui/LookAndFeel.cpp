@@ -130,6 +130,14 @@ void ChordSlotsLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton&
             shape.lineTo (7.0f, 4.5f);
             shape.cubicTo (12.0f, 4.5f, 12.0f, 11.0f, 7.0f, 11.0f);
             break;
+        case ui::ButtonIcon::Redo: // Undo mirrored horizontally
+            shape.startNewSubPath (8.5f, 1.0f);
+            shape.lineTo (12.0f, 4.5f);
+            shape.lineTo (8.5f, 8.0f);
+            shape.startNewSubPath (12.0f, 4.5f);
+            shape.lineTo (6.0f, 4.5f);
+            shape.cubicTo (1.0f, 4.5f, 1.0f, 11.0f, 6.0f, 11.0f);
+            break;
         case ui::ButtonIcon::None:
             break;
     }

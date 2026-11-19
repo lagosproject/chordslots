@@ -77,6 +77,28 @@ void LanesView::paint (juce::Graphics& g)
         g.drawText (laneNames[lane], lb.reduced (8.0f, 4.0f).toNearestInt(), juce::Justification::topLeft, false);
     }
 
+    // Value readout for the slot under the pointer: target and measured chord value, in percent.
+    if (readoutLane >= 0 && readoutSlot >= 0 && readoutSlot < prog.numSlots)
+    {
+        const cs::Slot& s = prog.slots[(size_t) readoutSlot];
+        const auto lb = laneBounds (readoutLane);
+        const float x0 = (float) (s.start / len) * lb.getWidth();
+        const float x1 = (float) (prog.slotEnd (readoutSlot) / len) * lb.getWidth();
+        const juce::String text = juce::String (juce::roundToInt (100.0f * targetOf (s, readoutLane))) + "%"
+                                + "  (chord " + juce::String (juce::roundToInt (100.0f * actualOf (s, readoutLane))) + "%)";
+        g.setFont (ui::font (11.0f, true));
+        const float w = juce::jmin (110.0f, juce::jmax (46.0f, g.getCurrentFont().getStringWidthFloat (text) + 10.0f));
+        const float cx = (x0 + x1) * 0.5f;
+        const float bx = juce::jlimit (0.0f, (float) getWidth() - w, cx - w * 0.5f);
+        const juce::Rectangle<float> pill (bx, lb.getY() + 3.0f, w, 16.0f);
+        g.setColour (ui::background.withAlpha (0.92f));
+        g.fillRoundedRectangle (pill, 4.0f);
+        g.setColour (laneColours[readoutLane]);
+        g.drawRoundedRectangle (pill, 4.0f, 1.0f);
+        g.setColour (juce::Colours::white);
+        g.drawText (text, pill.toNearestInt(), juce::Justification::centred, false);
+    }
+
     if (isDragOver)
     {
         g.setColour (ui::accent.withAlpha (0.25f));
@@ -104,23 +126,54 @@ juce::String LanesView::getTooltip()
     return "Drop a MIDI file here to extract target curves from it.";
 }
 
+int LanesView::slotAtX (float x) const
+{
+    const double step = (double) x / juce::jmax (1, getWidth()) * prog.lengthSteps();
+    for (int i = prog.numSlots - 1; i >= 0; --i)
+        if (step >= prog.slots[(size_t) i].start)
+            return i;
+    return 0;
+}
+
+int LanesView::laneAt (juce::Point<float> pos) const
+{
+    for (int lane = 0; lane < 3; ++lane)
+        if (laneBounds (lane).contains (pos))
+            return lane;
+    return -1;
+}
+
+void LanesView::setReadout (int lane, int slot)
+{
+    if (lane == readoutLane && slot == readoutSlot)
+        return;
+    readoutLane = lane;
+    readoutSlot = slot;
+    repaint();
+}
+
+void LanesView::mouseMove (const juce::MouseEvent& e)
+{
+    const int lane = laneAt (e.position);
+    setReadout (lane, lane < 0 ? -1 : slotAtX (e.position.x));
+}
+
+void LanesView::mouseExit (const juce::MouseEvent&)
+{
+    if (dragLane < 0)
+        setReadout (-1, -1);
+}
+
 void LanesView::applyDrag (const juce::MouseEvent& e)
 {
     if (dragLane < 0)
         return;
     const auto lb = laneBounds (dragLane).reduced (0.0f, 3.0f);
     const float value = juce::jlimit (0.0f, 1.0f, (lb.getBottom() - e.position.y) / lb.getHeight());
-    const double step = (double) e.position.x / juce::jmax (1, getWidth()) * prog.lengthSteps();
-
-    int slot = 0;
-    for (int i = prog.numSlots - 1; i >= 0; --i)
-        if (step >= prog.slots[(size_t) i].start)
-        {
-            slot = i;
-            break;
-        }
+    const int slot = slotAtX (e.position.x);
 
     editedMask |= 1u << slot;
+    setReadout (dragLane, slot);
     const int lane = dragLane;
     processor.edit ([slot, lane, value] (cs::Progression& p, cs::Rng&)
     {
@@ -154,6 +207,7 @@ void LanesView::mouseUp (const juce::MouseEvent&)
     const unsigned mask = editedMask;
     const bool energy = dragLane == 2;
     dragLane = -1;
+    setReadout (-1, -1);
     // Brightness and Tension regenerate by the edited-slot mask.
     // Energy reapplies voicing and velocity targets to the edited, unlocked slots only.
     processor.edit ([mask, energy] (cs::Progression& p, cs::Rng& rng)

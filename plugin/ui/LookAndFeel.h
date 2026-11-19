@@ -18,7 +18,7 @@ const juce::Colour brightness { 0xfff3b743 };
 const juce::Colour tension    { 0xffef5d6e };
 const juce::Colour energy     { 0xff3ec9bf };
 
-enum class ButtonIcon { None, Transport, Save, Undo };
+enum class ButtonIcon { None, Transport, Save, Undo, Redo };
 
 juce::Font font (float height, bool bold = false);
 /** Slot colour: deep blue for dark chords, warm gold for bright ones. */

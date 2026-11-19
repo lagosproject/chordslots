@@ -612,6 +612,7 @@ void ChordSlotsProcessor::pushHistory (int variationIndex)
 {
     const int idx = juce::jlimit (0, cs::kNumVariations - 1, variationIndex);
     histories[(size_t) idx].push_back (variations[(size_t) idx]);
+    redoStacks[(size_t) idx].clear(); // a new edit ends the redo branch
     if (histories[(size_t) idx].size() > 64)
         histories[(size_t) idx].erase (histories[(size_t) idx].begin());
 }
@@ -636,8 +637,31 @@ bool ChordSlotsProcessor::undo()
         const int idx = editVariation.load();
         if (histories[(size_t) idx].empty())
             return false;
+        redoStacks[(size_t) idx].push_back (variations[(size_t) idx]);
         variations[(size_t) idx] = histories[(size_t) idx].back();
         histories[(size_t) idx].pop_back();
+        publish();
+    }
+    sendChangeMessage();
+    return true;
+}
+
+bool ChordSlotsProcessor::canRedo() const
+{
+    const juce::ScopedLock sl (modelLock);
+    return ! redoStacks[(size_t) editVariation.load()].empty();
+}
+
+bool ChordSlotsProcessor::redo()
+{
+    {
+        const juce::ScopedLock sl (modelLock);
+        const int idx = editVariation.load();
+        if (redoStacks[(size_t) idx].empty())
+            return false;
+        histories[(size_t) idx].push_back (variations[(size_t) idx]);
+        variations[(size_t) idx] = redoStacks[(size_t) idx].back();
+        redoStacks[(size_t) idx].pop_back();
         publish();
     }
     sendChangeMessage();
@@ -2076,7 +2100,10 @@ void ChordSlotsProcessor::setStateInformation (const void* data, int size)
     {
         const juce::ScopedLock sl (modelLock);
         for (int i = 0; i < cs::kNumVariations; ++i)
+        {
             histories[(size_t) i].clear();
+            redoStacks[(size_t) i].clear();
+        }
 
         song = {};
         const auto songTree = root.getChildWithName ("Song");
