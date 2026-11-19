@@ -5,7 +5,7 @@ const html = fs.readFileSync(path.join(L, 'listening-test.html'), 'utf8');
 const dataSrc = html.split('const DATA = ')[1].split(';\n')[0];
 const pure = html.split('// PURE-BEGIN')[1].split('// PURE-END')[0];
 const sb = {}; vm.createContext(sb);
-vm.runInContext('this.DATA=' + dataSrc + ';\n' + pure + '\nthis.api={KINDS,writeCsv,makeSheet,trialKeys,baseKey,questionTexts,parseMidi,mergeNote,rng};', sb);
+vm.runInContext('this.DATA=' + dataSrc + ';\n' + pure + '\nthis.api={KINDS,writeCsv,makeSheet,trialKeys,baseKey,questionTexts,parseMidi,mergeNote,rng,idInfo,randomId,resultsJson};', sb);
 const A = sb.api, DATA = sb.DATA;
 const ORDER = ['r10', 'brightness', 'panel', 'flagab'];
 
@@ -103,4 +103,31 @@ print(json.dumps(n))" ${tmpf}`).toString());
   assert.strictEqual(m.notes.length, py, key); assert(m.duration > 1 && m.duration < 120, key + ' ' + m.duration); checked++;
 }
 assert.strictEqual(A.mergeNote('repeat check of trial 3', 'replayed'), 'repeat check of trial 3; replayed');
+// 5. Random ids: valid labels, deterministic, every participant sees half the pairs A-first; JSON export imports and recomputes
+const ids = Array.from({ length: 12 }, () => A.randomId());
+assert.strictEqual(new Set(ids).size, 12); ids.forEach(i => assert(/^[A-HJ-NP-Z2-9]{6}$/.test(i), i));
+assert.strictEqual(A.idInfo('7').label, 'P07'); assert.strictEqual(A.idInfo(' k7m2q ').label, 'PK7M2Q');
+let parities = 0;
+for (const id of ids) {
+  const sh = A.makeSheet('brightness', DATA.blocks.brightness, id, 'none', 'hobby');
+  assert.deepStrictEqual(sh.rows, A.makeSheet('brightness', DATA.blocks.brightness, id, 'none', 'hobby').rows);
+  const firstA = sh.rows.filter(r => /_A\.mid$/.test(r.first_file)).length; assert(Math.abs(firstA - sh.rows.length / 2) <= 2, `${id} ${firstA}`);
+  parities += A.idInfo(id).parity;
+}
+assert(parities > 0 && parities < 12, 'both orientations occur');
+const dd = path.join(tmp, 'data'), jf = path.join(tmp, 'res.json'), blocksAll = [];
+for (const id of ['QQQQQQ', 'WWWWWW', 'EEEEEE', 'RRRRRR', 'TTTTTT']) {
+  const bl = ORDER.map(k => { const sh = A.makeSheet(k, DATA.blocks[k], id, id === 'QQQQQQ' ? 'music theory' : 'none', 'hobby');
+    for (const row of sh.rows) { if (k === 'panel') { row.plausibility = '5'; row.would_use = '4'; } else { const f = row.first_file.match(/_([AB])\.mid$/)[1]; row[A.KINDS[k].cols[0]] = row[A.KINDS[k].cols[1]] = f === 'A' ? 'first' : 'second'; } }
+    return sh; });
+  fs.writeFileSync(jf, A.resultsJson(A.idInfo(id).label, 'none', 'hobby', bl));
+  run([path.join(L, 'import_results.py'), '--data', dd, jf]);
+}
+assert.throws(() => cp.execFileSync('python3', [path.join(L, 'import_results.py'), '--data', dd, jf], { stdio: 'pipe' }), 'duplicate refused');
+fs.writeFileSync(jf, '{"format":"cs-listening-1","blocks":{"r10":"participant,x\\r\\n../../evil,1\\r\\n"}}');
+assert.throws(() => cp.execFileSync('python3', [path.join(L, 'import_results.py'), '--data', dd, jf], { stdio: 'pipe' }), 'bad columns refused');
+assert(!fs.existsSync(path.join(dd, '..', 'evil')));
+const rc = run([path.join(L, 'recompute.py'), '--data', dd]);
+assert(/r10 {7}5/.test(rc) || /r10\s+5/.test(rc), rc.slice(0, 400)); assert(/with music-theory training: 1/.test(rc));
+fs.writeFileSync(dd + '/EXCLUDE.txt', '# pilot\nPQQQQQQ\n'); assert(/r10\s+4/.test(run([path.join(L, 'recompute.py'), '--data', dd])));
 console.log(`page logic tests OK (${checked} sounds, sheet rules, analysis pipeline)`);

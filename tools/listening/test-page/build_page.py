@@ -6,7 +6,7 @@ Run after regenerating any stimuli:  python3 tools/listening/test-page/build_pag
 Only neutral identifiers go into the page (pair ids, file base names, the mood word of block 4, item ids). The
 operator keys (what A and B are, engine values, flag on/off) stay in the repo and are used by the analysis scripts.
 """
-import base64, csv, json, os
+import argparse, base64, csv, json, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 L = os.path.dirname(HERE)
@@ -33,6 +33,9 @@ def pairs_from(keys, midi_dir, media, with_mood=False):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--contact", default="", help="text shown to listeners: where to send the results file, e.g. an email address")
+    args = ap.parse_args()
     media = {}
     blocks = {
         "r10": {"pairs": pairs_from(["r10/pairs.json"], "r10/stimuli", media)},
@@ -47,6 +50,7 @@ def main():
     data = json.dumps({"blocks": blocks, "media": media}, separators=(",", ":"))
     assert "/*DATA*/null/*END-DATA*/" in template
     html = template.replace("/*DATA*/null/*END-DATA*/", data)
+    html = html.replace("/*CONTACT*/''/*END-CONTACT*/", json.dumps(args.contact).replace("</", "<\\/"))
     out = os.path.join(L, "listening-test.html")
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(html)
