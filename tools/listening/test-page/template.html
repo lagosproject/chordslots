@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChordSlots listening test</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--ink:#1d1d1f;--mute:#6b6b70;--line:#d9d7d1;--accent:#2f6fed;--accent-ink:#fff;--warn:#b45309}
+@media (prefers-color-scheme:dark){:root{--bg:#161618;--card:#212124;--ink:#f1f1f3;--mute:#9a9aa2;--line:#3a3a40;--accent:#6c9bff;--accent-ink:#0b0b0d;--warn:#f0a050}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:1.25rem;margin:.2rem 0 1rem}
+h2{font-size:1.05rem;margin:0 0 .6rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+label{display:block;margin:.7rem 0 .25rem;font-weight:600;font-size:.92rem}
+input[type=text],input[type=number],select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+button{font:inherit;padding:12px 16px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;min-height:46px}
+button:hover:not(:disabled){border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>*{flex:1 1 120px}
+.opts button.sel{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.scale button{flex:1 1 0;min-width:44px;padding:12px 0}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-bottom:14px}
+.bar>i{display:block;height:100%;background:var(--accent);width:0}
+.q{margin-top:16px}
+.q p{margin:0 0 .5rem;font-weight:600}
+.note{color:var(--mute);font-size:.88rem}
+.err{color:var(--warn);font-size:.92rem;white-space:pre-wrap}
+.status{min-height:1.5em;color:var(--mute);margin:.6rem 0}
+.label-chip{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:3px 12px;font-weight:600}
+.drag{cursor:grab;user-select:none;text-align:center}
+.hidden{display:none!important}
+.legend{display:flex;justify-content:space-between;color:var(--mute);font-size:.8rem;margin-top:4px;flex-basis:100%}
+details{margin-top:14px}
+summary{cursor:pointer;color:var(--mute);font-size:.9rem}
+</style>
+</head>
+<body>
+<main>
+<h1>ChordSlots listening test</h1>
+
+<!-- ============ SETUP ============ -->
+<section id="setup" class="card">
+  <h2>Welcome</h2>
+  <p>You will hear short chord loops on a piano-like sound and answer a few quick questions. There are no right or wrong answers. Answer from your first impression. If you hear no difference, say so: that is a useful answer. It takes about 45 minutes. Use headphones at a comfortable volume.</p>
+  <label for="num">Participant number (the person running the test gives you this)</label>
+  <input id="num" type="number" min="1" max="99" value="1">
+  <label for="training">Musical training</label>
+  <select id="training"><option value="">Choose…</option><option value="none">None or informal</option><option value="music theory">Music theory or formal training</option></select>
+  <label for="prod">Music production experience</label>
+  <select id="prod"><option value="">Choose…</option><option>none</option><option>hobby</option><option>semi-pro</option><option>professional</option></select>
+  <label><input id="producerMode" type="checkbox"> Producer mode: after each answer, let me drag the loops into my DAW</label>
+  <details>
+    <summary>Advanced: use rendered audio instead of the built-in sound</summary>
+    <p class="note">Optional. Pick a folder with .mp3/.wav files named like the stimuli (for example pair05_A.mp3). Leave empty to use the built-in sound.</p>
+    <input id="audioFiles" type="file" webkitdirectory multiple>
+  </details>
+  <div id="setupErr" class="err"></div>
+  <div class="row" style="margin-top:14px">
+    <button id="practiceBtn" disabled>Try a sample first</button>
+    <button id="startBtn" class="primary" disabled>Start</button>
+  </div>
+  <p class="note" id="resumeNote"></p>
+</section>
+
+<!-- ============ BLOCK INTRO ============ -->
+<section id="intro" class="card hidden">
+  <h2 id="introTitle"></h2>
+  <p id="introText"></p>
+  <button id="introBtn" class="primary">Continue</button>
+</section>
+
+<!-- ============ TRIAL ============ -->
+<section id="trial" class="hidden">
+  <div class="bar"><i id="barFill"></i></div>
+  <div class="card">
+    <div class="note" id="counter"></div>
+    <p id="moodLine" class="hidden" style="margin:.4rem 0 0"></p>
+    <div class="row" style="margin-top:12px">
+      <button id="playBtn" class="primary">▶ Play</button>
+      <button id="stopBtn" disabled>■ Stop</button>
+    </div>
+    <div class="status" id="status"></div>
+
+    <div id="qs" class="hidden">
+      <div class="q"><p id="q1text"></p><div class="row opts" id="q1opts"></div></div>
+      <div class="q"><p id="q2text"></p><div class="row opts" id="q2opts"></div></div>
+    </div>
+
+    <div id="dragBox" class="hidden q">
+      <p>Producer mode: drag a loop into your DAW (optional).</p>
+      <div class="row">
+        <div class="drag card" id="drag1" draggable="true">⠿ Loop 1</div>
+        <div class="drag card" id="drag2" draggable="true">⠿ Loop 2</div>
+      </div>
+      <p class="note">If dragging does not work, use the links: <a id="dl1" href="#">download loop 1</a> · <a id="dl2" href="#">download loop 2</a></p>
+    </div>
+
+    <div class="row" style="margin-top:18px">
+      <button id="nextBtn" class="primary" disabled>Next ›</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ DONE ============ -->
+<section id="done" class="card hidden">
+  <h2>Finished, thank you!</h2>
+  <p id="doneMsg"></p>
+  <div class="row"><button id="downloadAll" class="primary">Download all answers</button></div>
+  <p class="note">Four small CSV files will be saved (your browser may ask to allow multiple downloads: allow it). Send them to the person who runs the test. Or download one at a time:</p>
+  <div class="row" id="dlList"></div>
+</section>
+</main>
+
+<script>
+// ============================================================================
+// Embedded stimuli and structure (generated by build_page.py; do not edit by hand)
+// ============================================================================
+const DATA = /*DATA*/null/*END-DATA*/;
+
+// Pure functions (tested in node by test_page_logic.js; no DOM here)
+// PURE-BEGIN
+const KINDS = {
+  r10:        { cols: ['more_tense', 'asks_to_resolve'], type: 'pair' },
+  brightness: { cols: ['brighter', 'lighter_open_use'],  type: 'pair' },
+  panel:      { cols: ['plausibility', 'would_use'],     type: 'item' },
+  flagab:     { cols: ['fits_mood', 'would_use'],        type: 'pair' }
+};
+function csvField(v) {
+  v = v == null ? '' : String(v);
+  return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function writeCsv(header, objs) {
+  const lines = [header.map(csvField).join(',')];
+  for (const o of objs) lines.push(header.map(h => csvField(o[h])).join(','));
+  return lines.join('\r\n') + '\r\n';
+}
+function hashSeed(str) {            // xmur3
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = h << 13 | h >>> 19; }
+  h = Math.imul(h ^ h >>> 16, 2246822507); h = Math.imul(h ^ h >>> 13, 3266489909);
+  return (h ^ h >>> 16) >>> 0;
+}
+function rng(seedStr) {             // mulberry32
+  let a = hashSeed(seedStr);
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+function shuffle(arr, rand) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+// Builds one participant's sheet for one block, with the same columns and rules as the Python generators:
+// every pair once, A/B order balanced across consecutive participant numbers, shuffled order, one reversed repeat.
+function makeSheet(kind, def, n, training, prod) {
+  const label = 'P' + pad2(n), rand = rng(`cs:${kind}:${label}`);
+  if (KINDS[kind].type === 'item') {
+    const header = ['participant', 'training', 'item', 'plausibility', 'would_use', 'notes'];
+    const rows = shuffle(def.items, rand).map(id => ({ participant: label, training, item: id, plausibility: '', would_use: '', notes: '' }));
+    return { kind, header, rows };
+  }
+  const [c1, c2] = KINDS[kind].cols;
+  const header = ['participant', 'training', 'production_experience', 'trial', 'pair_id', 'mood_label', 'first_file', 'second_file', c1, c2, 'notes'];
+  let trials = def.pairs.map((p, k) => ({ p, orient: (n - 1 + k) % 2 === 0 ? 'AB' : 'BA', notes: '' }));
+  trials = shuffle(trials, rand);
+  const oi = Math.floor(rand() * Math.max(1, trials.length - 3));
+  const original = trials[oi];
+  const repeat = { p: original.p, orient: original.orient === 'AB' ? 'BA' : 'AB', notes: '' };
+  const lo = Math.max(oi + 3, 3), pos = lo + Math.floor(rand() * (trials.length - lo + 1));
+  trials.splice(pos, 0, repeat);
+  repeat.notes = `repeat check of trial ${trials.indexOf(original) + 1}`;
+  const rows = trials.map((t, i) => ({
+    participant: label, training, production_experience: prod, trial: i + 1, pair_id: t.p.id, mood_label: t.p.mood || '',
+    first_file: t.p.base[t.orient[0]] + '.mid', second_file: t.p.base[t.orient[1]] + '.mid',
+    [c1]: '', [c2]: '', notes: t.notes
+  }));
+  return { kind, header, rows };
+}
+function baseKey(name) { return String(name).split(/[\\/]/).pop().replace(/\.[^.]+$/, '').toLowerCase(); }
+function trialKeys(kind, row) {
+  return KINDS[kind].type === 'item' ? [baseKey(row.item)] : [baseKey(row.first_file), baseKey(row.second_file)];
+}
+function questionTexts(kind, row) {
+  const label = (row.mood_label || '').trim();
+  switch (kind) {
+    case 'r10': return ['Which of the two sounds more tense?', 'Which one makes you want to hear something else next, more than the other?'];
+    case 'brightness': return ['Which sounds brighter?', 'Which would you use for a lighter, more open feel?'];
+    case 'flagab': return [`Which sounds more ${label}?`, `Which would you rather use for a track that should feel ${label}?`];
+    case 'panel': return ['How plausible is this as a chord progression for a song? (1 = not at all, 7 = very)', 'Would you use it as a starting point for your own music? (1 = never, 7 = certainly)'];
+  }
+}
+function parseMidi(buf) {           // Standard MIDI File -> { notes:[{t,dur,note,vel}], duration } in seconds
+  const d = new Uint8Array(buf); let p = 0;
+  const u32 = () => ((d[p++] << 24) | (d[p++] << 16) | (d[p++] << 8) | d[p++]) >>> 0;
+  const u16 = () => (d[p++] << 8) | d[p++];
+  const tag = () => String.fromCharCode(d[p++], d[p++], d[p++], d[p++]);
+  if (tag() !== 'MThd') throw new Error('Not a MIDI file');
+  u32(); u16(); const ntrk = u16(), div = u16();
+  if (div & 0x8000) throw new Error('SMPTE timing is not supported');
+  const tempos = [{ tick: 0, uspq: 500000 }]; const evs = [];
+  for (let t = 0; t < ntrk; t++) {
+    if (tag() !== 'MTrk') throw new Error('Bad track');
+    const len = u32(), end = p + len; let tick = 0, run = 0;
+    const vlq = () => { let v = 0, b; do { b = d[p++]; v = (v << 7) | (b & 0x7f); } while (b & 0x80); return v; };
+    while (p < end) {
+      tick += vlq(); let st = d[p];
+      if (st & 0x80) { p++; if (st < 0xF0) run = st; } else st = run;
+      if (st === 0xFF) {
+        const type = d[p++], l = vlq();
+        if (type === 0x51 && l === 3) tempos.push({ tick, uspq: (d[p] << 16) | (d[p + 1] << 8) | d[p + 2] });
+        p += l;
+      } else if (st === 0xF0 || st === 0xF7) { p += vlq(); }
+      else {
+        const hi = st & 0xF0, ch = st & 0x0F;
+        if (hi === 0xC0 || hi === 0xD0) { p += 1; }
+        else {
+          const a = d[p++], b = d[p++];
+          if (hi === 0x90 && b > 0) evs.push({ tick, on: true, ch, note: a, vel: b });
+          else if (hi === 0x80 || (hi === 0x90 && b === 0)) evs.push({ tick, on: false, ch, note: a });
+        }
+      }
+    }
+    p = end;
+  }
+  tempos.sort((a, b) => a.tick - b.tick);
+  const toSec = tick => {
+    let s = 0, last = 0, uspq = 500000;
+    for (const tm of tempos) { if (tm.tick > tick) break; s += (tm.tick - last) * uspq / 1e6 / div; last = tm.tick; uspq = tm.uspq; }
+    return s + (tick - last) * uspq / 1e6 / div;
+  };
+  evs.sort((a, b) => a.tick - b.tick || (a.on ? 1 : 0) - (b.on ? 1 : 0));
+  const open = {}, notes = []; let duration = 0;
+  for (const e of evs) {
+    if (e.ch === 9) continue;
+    const k = e.ch * 128 + e.note;
+    if (e.on) { (open[k] = open[k] || []).push(e); }
+    else if (open[k] && open[k].length) {
+      const on = open[k].shift(), t = toSec(on.tick), dur = Math.max(0.05, toSec(e.tick) - t);
+      notes.push({ t, dur, note: on.note, vel: on.vel }); duration = Math.max(duration, t + dur);
+    }
+  }
+  for (const k in open) for (const on of open[k]) { const t = toSec(on.tick); notes.push({ t, dur: 1, note: on.note, vel: on.vel }); duration = Math.max(duration, t + 1); }
+  return { notes, duration };
+}
+function mergeNote(existing, extra) {
+  existing = (existing || '').trim();
+  if (!extra || existing.split(';').map(s => s.trim()).includes(extra)) return existing;
+  return existing ? existing + '; ' + extra : extra;
+}
+// PURE-END
+
+// ============================================================================
+// UI
+// ============================================================================
+const $ = id => document.getElementById(id);
+const ORDER = ['r10', 'brightness', 'panel', 'flagab'];
+const BLOCK_TEXT = {
+  r10: ['Short chord pairs', 'You will hear a few very short pairs. After each pair, answer two questions about which one sounds more tense and which asks for something to follow.'],
+  brightness: ['Brighter or darker', 'Chord loops in pairs. After each pair, say which sounds brighter, and which you would use for a lighter, more open feel.'],
+  panel: ['Rate single loops', 'Now single chord loops, one at a time. Rate each from 1 to 7 on two questions. You may take a short break first (about 2 minutes).'],
+  flagab: ['Mood pairs', 'Last block. Each pair is meant to sound like a mood word shown above the player. Choose which fits better and which you would rather use.']
+};
+let blocks = [], bi = 0, idx = 0, P = null;
+let ctx = null, timers = [], sources = [], clipCache = {}, audioOverride = {};
+let plays = 0, heardAll = false, practice = false, dragged = false, current = {};
+
+function showSection(name) { for (const s of ['setup', 'intro', 'trial', 'done']) $(s).classList.toggle('hidden', s !== name); }
+const b64bytes = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---- setup ----
+function setupReady() {
+  const ok = $('num').value && $('training').value && $('prod').value;
+  $('startBtn').disabled = !ok; $('practiceBtn').disabled = false;
+  if ($('num').value) {
+    let saved = null; try { saved = JSON.parse(localStorage.getItem('cs_listen_v3:' + pad2(+$('num').value))); } catch (_) {}
+    $('resumeNote').textContent = saved ? `Saved progress found for P${pad2(+$('num').value)}: Start will resume where it stopped.` : '';
+  }
+}
+['num', 'training', 'prod'].forEach(id => $(id).addEventListener('input', setupReady));
+$('audioFiles').addEventListener('change', e => {
+  audioOverride = {}; clipCache = {};
+  for (const f of e.target.files) if (/\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(f.name)) audioOverride[baseKey(f.name)] = f;
+  $('setupErr').textContent = Object.keys(audioOverride).length ? `Using ${Object.keys(audioOverride).length} rendered audio files where names match; the rest use the built-in sound.` : '';
+});
+function storeKey() { return 'cs_listen_v3:' + P.label; }
+function save() { try { localStorage.setItem(storeKey(), JSON.stringify({ bi, idx, blocks: blocks.map(b => b.rows) })); } catch (_) {} }
+
+$('startBtn').onclick = () => {
+  const n = Math.max(1, Math.min(99, +$('num').value | 0));
+  P = { n, label: 'P' + pad2(n), training: $('training').value, prod: $('prod').value };
+  blocks = ORDER.map(k => makeSheet(k, DATA.blocks[k], n, P.training, P.prod));
+  bi = 0; idx = 0; practice = false;
+  try {
+    const saved = JSON.parse(localStorage.getItem(storeKey()));
+    if (saved && saved.blocks && saved.blocks.length === blocks.length && saved.blocks.every((r, i) => r.length === blocks[i].rows.length)) {
+      blocks.forEach((b, i) => b.rows = saved.blocks[i]); bi = saved.bi; idx = saved.idx;
+    }
+  } catch (_) {}
+  ensureCtx();
+  if (bi >= blocks.length) return finish();
+  idx === 0 ? showIntro() : showTrial();
+};
+$('practiceBtn').onclick = () => { practice = true; ensureCtx(); showTrial(); };
+
+function showIntro() {
+  stopAll(); const b = blocks[bi], [title, text] = BLOCK_TEXT[b.kind];
+  $('introTitle').textContent = `Part ${bi + 1} of ${blocks.length}: ${title}`;
+  $('introText').textContent = `${text} (${b.rows.length} ${KINDS[b.kind].type === 'item' ? 'items' : 'trials'})`;
+  showSection('intro');
+}
+$('introBtn').onclick = showTrial;
+
+// ---- audio ----
+function ensureCtx() {
+  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === 'suspended') ctx.resume();
+}
+async function loadClip(key) {
+  if (clipCache[key]) return clipCache[key];
+  let clip;
+  if (audioOverride[key]) {
+    const buf = await ctx.decodeAudioData(await audioOverride[key].arrayBuffer());
+    clip = { type: 'audio', buf, duration: buf.duration };
+  } else {
+    if (!DATA.media[key]) throw new Error('missing sound ' + key);
+    const mid = parseMidi(b64bytes(DATA.media[key]).buffer);
+    clip = { type: 'midi', notes: mid.notes, duration: mid.duration + 1.2 };
+  }
+  return (clipCache[key] = clip);
+}
+function startClip(clip) {
+  const t0 = ctx.currentTime + 0.08;
+  if (clip.type === 'audio') {
+    const s = ctx.createBufferSource(); s.buffer = clip.buf; s.connect(ctx.destination); s.start(t0); sources.push(s);
+    return;
+  }
+  const master = ctx.createGain(); master.gain.value = 0.22;
+  const comp = ctx.createDynamicsCompressor(); master.connect(comp); comp.connect(ctx.destination);
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3800; lp.connect(master);
+  for (const n of clip.notes) {
+    const f = 440 * Math.pow(2, (n.note - 69) / 12), vel = n.vel / 127;
+    const tau = Math.max(0.6, 2.6 - (n.note - 36) * 0.03);
+    const start = t0 + n.t, rel = start + Math.max(n.dur, 0.1), amp = 0.5 * vel;
+    [[1, 1], [2, 0.45], [3, 0.22], [4, 0.1], [5, 0.05]].forEach(([h, a]) => {
+      if (f * h > 9000) return;
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f * h;
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.linearRampToValueAtTime(amp * a, start + 0.006);
+      g.gain.setTargetAtTime(0.0001, start + 0.006, tau / h);
+      g.gain.setTargetAtTime(0.0001, rel, 0.12);
+      o.connect(g); g.connect(lp); o.start(start); o.stop(rel + 1.0); sources.push(o);
+    });
+  }
+}
+function stopAll() {
+  timers.forEach(clearTimeout); timers = [];
+  sources.forEach(s => { try { s.stop(); } catch (_) {} }); sources = [];
+}
+const wait = ms => new Promise(res => timers.push(setTimeout(res, ms)));
+let practiceClips = null;
+function makePracticeClips() {
+  const mk = notes => ({ type: 'midi', duration: 3.2, notes: notes.map(n => ({ t: 0, dur: 2.0, note: n, vel: 80 })) });
+  return [mk([48, 60, 64, 67]), mk([48, 60, 64, 67, 70])];   // C, then C7
+}
+async function playTrial() {
+  ensureCtx(); stopAll(); plays++; heardAll = false;
+  $('playBtn').disabled = true; $('stopBtn').disabled = false; $('nextBtn').disabled = true;
+  try {
+    const clips = practice ? (practiceClips = practiceClips || makePracticeClips())
+                           : await Promise.all(trialKeys(blocks[bi].kind, blocks[bi].rows[idx]).map(loadClip));
+    const pair = clips.length === 2;
+    for (let i = 0; i < clips.length; i++) {
+      $('status').textContent = pair ? (i === 0 ? '▶ First…' : '▶ Second…') : '▶ Playing…';
+      startClip(clips[i]); await wait(clips[i].duration * 1000);
+      if (pair && i === 0) { $('status').textContent = '…'; await wait(3000); }
+    }
+    heardAll = true; $('status').textContent = '';
+    $('qs').classList.remove('hidden');
+    const left = plays < 2;
+    $('playBtn').textContent = left ? '↻ Play again (1 left)' : 'Played twice';
+    $('playBtn').disabled = !left; $('stopBtn').disabled = true;
+    updateNext();
+  } catch (err) {
+    $('status').textContent = 'Playback problem: ' + (err && err.message);
+    $('stopBtn').disabled = true; $('playBtn').disabled = false;
+  }
+}
+$('playBtn').onclick = playTrial;
+$('stopBtn').onclick = () => { stopAll(); $('status').textContent = 'Stopped. Press Play to hear it again.'; $('stopBtn').disabled = true; $('playBtn').disabled = false; plays = Math.max(0, plays - 1); };
+
+// ---- trial UI ----
+function showTrial() {
+  stopAll(); plays = 0; heardAll = false; dragged = false;
+  showSection('trial');
+  const b = practice ? { kind: 'r10', rows: [{}] } : blocks[bi];
+  const row = b.rows[practice ? 0 : idx], kind = b.kind, isItem = KINDS[kind].type === 'item';
+  const done = blocks.slice(0, bi).reduce((s, x) => s + x.rows.length, 0) + idx, total = blocks.reduce((s, x) => s + x.rows.length, 0);
+  $('counter').textContent = practice ? 'Sample (not recorded)' : `Part ${bi + 1} of ${blocks.length} · ${isItem ? 'item' : 'trial'} ${idx + 1} of ${b.rows.length}`;
+  $('barFill').style.width = (practice ? 0 : done / total * 100) + '%';
+  const ml = $('moodLine');
+  if (!practice && kind === 'flagab' && row.mood_label) { ml.classList.remove('hidden'); ml.innerHTML = `These two loops are meant to sound <span class="label-chip">${esc(row.mood_label)}</span>`; }
+  else ml.classList.add('hidden');
+  const [t1, t2] = questionTexts(kind, row);
+  $('q1text').textContent = t1; $('q2text').textContent = t2;
+  buildOptions('q1opts', KINDS[kind].cols[0], isItem, row); buildOptions('q2opts', KINDS[kind].cols[1], isItem, row);
+  $('qs').classList.add('hidden'); $('dragBox').classList.add('hidden'); $('status').textContent = '';
+  $('playBtn').textContent = isItem ? '▶ Play' : '▶ Play pair'; $('playBtn').disabled = false; $('stopBtn').disabled = true;
+  $('nextBtn').disabled = true;
+  $('nextBtn').textContent = practice ? 'Back to start' : (idx === b.rows.length - 1 && bi === blocks.length - 1 ? 'Finish' : 'Next ›');
+}
+function buildOptions(boxId, col, isItem, row) {
+  const box = $(boxId); box.innerHTML = ''; box.classList.toggle('scale', isItem);
+  const opts = isItem ? [1, 2, 3, 4, 5, 6, 7].map(n => [String(n), String(n)])
+                      : [['first', 'First'], ['second', 'Second'], ['same', 'The same'], ['unsure', 'Not sure']];
+  current[col] = practice ? '' : (row[col] || '');
+  for (const [val, text] of opts) {
+    const bt = document.createElement('button'); bt.textContent = text;
+    if (current[col] === val) bt.classList.add('sel');
+    bt.onclick = () => {
+      current[col] = val;
+      [...box.children].forEach(c => c.classList.toggle('sel', c === bt));
+      if (!practice) { blocks[bi].rows[idx][col] = val; save(); }
+      updateNext();
+    };
+    box.appendChild(bt);
+  }
+  if (isItem) { const lg = document.createElement('div'); lg.className = 'legend'; lg.innerHTML = '<span>low</span><span>high</span>'; box.appendChild(lg); }
+}
+function updateNext() {
+  const kind = practice ? 'r10' : blocks[bi].kind, cols = KINDS[kind].cols;
+  const complete = heardAll && cols.every(c => current[c]);
+  $('nextBtn').disabled = !complete;
+  if (complete && !practice && $('producerMode').checked && KINDS[kind].type === 'pair') showDrag();   // only after the blind answers
+}
+$('nextBtn').onclick = () => {
+  if (practice) { practice = false; stopAll(); showSection('setup'); return; }
+  const r = blocks[bi].rows[idx];
+  if (plays > 1) r.notes = mergeNote(r.notes, 'replayed');
+  if (dragged) r.notes = mergeNote(r.notes, 'dragged');
+  idx++;
+  if (idx >= blocks[bi].rows.length) { bi++; idx = 0; save(); return bi >= blocks.length ? finish() : showIntro(); }
+  save(); showTrial();
+};
+function csvBlob(b) { return new Blob([writeCsv(b.header, b.rows)], { type: 'text/csv' }); }
+function download(b) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(csvBlob(b)); a.download = `${b.kind}_${P.label}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function finish() {
+  stopAll(); showSection('done');
+  const answered = blocks.reduce((s, b) => s + b.rows.filter(r => KINDS[b.kind].cols.every(c => r[c])).length, 0);
+  $('doneMsg').textContent = `${answered} of ${blocks.reduce((s, b) => s + b.rows.length, 0)} answers saved for ${P.label}.`;
+  const list = $('dlList'); list.innerHTML = '';
+  blocks.forEach(b => { const bt = document.createElement('button'); bt.textContent = `${b.kind}_${P.label}.csv`; bt.onclick = () => download(b); list.appendChild(bt); });
+}
+$('downloadAll').onclick = () => blocks.forEach((b, i) => setTimeout(() => download(b), i * 400));
+
+// ---- producer mode: drag the loops (neutral names; only after the answers are given) ----
+function showDrag() {
+  const keys = trialKeys(blocks[bi].kind, blocks[bi].rows[idx]), n = idx + 1;
+  keys.forEach((k, i) => {
+    if (!DATA.media[k]) return;
+    const url = URL.createObjectURL(new Blob([b64bytes(DATA.media[k])], { type: 'audio/midi' }));
+    const name = `loop_${pad2(bi + 1)}${pad2(n)}_${i + 1}.mid`;
+    const el = $('drag' + (i + 1)), dl = $('dl' + (i + 1));
+    el.ondragstart = ev => { dragged = true; ev.dataTransfer.setData('DownloadURL', `audio/midi:${name}:${url}`); ev.dataTransfer.effectAllowed = 'copy'; };
+    dl.href = url; dl.download = name; dl.onclick = () => { dragged = true; };
+  });
+  $('dragBox').classList.remove('hidden');
+}
+setupReady();
+</script>
+</body>
+</html>

@@ -1,27 +1,36 @@
-# Interactive listening test page
+# Interactive listening test
 
-One file, `index.html`. Open it in Chrome or Edge (double-click, no server). Nothing is uploaded anywhere.
+**To run a session: open `tools/listening/listening-test.html` in Chrome or Edge (double-click). That is all.** Everything is inside that one file: the 100 sound files, the trial order and the questions. Nothing is uploaded and no sheets or folders are needed.
 
-## Use
+## What the listener does
 
-1. Make the listener sheets with the generators (commands in `../FACILITATOR.md`), one CSV per listener and block.
-2. Open `index.html`. Pick the listener's **sheet CSV**, then the **folder with the sound files** (the `.mid` files, or rendered `.mp3`/`.wav` with the same base names). The page matches files by name, searches sub-folders, and tells you if any are missing. Pick the repo's `tools/listening` folder to cover all blocks at once.
-3. Set training and production experience, then **Start**. Optional: **Practice trial** (a C chord then C7, not recorded).
-4. The listener presses Play, hears first, 3 s of silence, second. One replay is allowed (logged as `replayed` in `notes`). The questions appear after the first full playback. **Next** unlocks only when both are answered.
-5. At the end, **Download answers (CSV)**. The file keeps the sheet's columns and order and is named `<block>_<participant>.csv`, so `analyse_pairs.py` and `analyse_panel.py` read it unchanged (`python3 tools/listening/analyse_pairs.py r10 file1.csv file2.csv ...`).
+1. Types the participant number (1, 2, 3, ...), picks training and production experience, presses Start. "Try a sample first" plays a C chord then C7 (not recorded).
+2. Four parts, with a short intro before each: tritone pairs (5 trials), Brightness pairs (23), single-loop ratings (24), mood pairs (13). About 45 to 60 minutes, not measured yet. Pilot with one person.
+3. Each trial: Play, first loop, 3 s of silence, second loop. One replay allowed (logged as `replayed`). The questions appear after the first full playback and Next unlocks when both are answered.
+4. At the end, "Download all answers" saves four CSV files (`r10_P03.csv`, `brightness_P03.csv`, `panel_P03.csv`, `flagab_P03.csv`). The browser may ask to allow multiple downloads. Progress is saved after every answer, so closing the tab and reopening with the same participant number resumes.
 
-Progress is saved in the browser after every answer. Reloading the page with the same sheet resumes where the listener stopped.
+Use consecutive participant numbers starting at 1, ideally an even count: the order of A/B in each pair alternates with the participant number, so that every pair is heard A-first by half of the listeners. Each participant gets their own shuffled order and one repeated pair (reversed) as a consistency check.
 
-## Blocks it handles
-r10 (tritone pairs), brightness pairs, flag A/B pairs (shows the mood label), and the R7 panel (two 1-7 ratings per item). The block is detected from the CSV columns.
+## Analysis
+
+```
+python3 tools/listening/analyse_pairs.py r10        r10_P*.csv
+python3 tools/listening/analyse_pairs.py brightness brightness_P*.csv
+python3 tools/listening/analyse_pairs.py flagab     flagab_P*.csv
+python3 tools/listening/blindpanel/analyse_panel.py <folder with the panel_P*.csv> --key tools/listening/blindpanel/operator/key.csv
+```
 
 ## Producer mode
-Tick it in setup. After both answers of a pair are given, two draggable chips appear ("Loop 1", "Loop 2") that drag the `.mid` file out under a neutral name (`loop_07_1.mid`), plus download links as a fallback. A drag is logged as `dragged` in `notes`. Dragging works through Chrome's `DownloadURL` drag type; whether Ableton accepts a drop straight from the browser window is not verified, so try one drag first (dropping onto Explorer, then into Ableton, also works).
+A checkbox on the first screen. After both answers of a pair are given, two draggable chips appear ("Loop 1", "Loop 2") that drag the `.mid` out under a neutral name (`loop_0207_1.mid`), plus download links as a fallback. A drag is logged as `dragged` in `notes`. It uses Chrome's `DownloadURL` drag type; whether Ableton accepts a drop straight from the browser is not verified, so try one drag first (dropping onto Explorer and then into Ableton also works).
 
 ## Sound
-If a rendered audio file exists it is used. Otherwise the `.mid` is played with a small built-in additive synth: identical for every listener, but not a real piano. For the real session, render all files once with one piano and put the audio next to the MIDI files.
+The page plays the `.mid` files with a small built-in additive synth: identical for every listener, not a real piano. Optional, under "Advanced" on the first screen: pick a folder of rendered `.mp3`/`.wav` files named like the stimuli (for example `pair05_A.mp3`); those are used where names match.
+
+## For the maintainer
+
+`test-page/template.html` is the source; `listening-test.html` is generated by `python3 tools/listening/test-page/build_page.py` (run it again after regenerating any stimuli, then commit both). The page contains only neutral identifiers (pair ids, file names, the mood word of part 4, item ids); what A and B mean stays in the operator keys used by the analysis scripts. File names do show which letter is which, but not what the letters mean.
 
 ## Tested
-- `node test_page_logic.js`: CSV parsing and export round-trip on all four generated sheet types, file matching, and the MIDI parser against an independent note count on 100 stimulus files.
-- Headless Chrome with a scripted listener: setup, play, replay limit, answers, producer-mode drag box, finish, CSV output.
-- Not tested: real audio output and its quality, the drag into Ableton, Edge/Firefox.
+- `node test-page/test_page_logic.js`: sheet rules for 6 participants (each pair once plus one reversed repeat, not adjacent, A-first balanced, deterministic), no key information embedded, simulated answers through the real Python analysis scripts, and the MIDI parser against an independent note count on all 100 sounds.
+- Headless Chrome with a scripted listener through all 65 trials: intros, play, replay limit, answers, drag box only on pair trials and only after answering, finish, four downloads.
+- Not tested: real audio output and its quality, the drag into Ableton, Edge/Firefox, the real duration.

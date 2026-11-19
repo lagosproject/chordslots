@@ -4,6 +4,8 @@ For whoever runs the session (it does not need to be a musician). Four blocks, i
 
 ## Before the session
 
+**Easiest route: `tools/listening/listening-test.html`.** Open it, type the participant number and start. It contains the sounds, the order and the questions, so the sheet generators and the manual wording below are only needed for a paper session. See `test-page/README.md`.
+
 - **One sound for everyone.** Play all MIDI files through the same piano instrument (General MIDI program 0), the same device, the same headphones and a fixed volume that is comfortable. Best: render every file once to audio with that instrument and play the audio. Do not let a DAW or player pick a different default sound between listeners.
 - **Sheets.** One per listener and block, generated beforehand (commands below). Fill in `training` (`music theory` or `none`) and `production_experience` on each sheet. Keep the keys (`pairs.json`, `pairs_matched.json`, `r10/pairs.json`, `blindpanel/operator/key.csv`, `flagab/operator/key.json`) out of sight.
 - **Even number of listeners** if possible, so every pair is heard first-A and first-B equally often.

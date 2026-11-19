@@ -1,67 +1,97 @@
-// Node test of the pure functions in index.html. Run: node test_page_logic.js
-const fs = require('fs'), vm = require('vm'), path = require('path'), assert = require('assert'), cp = require('child_process');
-const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+// Node test of listening-test.html logic. Run: node test_page_logic.js  (after build_page.py)
+const fs = require('fs'), vm = require('vm'), path = require('path'), assert = require('assert'), cp = require('child_process'), os = require('os');
+const L = path.join(__dirname, '..');
+const html = fs.readFileSync(path.join(L, 'listening-test.html'), 'utf8');
+const dataSrc = html.split('const DATA = ')[1].split(';\n')[0];
 const pure = html.split('// PURE-BEGIN')[1].split('// PURE-END')[0];
-const sb = {}; vm.createContext(sb); vm.runInContext(pure + '\nthis.api={parseCsv,writeCsv,sheetFromCsv,detectKind,baseKey,trialKeys,questionTexts,parseMidi,mergeNote,KINDS};', sb);
-const A = sb.api;
+const sb = {}; vm.createContext(sb);
+vm.runInContext('this.DATA=' + dataSrc + ';\n' + pure + '\nthis.api={KINDS,writeCsv,makeSheet,trialKeys,baseKey,questionTexts,parseMidi,mergeNote,rng};', sb);
+const A = sb.api, DATA = sb.DATA;
+const ORDER = ['r10', 'brightness', 'panel', 'flagab'];
 
-// CSV round trip with quotes, commas, CRLF, BOM
-const t = '﻿participant,notes\r\nP01,"a, ""b"""\r\nP01,\r\n';
-const s = A.sheetFromCsv(t);
-assert.strictEqual(s.rows.length, 2); assert.strictEqual(s.rows[0].notes, 'a, "b"');
-assert.strictEqual(A.writeCsv(s.header, s.rows), 'participant,notes\r\nP01,"a, ""b"""\r\nP01,\r\n');
-
-// Real generated sheets: kind, keys, header preserved on export
-const tmp = fs.mkdtempSync('/tmp/cs-page-'); const L = path.join(__dirname, '..');
-cp.execSync(`python3 ${L}/r10/make_session_sheet.py --participants 2 --seed 4 --out-dir ${tmp}/r10`);
-cp.execSync(`python3 ${L}/make_pair_sheets.py brightness --participants 2 --seed 4 --out-dir ${tmp}/br`);
-cp.execSync(`python3 ${L}/make_pair_sheets.py flagab --participants 2 --seed 4 --out-dir ${tmp}/fl`);
-cp.execSync(`python3 ${L}/blindpanel/make_rating_sheets.py --participants 2 --seed 4 --theory P01 --out-dir ${tmp}/pn`);
-for (const [d, kind, n] of [['r10', 'r10', 5], ['br', 'brightness', 23], ['fl', 'flagab', 13], ['pn', 'panel', 24]]) {
-  const txt = fs.readFileSync(`${tmp}/${d}/P01.csv`, 'utf8'); const sh = A.sheetFromCsv(txt);
-  assert.strictEqual(A.detectKind(sh.header), kind); assert.strictEqual(sh.rows.length, n);
-  assert.strictEqual(A.writeCsv(sh.header, sh.rows).replace(/\r\n/g, '\n'), txt.replace(/\r\n/g, '\n'), kind + ' round trip');
-  const keys = A.trialKeys(kind, sh.rows[0]); assert(keys.length === (kind === 'panel' ? 1 : 2) && keys.every(k => k === k.toLowerCase()), keys);
-  if (kind === 'flagab') assert(A.questionTexts(kind, sh.rows[0])[0].includes(sh.rows[0].mood_label));
+// 1. Every key a sheet needs exists in the embedded media; the page carries no key information
+for (const kind of ORDER) {
+  const sh = A.makeSheet(kind, DATA.blocks[kind], 1, 'none', 'none');
+  for (const r of sh.rows) for (const k of A.trialKeys(kind, r)) assert(DATA.media[k], 'missing media ' + k);
 }
-assert.strictEqual(A.baseKey('brightness/pairs/pair05_B.mid'), 'pair05_b');
-assert.strictEqual(A.mergeNote('repeat check of trial 3', 'replayed'), 'repeat check of trial 3; replayed');
-assert.strictEqual(A.mergeNote('replayed', 'replayed'), 'replayed');
+const blob = dataSrc.toLowerCase();
+for (const bad of ['tritone', 'contains_tritone', 'delta_brightness', 'higher_register', 'cs_full', 'cs_plain', 'corpus', 'on_file', 'kmood', 'ksoft']) assert(!blob.includes(bad), 'leak: ' + bad);
 
-// MIDI parser on every stimulus: note count and duration agree with an independent count
-const mids = cp.execSync(`find ${L} -name "*.mid" -path "*midi*" -o -name "r10_pair*.mid" -o -path "*brightness/pairs/*.mid"`).toString().trim().split('\n').filter(Boolean);
-assert(mids.length > 50, 'found ' + mids.length);
+// 2. Sheet rules, over 6 participants: each pair once plus one reversed, non-adjacent repeat; A-first balanced
+for (const kind of ['r10', 'brightness', 'flagab']) {
+  const firstA = {};
+  for (let n = 1; n <= 6; n++) {
+    const sh = A.makeSheet(kind, DATA.blocks[kind], n, 'none', 'pro');
+    const np = DATA.blocks[kind].pairs.length; assert.strictEqual(sh.rows.length, np + 1);
+    const seen = {}; sh.rows.forEach((r, i) => { (seen[r.pair_id] = seen[r.pair_id] || []).push(i); });
+    const reps = Object.values(seen).filter(v => v.length === 2); assert.strictEqual(reps.length, 1);
+    const [i0, i1] = reps[0]; assert(i1 - i0 >= 3, `repeat too close in ${kind} P${n}: ${i0},${i1}`);
+    assert.notStrictEqual(sh.rows[i0].first_file, sh.rows[i1].first_file);
+    assert(sh.rows[i1].notes.startsWith('repeat check of trial ' + (i0 + 1)));
+    sh.rows.forEach((r, i) => { if (i !== i1) firstA[r.pair_id] = (firstA[r.pair_id] || 0) + (/_A\.mid$/.test(r.first_file) ? 1 : 0); });
+    assert.deepStrictEqual(sh.rows.map(r => r.trial), sh.rows.map((_, i) => i + 1));
+  }
+  for (const [pid, c] of Object.entries(firstA)) assert.strictEqual(c, 3, `${kind} ${pid} A-first ${c}/6`);
+}
+// determinism and variety
+const s1 = JSON.stringify(A.makeSheet('brightness', DATA.blocks.brightness, 2, 'none', 'pro').rows), s2 = JSON.stringify(A.makeSheet('brightness', DATA.blocks.brightness, 2, 'none', 'pro').rows);
+assert.strictEqual(s1, s2);
+assert.notStrictEqual(s1, JSON.stringify(A.makeSheet('brightness', DATA.blocks.brightness, 4, 'none', 'pro').rows));
+
+// 3. End to end: simulated listeners -> page CSVs -> the Python analysis scripts
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-page-')); fs.mkdirSync(tmp + '/panel');
+const r = A.rng('sim');
+const letterOf = f => f.match(/_([AB])\.mid$/)[1];
+for (let n = 1; n <= 6; n++) {
+  for (const kind of ORDER) {
+    const sh = A.makeSheet(kind, DATA.blocks[kind], n, n === 1 ? 'music theory' : 'none', 'hobby');
+    for (const row of sh.rows) {
+      if (kind === 'panel') { row.plausibility = String(1 + Math.floor(r() * 7)); row.would_use = String(1 + Math.floor(r() * 7)); continue; }
+      const [c1, c2] = A.KINDS[kind].cols; const fl = letterOf(row.first_file);
+      // always prefer file A: first if A is shown first, else second
+      row[c1] = row[c2] = fl === 'A' ? 'first' : 'second';
+    }
+    const name = kind === 'panel' ? `${tmp}/panel/P${String(n).padStart(2, '0')}.csv` : `${tmp}/${kind}_P${String(n).padStart(2, '0')}.csv`;
+    fs.writeFileSync(name, A.writeCsv(sh.header, sh.rows));
+  }
+}
+const run = a => cp.execFileSync('python3', a, { encoding: 'utf8' });
+const o10 = run([path.join(L, 'analyse_pairs.py'), 'r10', ...fs.readdirSync(tmp).filter(f => f.startsWith('r10_')).map(f => tmp + '/' + f)]);
+assert(/6 participants/.test(o10) && /pair01/.test(o10), o10.slice(0, 300));
+const ob = run([path.join(L, 'analyse_pairs.py'), 'brightness', ...fs.readdirSync(tmp).filter(f => f.startsWith('brightness_')).map(f => tmp + '/' + f)]);
+assert(/6 participants/.test(ob), ob.slice(0, 300));
+const of = run([path.join(L, 'analyse_pairs.py'), 'flagab', ...fs.readdirSync(tmp).filter(f => f.startsWith('flagab_')).map(f => tmp + '/' + f)]);
+assert(/6 participants/.test(of), of.slice(0, 300));
+// "always file A" must give the A-file share 100% on a pair where A is the target: pair01 of r10 (A = G7, has the tritone)
+assert(/more tense: 6\/6 = 100%/.test(o10.split('### pair02')[0]), o10.split('### pair02')[0]);
+const op = run([path.join(L, 'blindpanel', 'analyse_panel.py'), tmp + '/panel', '--key', path.join(L, 'blindpanel', 'operator', 'key.csv')]);
+assert(/cs_full/.test(op), op.slice(0, 300));
+
+// 4. MIDI parser against an independent note count on every embedded stimulus
 let checked = 0;
-for (const f of mids) {
-  const buf = fs.readFileSync(f); const m = A.parseMidi(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length));
+for (const [key, b] of Object.entries(DATA.media)) {
+  const buf = Buffer.from(b, 'base64'); const m = A.parseMidi(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length));
+  const tmpf = path.join(tmp, key + '.mid'); fs.writeFileSync(tmpf, buf);
   const py = JSON.parse(cp.execSync(`python3 -c "
-import sys,json
-d=open(sys.argv[1],'rb').read()
-# count note-ons (velocity>0) with a tiny independent scan of track data
-import struct
-p=14; n=0; 
+import sys,json,struct
+d=open(sys.argv[1],'rb').read(); p=14; n=0
+def vl(q):
+    l=0
+    while True:
+        b=d[q]; q+=1; l=(l<<7)|(b&0x7f)
+        if not b&0x80: return l,q
 while p<len(d):
-    assert d[p:p+4]==b'MTrk'; ln=struct.unpack('>I',d[p+4:p+8])[0]; q=p+8; e=q+ln; run=0
+    ln=struct.unpack('>I',d[p+4:p+8])[0]; q=p+8; e=q+ln; run=0
     while q<e:
-        while d[q]&0x80: q+=1
-        q+=1
-        st=d[q]
+        _,q=vl(q); st=d[q]
         if st&0x80:
             q+=1
             if st<0xF0: run=st
         else: st=run
         if st==0xFF:
-            q+=1; l=0
-            while True:
-                b=d[q]; q+=1; l=(l<<7)|(b&0x7f)
-                if not b&0x80: break
-            q+=l
+            q+=1; l,q=vl(q); q+=l
         elif st in(0xF0,0xF7):
-            l=0
-            while True:
-                b=d[q]; q+=1; l=(l<<7)|(b&0x7f)
-                if not b&0x80: break
-            q+=l
+            l,q=vl(q); q+=l
         else:
             hi=st&0xF0
             if hi in(0xC0,0xD0): q+=1
@@ -69,7 +99,8 @@ while p<len(d):
                 if hi==0x90 and d[q+1]>0 and (st&15)!=9: n+=1
                 q+=2
     p=e
-print(json.dumps(n))" "${f}"`).toString());
-  assert.strictEqual(m.notes.length, py, f); assert(m.duration > 1 && m.duration < 120, f + ' ' + m.duration); checked++;
+print(json.dumps(n))" ${tmpf}`).toString());
+  assert.strictEqual(m.notes.length, py, key); assert(m.duration > 1 && m.duration < 120, key + ' ' + m.duration); checked++;
 }
-console.log('page logic tests OK (' + checked + ' MIDI files parsed)');
+assert.strictEqual(A.mergeNote('repeat check of trial 3', 'replayed'), 'repeat check of trial 3; replayed');
+console.log(`page logic tests OK (${checked} sounds, sheet rules, analysis pipeline)`);
