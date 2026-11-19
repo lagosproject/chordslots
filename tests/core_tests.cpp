@@ -582,6 +582,15 @@ static void testEditing()
             CHECK (e.slots[(size_t) i].chord == q.slots[(size_t) i].chord);
             CHECK (e.slots[(size_t) i].voicing.velocity < q.slots[(size_t) i].voicing.velocity);
         }
+
+        // A masked energy edit leaves the other slots untouched.
+        Progression m = q;
+        m.slots[1].targetE = 0.0f;
+        applyEnergy (m, rng, 1u << 1);
+        for (int i = 0; i < m.numSlots; ++i)
+            if (i != 1)
+                CHECK (m.slots[(size_t) i].voicing.velocity == q.slots[(size_t) i].voicing.velocity
+                       && m.slots[(size_t) i].voicing.n == q.slots[(size_t) i].voicing.n);
     }
 
     const auto alts = alternatives (p, 0, 8);

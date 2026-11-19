@@ -1716,13 +1716,13 @@ inline void rerollSlots (Progression& p, unsigned mask, Rng& rng, float temperat
 }
 
 /** Applies the energy targets (density and velocity) while keeping each
-    voicing's shape. */
-inline void applyEnergy (Progression& p, Rng& rng)
+    voicing's shape. Only slots whose bit is set in `mask` are touched (default: all). */
+inline void applyEnergy (Progression& p, Rng& rng, unsigned mask = ~0u)
 {
     for (int i = 0; i < p.numSlots; ++i)
     {
         Slot& s = p.slots[(size_t) i];
-        if (s.locked || s.voicing.n == 0)
+        if ((mask & (1u << i)) == 0 || s.locked || s.voicing.n == 0)
             continue;
         const Voicing old = s.voicing;
         s.voicing = makeVoicing (s.chord, &old, centreForBrightness (s.targetB), s.targetE, rng, 3.0f, 0.0f, (VoicingStyle) p.voicingStyle);

@@ -155,11 +155,11 @@ void LanesView::mouseUp (const juce::MouseEvent&)
     const bool energy = dragLane == 2;
     dragLane = -1;
     // Brightness and Tension regenerate by the edited-slot mask.
-    // Energy reapplies voicing and velocity targets to all voiced, unlocked slots.
+    // Energy reapplies voicing and velocity targets to the edited, unlocked slots only.
     processor.edit ([mask, energy] (cs::Progression& p, cs::Rng& rng)
     {
         if (energy)
-            cs::applyEnergy (p, rng);
+            cs::applyEnergy (p, rng, mask);
         else
             cs::rerollSlots (p, mask, rng);
     }, false);

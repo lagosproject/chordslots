@@ -147,3 +147,28 @@ The Drag tile labelled **Drag MIDI** is the Master export [plugin/PluginEditor.c
 | Differences found between Save MIDI, Drag MIDI and the captured track | |
 | Redo present (F3) | |
 | Decision and reason | |
+
+## Session 1 results (19 November 2026, Windows 11, Ableton Live 12.1, VST3, tester not a professional)
+
+Steps A1, A3, B1 to B10, C1 to C7, D1, D3, E1, E5, F1, F2, F4, G2, G3, G4, H2, H4, H6 passed or behaved as expected. Not run: D6 to D8, E2, G1, G6, I1, I3 to I5. Commit under test was not recorded.
+
+| Step | Finding | Verdict |
+|---|---|---|
+| D4 | Dragging Energy on one slot showed no change in the other slots. The code re-voiced every unlocked voiced slot on release, and a probe over 300 rolls found 257 of 900 untouched slots changed notes or velocity. | **Bug in design, fixed in code** (`applyEnergy` takes the edited-slot mask, test added). Needs a rebuild to confirm in the host. The expected result in D4 was wrong and is now: only the dragged slot changes. |
+| E4 | With the Voicing lock on, a Roll showed no change in base velocity. Roll does not change Energy targets, so velocity should not change. | **Checklist error**, not a bug. To see the lock work: set Energy low on a slot, Roll with Voicing locked, and the notes of unchanged chords stay the same. |
+| G5 | Song export and Drag Song always put chords and bass on separate tracks, even with Split off. The code does this on purpose (`createSongMidiFile`). | **By design**, not documented. Document it in the README. |
+| H1, H3 | Host playback follows the Song chain when one exists, so tempo and bars come from the Song, not the selected variation. | **As coded** (Song playback toggle). Consider a clearer indicator in the UI. |
+| H5 | With internal Play running, starting and stopping the host: Play follows the host tempo and carries on alone when the host stops. | Acceptable, record as expected behaviour. |
+| F3 | No Redo. Undo works, but it is unclear how far back it goes. | Expected (docs mention only Undo). Undo depth is not documented. |
+| I2 | State is saved per ChordSlots instance on each track. | Expected. |
+
+### Remaining steps in plain words
+
+- **C8**: skip. It had no clear expected result.
+- **D2**: drag Tension up on one slot and press Play. You should hear that slot get tenser, for example more dissonant chords. No number to check.
+- **D5, G4**: Split puts the chords on MIDI channel 1 and the bass on channel 2, so you can send them to two instruments. Pass is "Split on gives two sets of notes". You already did G4.
+- **D6**: set one slot's Energy to 59, 60, 61 and listen. Write "no jump" or "jump".
+- **E2**: turn on Roots and Colors, Roll five times. The chords must not change.
+- **F5**: with several variations, press Play and click variation B. It should switch on the boundary you chose (now, next slot, next bar).
+- **G1, G6**: optional, skip unless you want a MIDI capture.
+- **I1 to I5**: save the Ableton project, close it, reopen. Check the chords, locks, mood and Split are the same. Note the Match %.
