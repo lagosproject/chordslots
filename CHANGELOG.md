@@ -1,9 +1,14 @@
 # Changelog
 
+## 0.3.1 Test Release
+
+- Added Redo (button, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y; 64 steps per variation) and a percentage readout on the Brightness, Tension and Energy lanes (target and measured chord value, on hover and while dragging).
+- Fixed: dragging Energy on one slot no longer re-voices the other slots.
+- Engine experiments (tritone weight, minor-key and mood context, Brightness soft clip) are in the code but switched off. Chord choice is unchanged.
+- Added a listening survey page to help decide which of those experiments should be switched on: https://lagosproject.github.io/chordslots/listening-test.html
+
 ## 0.3.0 Test Release
 
-- Added Redo (button, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y) and a percentage readout on the Brightness, Tension and Energy lanes (target and measured chord value, on hover and while dragging).
-- Fixed: dragging Energy on one slot no longer re-voices the other slots.
 - Separated Harmony and Groove & Feel into tabs with a shared Undo button, synth preview, and MIDI output and export.
 - Placed the target curves directly below the chord timeline and grouped curve editing and import controls below the lanes.
 - Added a chord-alternative plot with audition and swap, plus expanded chord editing controls.
