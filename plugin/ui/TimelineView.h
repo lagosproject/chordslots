@@ -13,6 +13,7 @@ public:
 
     void setProgression (const cs::Progression&);
     void setPlayhead (double step);
+    double getPlayhead() const noexcept { return playhead; }
     void setMidiVisible (bool show);
 
     void paint (juce::Graphics&) override;

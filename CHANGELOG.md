@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 Test Release
+
+- Harmony groups Roll, Play, and Match and labels target and measured values on the slot-aligned curves.
+- A docked chord inspector lets you audition and replace alternatives and edit voicing while keeping the selected chord and its curves visible.
+- Groove & Feel shows chord names aligned with the piano roll.
+- Song has a dedicated workspace for arranging, transposing, previewing, and exporting sections.
+- Added an Acoustic Piano preview sound and improved chord voicing edits.
+
 ## 0.3.1 Test Release
 
 - Added Redo (button, Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y; 64 steps per variation) and a percentage readout on the Brightness, Tension and Energy lanes (target and measured chord value, on hover and while dragging).

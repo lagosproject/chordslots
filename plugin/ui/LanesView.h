@@ -13,6 +13,7 @@ public:
     explicit LanesView (ChordSlotsProcessor&);
 
     void setProgression (const cs::Progression&);
+    void setSelectedSlot (int slot) { selectedSlot = slot; repaint(); }
     void paint (juce::Graphics&) override;
     juce::String getTooltip() override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -35,6 +36,7 @@ private:
 
     ChordSlotsProcessor& processor;
     cs::Progression prog;
+    int selectedSlot = -1;
     int dragLane = -1;
     unsigned editedMask = 0;
     bool isDragOver = false;

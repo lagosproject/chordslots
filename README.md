@@ -2,7 +2,7 @@
 
 **Target driven harmony for producers.** Draw brightness, tension, and energy across a loop. ChordSlots searches for chords and voicings that follow those curves, then sends or exports the result as MIDI.
 
-[Download ChordSlots v0.3.1 for testing](https://github.com/lagosproject/chordslots/releases/tag/v0.3.1) · [Release notes](RELEASE_NOTES_v0.3.md) · **[Help decide how the chords sound: 45 minute listening survey](https://lagosproject.github.io/chordslots/listening-test.html)**
+[Download ChordSlots v0.4.0 for testing](https://github.com/lagosproject/chordslots/releases/tag/v0.4.0) · [Release notes](CHANGELOG.md#040-test-release) · **[Help decide how the chords sound: 45 minute listening survey](https://lagosproject.github.io/chordslots/listening-test.html)**
 
 ![ChordSlots Harmony tab with the chord timeline and target curves](docs/chordslots-v0.3-harmony.png)
 

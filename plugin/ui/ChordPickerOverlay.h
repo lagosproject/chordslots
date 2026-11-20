@@ -1,4 +1,4 @@
-// ChordSlots - Rich In-Context Chord Inspector & Picker Overlay
+// ChordSlots - bottom-docked selected-slot inspector (historical class name).
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
@@ -51,6 +51,7 @@ private:
         std::function<void(bool)> onAudition;
         std::function<void()> onRelease;
         juce::TextButton replace { "Replace" };
+        juce::TextButton audition { "Audition" };
 
     private:
         void paintButton (juce::Graphics&, bool, bool) override;
@@ -65,6 +66,11 @@ private:
     };
 
     juce::TextButton closeBtn { "Close" }, switchViewBtn { "Edit chord" };
+    juce::TextButton chordLock { "Chord lock" };
+    juce::TextButton rollRoot { "Roll Root" }, rollColor { "Roll Color" }, changeBass { "Change Bass" };
+    juce::Label lockScope;
+    juce::ComboBox qualityBox;
+    int contextVariation = -1;
     juce::ToggleButton showOutside { "Show out-of-scale chords" };
     juce::Component alternativesContent;
     juce::Viewport alternativesViewport;
@@ -74,15 +80,6 @@ private:
 
     // 12 Chromatic Roots
     std::array<std::unique_ptr<juce::TextButton>, 12> rootButtons;
-
-    // Quality buttons
-    struct QualityBtn
-    {
-        std::unique_ptr<juce::TextButton> btn;
-        int typeIndex = 0;
-        QualityBtn (std::unique_ptr<juce::TextButton> b, int t) : btn (std::move (b)), typeIndex (t) {}
-    };
-    std::vector<QualityBtn> qualityButtons;
 
     juce::TextButton invertUpBtn { "Invert Up" }, invertDownBtn { "Invert Down" };
     std::vector<std::unique_ptr<juce::TextButton>> bassButtons;

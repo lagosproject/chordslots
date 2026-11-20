@@ -8,6 +8,7 @@
 #include "ui/LanesView.h"
 #include "ui/MidiDragTile.h"
 #include "ui/ChordPickerOverlay.h"
+#include "ui/SongPanel.h"
 
 //==============================================================================
 class ChordSlotsEditor final : public juce::AudioProcessorEditor,
@@ -109,10 +110,11 @@ private:
     MidiDragTile dragChordsTile;
     MidiDragTile dragBassTile;
     MidiDragTile dragSongTile;
+    SongPanel songPanel;
 
     // Context / Hint bar & Targeted Rolls
     juce::Label hint;
-    juce::TextButton rollRootBtn { "Roll Root" }, rollColorBtn { "Roll Color" }, rollBassBtn { "Change Bass" }, inspectBtn { "Inspect" };
+    juce::TextButton inspectBtn { "Slot inspector" };
 
     void updateContextBar (int slot);
 

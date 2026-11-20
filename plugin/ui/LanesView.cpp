@@ -74,26 +74,31 @@ void LanesView::paint (juce::Graphics& g)
 
         g.setColour (c.withAlpha (0.9f));
         g.setFont (ui::font (10.0f, true));
-        g.drawText (laneNames[lane], lb.reduced (8.0f, 4.0f).toNearestInt(), juce::Justification::topLeft, false);
+        const bool showingReadout = (readoutLane == lane && readoutSlot >= 0 && readoutSlot < prog.numSlots)
+            || (readoutLane < 0 && selectedSlot >= 0 && selectedSlot < prog.numSlots);
+        if (! showingReadout)
+            g.drawText (laneNames[lane], lb.reduced (8.0f, 4.0f).toNearestInt(), juce::Justification::topLeft, false);
     }
 
     // Value readout for the slot under the pointer: target and measured chord value, in percent.
-    if (readoutLane >= 0 && readoutSlot >= 0 && readoutSlot < prog.numSlots)
+    for (int lane = 0; lane < 3; ++lane)
+    if ((readoutLane == lane && readoutSlot >= 0 && readoutSlot < prog.numSlots) || (readoutLane < 0 && selectedSlot >= 0 && selectedSlot < prog.numSlots))
     {
-        const cs::Slot& s = prog.slots[(size_t) readoutSlot];
-        const auto lb = laneBounds (readoutLane);
+        const int slot = readoutLane >= 0 ? readoutSlot : selectedSlot;
+        const cs::Slot& s = prog.slots[(size_t) slot];
+        const auto lb = laneBounds (lane);
         const float x0 = (float) (s.start / len) * lb.getWidth();
-        const float x1 = (float) (prog.slotEnd (readoutSlot) / len) * lb.getWidth();
-        const juce::String text = juce::String (juce::roundToInt (100.0f * targetOf (s, readoutLane))) + "%"
-                                + "  (chord " + juce::String (juce::roundToInt (100.0f * actualOf (s, readoutLane))) + "%)";
+        const float x1 = (float) (prog.slotEnd (slot) / len) * lb.getWidth();
+        const juce::String text = juce::String (laneNames[lane]) + "  Slot " + juce::String (slot + 1) + "  Target " + juce::String (juce::roundToInt (100.0f * targetOf (s, lane))) + "%"
+                                + "  Result " + juce::String (juce::roundToInt (100.0f * actualOf (s, lane))) + "%";
         g.setFont (ui::font (11.0f, true));
-        const float w = juce::jmin (110.0f, juce::jmax (46.0f, (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), text) + 10.0f));
+        const float w = juce::jmin ((float) getWidth(), juce::jmax (46.0f, (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), text) + 10.0f));
         const float cx = (x0 + x1) * 0.5f;
         const float bx = juce::jlimit (0.0f, (float) getWidth() - w, cx - w * 0.5f);
         const juce::Rectangle<float> pill (bx, lb.getY() + 3.0f, w, 16.0f);
         g.setColour (ui::background.withAlpha (0.92f));
         g.fillRoundedRectangle (pill, 4.0f);
-        g.setColour (laneColours[readoutLane]);
+        g.setColour (laneColours[lane]);
         g.drawRoundedRectangle (pill, 4.0f, 1.0f);
         g.setColour (juce::Colours::white);
         g.drawText (text, pill.toNearestInt(), juce::Justification::centred, false);
@@ -121,7 +126,7 @@ juce::String LanesView::getTooltip()
     const auto pos = getMouseXYRelative().toFloat();
     for (int lane = 0; lane < 3; ++lane)
         if (laneBounds (lane).contains (pos))
-            return juce::String (help[lane]) + " The white marker shows the current value.";
+            return juce::String (help[lane]) + " The colored line is Target; the white dash is Result.";
 
     return "Drop a MIDI file here to extract target curves from it.";
 }

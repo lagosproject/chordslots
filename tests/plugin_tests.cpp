@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "../plugin/PluginProcessor.h"
+#include "../plugin/PluginEditor.h"
+#include "../plugin/ui/SongPanel.h"
 #include "../plugin/ui/ChordPickerOverlay.h"
 #include "../plugin/ui/TimelineView.h"
 
@@ -713,6 +715,237 @@ void testInspectAlternatives()
     CHECK (heardInContext == heard);
 }
 
+// Exercise the actual dock callbacks, including preview isolation and variation refresh.
+void testPhase3Views (const juce::File& output = {})
+{
+    Host host;
+    host.processor.edit ([] (cs::Progression& p, cs::Rng& rng)
+    {
+        cs::moveCut (p, 1, p.snap);
+        cs::setChord (p, 0, { 1, 1 }, rng);
+        cs::setChord (p, 1, { 5, 0 }, rng);
+        cs::setChord (p, 2, { 9, 1 }, rng);
+        cs::setChord (p, 3, { 7, 0 }, rng);
+    });
+    std::unique_ptr<juce::AudioProcessorEditor> editor (host.processor.createEditor());
+    auto button = [&] (const juce::String& text) -> juce::TextButton*
+    {
+        for (auto* child : editor->getChildren())
+            if (auto* b = dynamic_cast<juce::TextButton*> (child); b && b->getButtonText() == text) return b;
+        return nullptr;
+    };
+    TimelineView* timeline = nullptr;
+    for (auto* child : editor->getChildren())
+        if (auto* t = dynamic_cast<TimelineView*> (child)) timeline = t;
+    CHECK (timeline && button ("MIDI view") && button ("Groove & Feel") && button ("Play"));
+    if (! timeline || ! button ("MIDI view")) return;
+    button ("MIDI view")->setToggleState (true, juce::dontSendNotification);
+    button ("MIDI view")->onClick();
+    timeline->setSelectedSlot (0);
+    timeline->onSlotSelected (0);
+    timeline->setPlayhead (37.0);
+    auto snapshot = [&] (juce::String name)
+    {
+        if (output == juce::File()) return;
+        output.createDirectory();
+        auto file = output.getChildFile (name + ".png");
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat png;
+        CHECK (stream.openedOk() && png.writeImageToStream (editor->createComponentSnapshot (editor->getLocalBounds()), stream));
+    };
+    for (auto size : { juce::Point<int> (1040, 650), juce::Point<int> (900, 570) })
+    {
+        editor->setSize (size.x, size.y);
+        const auto playBounds = button ("Play")->getBounds();
+        const auto saveBounds = button ("Save MIDI")->getBounds();
+        snapshot ("harmony-" + juce::String (size.x));
+        button ("Groove & Feel")->onClick();
+        CHECK (timeline->getSelectedSlot() == 0);
+        CHECK (timeline->getPlayhead() == 37.0);
+        CHECK (button ("Play")->getBounds() != playBounds);
+        CHECK (button ("Save MIDI")->getBounds() == saveBounds);
+        const auto before = host.processor.getProgression();
+        // Same undoable mutation used by the bass-pattern browser's selection callback.
+        host.processor.edit ([] (cs::Progression& p, cs::Rng&) { p.bassStyle = cs::BassStyle::OctavePump; });
+        host.processor.sendSynchronousChangeMessage();
+        const auto after = host.processor.getProgression();
+        CHECK (after.bassStyle == cs::BassStyle::OctavePump);
+        for (int i = 0; i < before.numSlots; ++i)
+            CHECK (after.slots[(size_t) i].chord == before.slots[(size_t) i].chord
+                   && after.slots[(size_t) i].start == before.slots[(size_t) i].start);
+        snapshot ("groove-" + juce::String (size.x));
+        button ("Play")->onClick();
+        CHECK (host.processor.isPreviewPlaying());
+        host.run (100);
+        CHECK (! host.events.empty());
+        host.processor.setPreviewPlaying (false);
+        const auto file = host.processor.writeTempMidiFile();
+        juce::FileInputStream stream (file);
+        juce::MidiFile midi;
+        CHECK (stream.openedOk() && midi.readFrom (stream));
+        CHECK (midi.getNumTracks() > 0);
+        button ("Harmony")->onClick();
+        CHECK (timeline->getSelectedSlot() == 0);
+        CHECK (button ("Chords") != nullptr); // compact MIDI mode survives the round trip
+        snapshot ("harmony-" + juce::String (size.x)); // matched final pattern in both views
+    }
+}
+
+void testSelectedSlotInspector()
+{
+    Host host;
+    host.processor.edit ([] (cs::Progression& p, cs::Rng& rng)
+    {
+        p.tonic = 9;
+        p.scale = 2;
+        cs::moveCut (p, 1, p.snap); // short first slot, uneven progression
+        cs::setChord (p, 0, { 9, 1 }, rng);
+    });
+    std::unique_ptr<juce::AudioProcessorEditor> editor (host.processor.createEditor());
+    TimelineView* timeline = nullptr;
+    LanesView* lanes = nullptr;
+    ChordPickerOverlay* inspector = nullptr;
+    for (auto* child : editor->getChildren())
+    {
+        if (auto* t = dynamic_cast<TimelineView*> (child)) timeline = t;
+        if (auto* l = dynamic_cast<LanesView*> (child)) lanes = l;
+        if (auto* i = dynamic_cast<ChordPickerOverlay*> (child)) inspector = i;
+    }
+    CHECK (timeline != nullptr && lanes != nullptr && inspector != nullptr);
+    if (! timeline || ! lanes || ! inspector) return;
+    timeline->setSelectedSlot (0);
+    timeline->onSlotSelected (0);
+    timeline->onOpenAlternatives (0);
+    auto button = [] (juce::Component& parent, const juce::String& text) -> juce::TextButton*
+    {
+        for (auto* child : parent.getChildren())
+            if (auto* b = dynamic_cast<juce::TextButton*> (child); b && b->getButtonText() == text) return b;
+        return nullptr;
+    };
+    for (auto size : { juce::Point<int> (1040, 650), juce::Point<int> (900, 570) })
+    {
+        editor->setSize (size.x, size.y);
+        CHECK (inspector->isVisible());
+        CHECK (timeline->getBottom() <= lanes->getY());
+        CHECK (lanes->getBottom() < inspector->getY());
+        CHECK (lanes->getHeight() >= 70);
+        CHECK (timeline->getWidth() == inspector->getWidth());
+        auto* edit = button (*inspector, "Edit chord");
+        CHECK (edit != nullptr);
+        if (edit) edit->onClick();
+        for (auto* child : inspector->getChildren())
+            if (child->isVisible()) CHECK (inspector->getLocalBounds().contains (child->getBounds()));
+        auto* alternatives = button (*inspector, "Alternatives");
+        CHECK (alternatives != nullptr);
+        if (alternatives) alternatives->onClick();
+    }
+    // Set up both undo and redo history. Preview must preserve both stacks.
+    host.processor.edit ([] (cs::Progression& p, cs::Rng&) { p.variety = 0.123f; });
+    CHECK (host.processor.undo());
+    host.processor.sendSynchronousChangeMessage();
+    juce::MemoryBlock beforeState, afterState;
+    host.processor.getStateInformation (beforeState);
+    const auto before = host.processor.getProgression();
+    CHECK (host.processor.canUndo() && host.processor.canRedo());
+    juce::Viewport* viewport = nullptr;
+    for (auto* child : inspector->getChildren())
+        if (auto* v = dynamic_cast<juce::Viewport*> (child)) viewport = v;
+    CHECK (viewport != nullptr);
+    if (! viewport) return;
+    std::vector<juce::TextButton*> rows;
+    for (auto* child : viewport->getViewedComponent()->getChildren())
+        if (auto* b = dynamic_cast<juce::TextButton*> (child)) rows.push_back (b);
+    CHECK (rows.size() >= 2);
+    if (rows.size() < 2) return;
+    for (int i = 0; i < 2; ++i)
+    {
+        auto* audition = button (*rows[(size_t) i], "Audition");
+        CHECK (audition != nullptr);
+        if (audition) audition->onClick();
+        host.run (100);
+    }
+    CHECK (! host.events.empty());
+    host.processor.getStateInformation (afterState);
+    CHECK (beforeState == afterState);
+    CHECK (host.processor.canUndo() && host.processor.canRedo());
+    // The pending redo is the marker, proving audition added no history entry.
+    CHECK (host.processor.redo());
+    CHECK (host.processor.getProgression().variety == 0.123f);
+    CHECK (host.processor.undo());
+    const auto checkNeighbours = [&] (const cs::Progression& p)
+    {
+        CHECK (p.numSlots == before.numSlots);
+        for (int i = 1; i < before.numSlots; ++i)
+        {
+            const auto& a = before.slots[(size_t) i];
+            const auto& b = p.slots[(size_t) i];
+            CHECK (a.chord == b.chord && a.voicing.notes == b.voicing.notes && a.voicing.n == b.voicing.n);
+            CHECK (a.start == b.start && a.targetB == b.targetB && a.targetT == b.targetT && a.targetE == b.targetE);
+        }
+    };
+    auto* replace = button (*rows.front(), "Replace");
+    CHECK (replace != nullptr);
+    if (replace) replace->onClick();
+    const auto replaced = host.processor.getProgression();
+    CHECK (replaced.slots[0].chord != before.slots[0].chord);
+    checkNeighbours (replaced);
+    CHECK (host.processor.undo());
+    CHECK (host.processor.getProgression().slots[0].chord == before.slots[0].chord);
+    CHECK (host.processor.getProgression().slots[0].voicing.notes == before.slots[0].voicing.notes);
+    checkNeighbours (host.processor.getProgression());
+    CHECK (host.processor.redo());
+    CHECK (host.processor.getProgression().slots[0].chord == replaced.slots[0].chord);
+    host.processor.sendSynchronousChangeMessage();
+    // Manual controls use the same one-slot undoable edit paths as before docking.
+    if (auto* edit = button (*inspector, "Edit chord")) edit->onClick();
+    auto* root = button (*inspector, replaced.slots[0].chord.root == 0 ? "D" : "C");
+    CHECK (root != nullptr);
+    if (root) root->onClick();
+    CHECK (host.processor.getProgression().slots[0].chord.root == (replaced.slots[0].chord.root == 0 ? 2 : 0));
+    checkNeighbours (host.processor.getProgression());
+    CHECK (host.processor.undo());
+    host.processor.sendSynchronousChangeMessage();
+    juce::ComboBox* quality = nullptr;
+    for (auto* child : inspector->getChildren())
+        if (auto* q = dynamic_cast<juce::ComboBox*> (child)) quality = q;
+    CHECK (quality != nullptr);
+    if (quality)
+    {
+        const int type = (replaced.slots[0].chord.type + 1) % (int) cs::chordTypes().size();
+        quality->setSelectedId (type + 1, juce::dontSendNotification);
+        quality->onChange();
+        CHECK (host.processor.getProgression().slots[0].chord.type == type);
+        checkNeighbours (host.processor.getProgression());
+        CHECK (host.processor.undo());
+        host.processor.sendSynchronousChangeMessage();
+    }
+    // Same slot ordinal follows the edit variation, with its own chord and history.
+    host.processor.setEditVariation (1);
+    host.processor.sendSynchronousChangeMessage();
+    CHECK (inspector->isVisible() && inspector->getSlot() == 0);
+    CHECK (! host.processor.canUndo());
+    auto* lock = button (*inspector, "Chord lock");
+    CHECK (lock != nullptr);
+    const bool wasLocked = host.processor.getProgression().slots[0].locked;
+    if (lock) lock->onClick();
+    CHECK (host.processor.getProgression().slots[0].locked != wasLocked);
+    CHECK (host.processor.undo());
+    host.processor.setEditVariation (0);
+    host.processor.sendSynchronousChangeMessage();
+    CHECK (inspector->isVisible() && inspector->getSlot() == 0);
+    CHECK (host.processor.getProgression().slots[0].chord == replaced.slots[0].chord);
+    // A surviving ordinal refreshes; a removed ordinal closes and clears selection.
+    host.processor.edit ([] (cs::Progression& p, cs::Rng&) { cs::setNumSlots (p, 2); });
+    host.processor.sendSynchronousChangeMessage();
+    CHECK (inspector->isVisible() && inspector->getSlot() == 0);
+    timeline->setSelectedSlot (1);
+    timeline->onSlotSelected (1);
+    host.processor.edit ([] (cs::Progression& p, cs::Rng&) { cs::setNumSlots (p, 1); });
+    host.processor.sendSynchronousChangeMessage();
+    CHECK (! inspector->isVisible() && timeline->getSelectedSlot() == -1);
+}
+
 void testEditWhilePlaying()
 {
     Host h;
@@ -1293,8 +1526,8 @@ void testTonalContextAndTranspose()
         {
             const int pitch = low + cs::mod12 (pc - low);
             CHECK (pitch <= high);
-            const float rowHeight = (float) (timeline->getHeight() - 35) / (high - low + 1);
-            const int y = (int) (35 + (high - pitch + 0.5f) * rowHeight);
+            const float rowHeight = (float) (timeline->getHeight() - 61) / (high - low + 1);
+            const int y = (int) (61 + (high - pitch + 0.5f) * rowHeight);
             const auto image = timeline->createComponentSnapshot (timeline->getLocalBounds());
             return image.getPixelAt (4, y); // Pitch column, before the note labels.
         };
@@ -2570,10 +2803,225 @@ void testEndingSelector()
     }
 }
 
+
+static juce::TextButton* songTestButton (juce::Component& root, const juce::String& name)
+{
+    if (auto* b = dynamic_cast<juce::TextButton*> (&root); b && b->getButtonText() == name) return b;
+    for (auto* c : root.getChildren()) if (auto* b = songTestButton (*c, name)) return b;
+    return nullptr;
+}
+
+static void phase4Snapshot (juce::Component& editor, const juce::File& dir, const juce::String& name, float scale = 1.0f)
+{
+    dir.createDirectory();
+    auto file = dir.getChildFile (name + ".png");
+    file.deleteFile();
+    juce::FileOutputStream stream (file);
+    juce::PNGImageFormat png;
+    CHECK (stream.openedOk() && png.writeImageToStream (editor.createComponentSnapshot (editor.getLocalBounds(), true, scale), stream));
+}
+
+static void testFollowupFixes (const juce::File& output = {})
+{
+    Host h;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (h.processor.createEditor());
+    auto* panel = dynamic_cast<SongPanel*> (editor->findChildWithID ("song-panel"));
+    CHECK (panel != nullptr);
+    if (! panel) return;
+    // Start ordinary preview before opening Song, then use its Stop action.
+    songTestButton (*editor, "Play")->onClick();
+    CHECK (h.processor.isPreviewPlaying() && ! h.processor.isSongEnabled());
+    songTestButton (*editor, "Song")->onClick();
+    panel->refresh();
+    songTestButton (*panel, "Stop")->onClick();
+    CHECK (! h.processor.isPreviewPlaying() && ! h.processor.isSongEnabled());
+    songTestButton (*panel, "Add section")->onClick();
+    songTestButton (*panel, "Play Song")->onClick();
+    CHECK (h.processor.isPreviewPlaying() && h.processor.isSongEnabled());
+    songTestButton (*panel, "Stop")->onClick();
+    CHECK (! h.processor.isPreviewPlaying() && h.processor.isSongEnabled());
+    songTestButton (*panel, "Close")->onClick();
+
+    juce::TemporaryFile target (".mid");
+    const auto file = target.getFile();
+    CHECK (SongPanel::saveMidiTo (file, h.processor.createSongMidiFile()).wasOk());
+    {
+        juce::FileInputStream in (file); juce::MidiFile midi;
+        CHECK (midi.readFrom (in) && midi.getNumTracks() == 2);
+    }
+    CHECK (file.replaceWithText ("existing destination"));
+   #if JUCE_WINDOWS
+    // POSIX permits replacing a read-only file in a writable directory.
+    CHECK (file.setReadOnly (true));
+    CHECK (SongPanel::saveMidiTo (file, h.processor.createSongMidiFile()).failed());
+    CHECK (file.loadFileAsString() == "existing destination");
+    CHECK (file.setReadOnly (false));
+   #endif
+    CHECK (SongPanel::saveMidiTo (file, h.processor.createSongMidiFile()).wasOk());
+
+    TimelineView* timeline = nullptr;
+    ChordPickerOverlay* inspector = nullptr;
+    for (auto* c : editor->getChildren()) {
+        if (auto* t = dynamic_cast<TimelineView*> (c)) timeline = t;
+        if (auto* i = dynamic_cast<ChordPickerOverlay*> (c)) inspector = i;
+    }
+    CHECK (timeline && inspector);
+    if (! timeline || ! inspector) return;
+    auto* play = songTestButton (*editor, "Play");
+    auto* roll = songTestButton (*editor, "ROLL");
+    for (auto size : { juce::Point<int> (1042, 679), juce::Point<int> (900, 570) }) {
+        editor->setSize (size.x, size.y);
+        for (bool open : { false, true, false }) {
+            if (open) timeline->onOpenAlternatives (0); else inspector->onClose();
+            CHECK (play == songTestButton (*editor, "Play"));
+            CHECK (play->isVisible() && play->getY() == roll->getY());
+            CHECK (play->getX() == roll->getRight() + 6);
+            if (output != juce::File()) phase4Snapshot (*editor, output,
+                "harmony-" + juce::String (size.x) + (open ? "-open" : "-closed"));
+            const auto harmonyBounds = play->getBounds();
+            songTestButton (*editor, "Groove & Feel")->onClick();
+            CHECK (play->getBounds() != harmonyBounds);
+            if (output != juce::File()) phase4Snapshot (*editor, output, "groove-" + juce::String (size.x));
+            songTestButton (*editor, "Harmony")->onClick();
+            CHECK (play->getY() == roll->getY());
+        }
+    }
+}
+
+static void testPhase4 (const juce::File& output)
+{
+    Host h;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (h.processor.createEditor());
+    auto* panel = dynamic_cast<SongPanel*> (editor->findChildWithID ("song-panel"));
+    CHECK (panel != nullptr);
+    if (! panel) return;
+    editor->setSize (900, 570);
+    songTestButton (*editor, "Song")->onClick();
+    CHECK (panel->isVisible() && editor->getLocalBounds().contains (panel->getBounds()));
+    CHECK (! songTestButton (*panel, "Play Song")->isEnabled());
+    phase4Snapshot (*editor, output, "song-empty-900");
+    phase4Snapshot (*editor, output, "song-empty-900-150pct", 1.5f);
+    auto* add = songTestButton (*panel, "Add section");
+    add->onClick(); add->onClick(); add->onClick();
+    CHECK (h.processor.getSong().numEntries == 3);
+    auto* viewport = [&]() -> juce::Viewport* { for (auto* c : panel->getChildren()) if (auto* v = dynamic_cast<juce::Viewport*> (c)) return v; return nullptr; }();
+    CHECK (viewport != nullptr);
+    if (! viewport) return;
+    auto* rows = viewport->getViewedComponent();
+    const int vars[] = { 1, 0, 2 }, shifts[] = { 7, -5, 12 };
+    for (int i = 0; i < 3; ++i) {
+        auto* v = dynamic_cast<juce::ComboBox*> (rows->findChildWithID ("song-variation-" + juce::String (i)));
+        auto* t = dynamic_cast<juce::Slider*> (rows->findChildWithID ("song-transpose-" + juce::String (i)));
+        CHECK (v && t);
+        v->setSelectedId (vars[i] + 1, juce::sendNotificationSync);
+        t->setValue (shifts[i], juce::sendNotificationSync);
+        CHECK (h.processor.getSong().entries[i].variation == vars[i]);
+        CHECK (h.processor.getSong().entries[i].transpose == shifts[i]);
+    }
+    panel->refresh();
+    phase4Snapshot (*editor, output, "song-populated-900");
+    phase4Snapshot (*editor, output, "song-populated-900-150pct", 1.5f);
+    editor->setSize (1040, 650); phase4Snapshot (*editor, output, "song-populated-1040");
+    songTestButton (*panel, "Play Song")->onClick();
+    CHECK (h.processor.isSongEnabled() && h.processor.isPreviewPlaying());
+    h.run (400);
+    CHECK (! h.events.empty());
+    songTestButton (*panel, "Stop")->onClick();
+    CHECK (! h.processor.isPreviewPlaying());
+    h.processor.setSongEnabled (false);
+    // Compare every exported note to each variation's independent export, including track and timestamp.
+    using Note = std::tuple<int, int, bool, int>;
+    std::vector<Note> expected[2], actual[2];
+    double offset = 0;
+    for (int section = 0; section < 3; ++section) {
+        h.processor.setEditVariation (vars[section]);
+        h.processor.apvts.getParameter ("splitMidi")->setValueNotifyingHost (1.0f);
+        const auto midi = h.processor.createMidiFile();
+        CHECK (midi.getNumTracks() == 2);
+        for (int tr = 0; tr < 2; ++tr) for (int e = 0; e < midi.getTrack (tr)->getNumEvents(); ++e) {
+            const auto& m = midi.getTrack (tr)->getEventPointer (e)->message;
+            if (m.isNoteOnOrOff()) expected[tr].emplace_back ((int) std::lround (m.getTimeStamp() + offset), juce::jlimit (0, 127, m.getNoteNumber() + shifts[section]), m.isNoteOn(), m.isNoteOn() ? m.getVelocity() : 0);
+        }
+        offset += h.processor.getProgression().lengthSteps() * 20;
+    }
+    const auto file = h.processor.writeTempMidiFile (ChordSlotsProcessor::MidiExportMode::Song);
+    file.copyFileTo (output.getChildFile ("song-export.mid"));
+    juce::FileInputStream input (file); juce::MidiFile midi;
+    CHECK (midi.readFrom (input) && midi.getNumTracks() == 2);
+    for (int tr = 0; tr < 2; ++tr) {
+        for (int e = 0; e < midi.getTrack (tr)->getNumEvents(); ++e) {
+            const auto& m = midi.getTrack (tr)->getEventPointer (e)->message;
+            if (m.isNoteOnOrOff()) actual[tr].emplace_back ((int) std::lround (m.getTimeStamp()), m.getNoteNumber(), m.isNoteOn(), m.isNoteOn() ? m.getVelocity() : 0);
+        }
+        std::sort (actual[tr].begin(), actual[tr].end()); std::sort (expected[tr].begin(), expected[tr].end());
+        CHECK (! actual[tr].empty() && actual[tr] == expected[tr]);
+    }
+    songTestButton (*rows, "Remove")->onClick();
+    CHECK (h.processor.getSong().numEntries == 2 && h.processor.getSong().entries[0].transpose == -5);
+    for (int i = 0; i < 20; ++i) add->onClick();
+    CHECK (h.processor.getSong().numEntries == 16 && ! add->isEnabled());
+    editor->setSize (900, 570); viewport->setViewPosition (0, rows->getHeight());
+    CHECK (viewport->getViewPositionY() > 0);
+    phase4Snapshot (*editor, output, "song-full-900");
+    songTestButton (*panel, "Clear chain")->onClick();
+    CHECK (h.processor.getSong().numEntries == 0);
+    songTestButton (*panel, "Close")->onClick();
+    CHECK (! panel->isVisible());
+    testSongMode();
+}
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
 
+    if (argc == 3 && juce::String (argv[1]) == "--followup") {
+        testFollowupFixes (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
+        testPhase4 (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
+        std::printf ("Follow-up: %d checks, %d failures\n", checks, failures);
+        return failures ? 1 : 0;
+    }
+
+    if (argc == 4 && juce::String (argv[1]) == "--song-window")
+    {
+        Host h;
+        juce::DocumentWindow window ("Song bounds verification", juce::Colours::black, juce::DocumentWindow::allButtons);
+        auto* editor = h.processor.createEditor();
+        const float scale = juce::String (argv[2]).getFloatValue();
+        editor->setSize (900, 570);
+        editor->setScaleFactor (scale);
+        struct ScaledContent : juce::Component { ~ScaledContent() override { deleteAllChildren(); } };
+        auto* content = new ScaledContent();
+        content->addAndMakeVisible (editor);
+        content->setSize (juce::roundToInt (900 * scale), juce::roundToInt (570 * scale));
+        window.setContentOwned (content, true);
+        window.centreWithSize (window.getWidth(), window.getHeight());
+        window.setVisible (true);
+        songTestButton (*editor, "Song")->onClick();
+        juce::Timer::callAfterDelay (500, [&] {
+        auto dir = juce::File::getCurrentWorkingDirectory().getChildFile (argv[3]);
+        phase4Snapshot (window, dir, "window-" + juce::String (scale));
+        for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i) {
+            auto* c = juce::Desktop::getInstance().getComponent (i);
+            const auto bounds = c->getScreenBounds();
+            std::printf ("desktop %d: %s %s\n", i, c->getName().toRawUTF8(), bounds.toString().toRawUTF8());
+            if (c != &window && c->isVisible()) {
+                phase4Snapshot (*c, dir, "popup-" + juce::String (scale) + "-" + juce::String (i));
+                auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (bounds);
+                std::printf ("popup inside screen=%d inside window=%d\n", display && display->userBounds.contains (bounds.toFloat()), window.getScreenBounds().contains (bounds));
+            }
+        }
+        juce::PopupMenu::dismissAllActiveMenus();
+        juce::MessageManager::getInstance()->stopDispatchLoop();
+        });
+        juce::MessageManager::getInstance()->runDispatchLoop();
+        return failures ? 1 : 0;
+    }
+    if (argc == 3 && juce::String (argv[1]) == "--phase4")
+    {
+        testPhase4 (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
+        std::printf ("Phase 4: %d checks, %d failures\n", checks, failures);
+        return failures ? 1 : 0;
+    }
     if (argc == 3 && juce::String (argv[1]) == "--preview-piano-ab")
         return renderPianoComparison (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
 
@@ -2611,6 +3059,13 @@ int main (int argc, char** argv)
                 std::printf ("%s: %s\n", name.toRawUTF8(), processor.describeProgression().toRawUTF8());
             }
         return 0;
+    }
+
+    if (argc == 3 && juce::String (argv[1]) == "--phase3")
+    {
+        testPhase3Views (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
+        std::printf ("%d checks, %d failures\n", checks, failures);
+        return failures == 0 ? 0 : 1;
     }
 
     // `--snapshot out.png [mood] [--groove]` renders the editor off-screen instead of running the tests.
@@ -2665,6 +3120,8 @@ int main (int argc, char** argv)
     testBassAndArpAuditions();
     testSeparatorLocksAndAlternativeAudition();
     testInspectAlternatives();
+    testPhase3Views();
+    testSelectedSlotInspector();
     testEditWhilePlaying();
     testStateRoundTrip();
     testEndingSelector();
@@ -2674,6 +3131,7 @@ int main (int argc, char** argv)
     testMidiFile();
     testSongMode();
     testPerformanceAndStrum();
+    testFollowupFixes();
     testIncomingMidiTriggerIntegration();
     testChordInversion();
     testSplitMidiOutput();

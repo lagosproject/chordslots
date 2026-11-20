@@ -125,7 +125,7 @@ void TimelineView::updateMidiNotes()
 
 void TimelineView::paintMidi (juce::Graphics& g)
 {
-    const auto area = getLocalBounds().toFloat().withTrimmedTop ((float) contentTop);
+    const auto area = getLocalBounds().toFloat().withTrimmedTop ((float) contentTop + 26.0f);
     if (area.isEmpty())
         return;
 
@@ -193,7 +193,7 @@ void TimelineView::paintMidi (juce::Graphics& g)
     if (hasSelection)
     {
         g.setColour (ui::accent.withAlpha (0.15f));
-        g.fillRect (slotBounds (selected));
+        g.fillRect (slotBounds (selected).withTrimmedTop (26.0f));
     }
     if (hovered >= 0)
     {
@@ -307,7 +307,23 @@ void TimelineView::paint (juce::Graphics& g)
     }
 
     if (midiVisible)
+    {
         paintMidi (g);
+        // Same step transform as the notes, including the pitch-label gutter.
+        for (int i = 0; i < prog.numSlots; ++i)
+        {
+            const auto r = slotBounds (i).withHeight (24.0f);
+            g.setColour (i == selected ? ui::accent.withAlpha (0.35f) : ui::panel);
+            g.fillRoundedRectangle (r, 3.0f);
+            g.setColour (i == selected ? ui::accent.brighter (0.5f) : ui::outline);
+            g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, i == selected ? 2.0f : 1.0f);
+            g.setColour (ui::text);
+            g.setFont (ui::font (12.0f, true));
+            // Readable type with ellipsis; full names remain in tooltip and context bar.
+            g.drawText (utf8 (cs::chordName (prog.slots[(size_t) i].chord, prog.tonic, prog.scale)),
+                        r.reduced (4.0f, 0.0f), juce::Justification::centredLeft, true);
+        }
+    }
 
     for (int i = 0; ! midiVisible && i < prog.numSlots; ++i)
     {
@@ -355,15 +371,11 @@ void TimelineView::paint (juce::Graphics& g)
             g.setFont (ui::font (juce::jlimit (10.0f, 13.0f, rw * 0.15f), true));
             g.drawText (roman, r.getX() + 6.0f, r.getY() + 5.0f, rw - 26.0f, 16.0f, juce::Justification::topLeft, true);
 
-            // Lock icon
+            // Keep the chord lock discoverable without hovering.
             if (rw > 38.0f)
             {
-                const bool showLock = s.locked || i == hoverSlot || i == selected;
-                if (showLock)
-                {
-                    const float lockAlpha = s.locked ? 1.0f : (hoverLock && i == hoverSlot ? 0.9f : 0.45f);
-                    ui::drawPadlock (g, lockBounds (i), ink.withAlpha (lockAlpha), s.locked);
-                }
+                const float lockAlpha = s.locked ? 1.0f : (hoverLock && i == hoverSlot ? 0.9f : 0.45f);
+                ui::drawPadlock (g, lockBounds (i), ink.withAlpha (lockAlpha), s.locked);
             }
 
             // Middle: Chord Name
@@ -471,21 +483,23 @@ juce::String TimelineView::getTooltip()
             return "Click between separators to split a chord slot at the nearest grid point.";
 
         return prog.slots[(size_t) cut].cutLocked
-            ? "This separator is locked. Double-click to unlock it."
-            : "Drag to move this separator. Double-click to lock it, or right-click for more options.";
+            ? "Separator lock protects this timing boundary. Double-click to unlock it."
+            : "Drag to move this timing boundary. Double-click for a separator lock (timing only), or right-click for options.";
     }
 
     if (midiVisible)
-        return "Click a slot to hear its generated notes. Right-click for slot actions.";
+        return utf8 (cs::chordName (prog.slots[(size_t) slotAt (pos.x)].chord, prog.tonic, prog.scale))
+            + " — Click to select and hear this slot. Right-click for slot actions.";
 
     const int slot = slotAt (pos.x);
     const float width = slotBounds (slot).getWidth();
     if (width > 45.0f && optionsBounds (slot).expanded (4.0f).contains (pos))
         return "Open slot actions such as auditioning, replacing or locking the chord.";
     if (width > 38.0f && lockBounds (slot).expanded (4.0f).contains (pos))
-        return "Toggle the slot lock to keep this chord when you roll.";
+        return "Chord lock keeps this slot's chord when rolling. Separator locks protect timing; generation locks apply across the progression.";
 
-    return "Click a chord to see alternatives. Shift-click to hear it, or right-click for slot actions.";
+    return utf8 (cs::chordName (prog.slots[(size_t) slot].chord, prog.tonic, prog.scale))
+        + " — Card color: measured Brightness. Bottom bar: measured Tension. Click for alternatives. Shift-click to hear it; right-click for actions.";
 }
 
 void TimelineView::mouseMove (const juce::MouseEvent& e)
@@ -708,7 +722,7 @@ void TimelineView::showSlotMenu (int slot, int step)
     }
     menu.addSubMenu ("Bass note", bassMenu);
 
-    menu.addItem (1, prog.slots[(size_t) slot].locked ? "Unlock slot (L)" : "Lock slot (L)");
+    menu.addItem (1, prog.slots[(size_t) slot].locked ? "Unlock chord (L)" : "Lock chord on Roll (L)");
     menu.addItem (2, "Split here", prog.numSlots < cs::kMaxSlots);
     menu.addItem (3, "Merge with previous", slot > 0 && ! prog.slots[(size_t) slot].cutLocked);
 
