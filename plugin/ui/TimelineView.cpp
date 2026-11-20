@@ -6,6 +6,7 @@ namespace
 {
 constexpr int separatorTop = 17;
 constexpr int contentTop = 35;
+constexpr int pitchColumnWidth = 44;
 inline juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 }
 
@@ -32,14 +33,26 @@ void TimelineView::setPlayhead (double step)
     }
 }
 
+int TimelineView::timelineLeft() const
+{
+    return midiVisible ? juce::jmin (pitchColumnWidth, juce::jmax (0, getWidth() - 1)) : 0;
+}
+
 float TimelineView::xForStep (double step) const
 {
-    return (float) (step / (double) prog.lengthSteps()) * (float) getWidth();
+    const int left = timelineLeft();
+    return left + (float) (step / (double) prog.lengthSteps()) * (getWidth() - left);
+}
+
+double TimelineView::positionForX (float x) const
+{
+    const int left = timelineLeft();
+    return (double) (x - left) / juce::jmax (1, getWidth() - left) * prog.lengthSteps();
 }
 
 int TimelineView::stepForX (float x) const
 {
-    return (int) std::lround ((double) x / juce::jmax (1, getWidth()) * prog.lengthSteps());
+    return (int) std::lround (positionForX (x));
 }
 
 int TimelineView::cutAt (float x) const
@@ -60,7 +73,7 @@ int TimelineView::cutAt (float x) const
 
 int TimelineView::slotAt (float x) const
 {
-    const double step = (double) x / juce::jmax (1, getWidth()) * prog.lengthSteps();
+    const double step = positionForX (x);
     for (int i = prog.numSlots - 1; i >= 0; --i)
         if (step >= prog.slots[(size_t) i].start)
             return i;
@@ -89,6 +102,7 @@ juce::Rectangle<float> TimelineView::optionsBounds (int i) const
 void TimelineView::setMidiVisible (bool show)
 {
     midiVisible = show;
+    midiHoverY = isMouseOver() ? (float) getMouseXYRelative().y : -1.0f;
     updateMidiNotes();
     repaint();
 }
@@ -112,26 +126,59 @@ void TimelineView::updateMidiNotes()
 void TimelineView::paintMidi (juce::Graphics& g)
 {
     const auto area = getLocalBounds().toFloat().withTrimmedTop ((float) contentTop);
-    g.setColour (ui::panel);
-    g.fillRect (area);
-    if (midiNotes.empty())
+    if (area.isEmpty())
         return;
 
-    int low = 127, high = 0;
+    const int left = timelineLeft();
+    g.setColour (ui::panel);
+    g.fillRect (area);
+    g.setColour (ui::background);
+    g.fillRect (area.withWidth ((float) left));
+
+    int low = midiNotes.empty() ? 60 : 127;
+    int high = midiNotes.empty() ? 71 : 0;
+    const bool hasSelection = selected >= 0 && selected < prog.numSlots;
+    const int selectionStart = hasSelection ? prog.slots[(size_t) selected].start : 0;
+    const int selectionEnd = hasSelection ? prog.slotEnd (selected) : 0;
+    std::array<int, 128> labelPriority {};
     for (const auto& note : midiNotes)
     {
         low = std::min (low, note.pitch);
         high = std::max (high, note.pitch);
+        const int priority = hasSelection && note.start < selectionEnd && note.end > selectionStart ? 2 : 1;
+        auto& rowPriority = labelPriority[(size_t) note.pitch];
+        rowPriority = std::max (rowPriority, priority);
     }
     const float rowH = area.getHeight() / (high - low + 1);
     auto yForNote = [&] (int pitch) { return area.getY() + (high - pitch) * rowH; };
+    const int hovered = midiHoverY >= area.getY() && midiHoverY < area.getBottom()
+        ? juce::jmax (low, high - (int) ((midiHoverY - area.getY()) / rowH)) : -1;
+    const auto scale = cs::scaleMask (prog.scale);
+    auto noteName = [&] (int pitch)
+    {
+        return utf8 (cs::pitchClassName (pitch % 12, prog.tonic, prog.scale))
+            .replaceCharacter ('b', 0x266d).replaceCharacter ('#', 0x266f)
+            + juce::String (pitch / 12 - 1);
+    };
     for (int pitch = low; pitch <= high; ++pitch)
     {
         const int pc = pitch % 12;
+        const int degree = cs::mod12 (pc - prog.tonic);
+        const float y = yForNote (pitch);
         if (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10)
         {
             g.setColour (ui::background.withAlpha (0.6f));
-            g.fillRect (0.0f, yForNote (pitch), area.getWidth(), rowH);
+            g.fillRect ((float) left, y, area.getWidth() - left, rowH);
+        }
+        if ((scale & (1u << degree)) != 0)
+        {
+            g.setColour (ui::accent.withAlpha (degree == 0 ? 0.28f : 0.12f));
+            g.fillRect (0.0f, y, area.getWidth(), rowH);
+        }
+        if (degree == 0)
+        {
+            g.setColour (ui::accent.brighter (0.4f).withAlpha (0.85f));
+            g.fillRect (0.0f, y, 3.0f, rowH);
         }
     }
     const auto meter = prog.meter();
@@ -143,29 +190,86 @@ void TimelineView::paintMidi (juce::Graphics& g)
         g.setColour (ui::outline.brighter (0.4f).withAlpha (alpha));
         g.drawVerticalLine ((int) xForStep (step), area.getY(), area.getBottom());
     }
-    if (selected >= 0 && selected < prog.numSlots)
+    if (hasSelection)
     {
         g.setColour (ui::accent.withAlpha (0.15f));
         g.fillRect (slotBounds (selected));
     }
+    if (hovered >= 0)
+    {
+        g.setColour (ui::text.withAlpha (0.20f));
+        g.fillRect (0.0f, yForNote (hovered), area.getWidth(), rowH);
+    }
+
+    const auto blockFont = ui::font (9.0f, true);
+    g.setFont (blockFont);
     for (const auto& note : midiNotes)
     {
         const float x = xForStep (note.start);
-        g.setColour ((note.bass ? ui::energy : ui::brightness).withAlpha (0.4f + 0.6f * note.velocity / 127.0f));
-        g.fillRect (x, yForNote (note.pitch), std::max (1.0f, xForStep (note.end) - x),
-                    juce::jmax (1.0f, rowH * 0.82f));
+        const auto colour = (note.bass ? ui::energy : ui::brightness)
+            .withAlpha (0.4f + 0.6f * note.velocity / 127.0f);
+        const float height = rowH * 0.86f;
+        const juce::Rectangle<float> block (x, yForNote (note.pitch) + (rowH - height) * 0.5f,
+                                            std::max (1.0f, xForStep (note.end) - x), height);
+        g.setColour (colour);
+        g.fillRect (block);
+        if (height >= 10.0f && block.getWidth() >= 12.0f)
+        {
+            const auto label = noteName (note.pitch);
+            if (juce::GlyphArrangement::getStringWidth (blockFont, label) + 8.0f <= block.getWidth())
+            {
+                const auto background = (note.pitch == hovered ? ui::panel.overlaidWith (ui::text.withAlpha (0.20f))
+                                                               : ui::panel).overlaidWith (colour);
+                g.setColour (background.contrasting());
+                g.drawText (label, block.reduced (4.0f, 0.0f), juce::Justification::centredLeft, false);
+            }
+        }
     }
-    g.setFont (ui::font (10.0f));
-    g.setColour (ui::text.withAlpha (0.85f));
-    for (int pitch = ((low + 11) / 12) * 12; pitch <= high; pitch += 12)
-        g.drawText ("C" + juce::String (pitch / 12 - 1), 3,
-                    juce::jmin ((int) area.getBottom() - 10, (int) yForNote (pitch)),
-                    24, 10, juce::Justification::centredLeft);
+
+    g.setColour (ui::outline);
+    g.drawVerticalLine (left - 1, area.getY(), area.getBottom());
+    constexpr float labelHeight = 11.0f;
+    if (area.getHeight() < labelHeight)
+        return;
+
+    auto labelBounds = [&] (int pitch)
+    {
+        const float y = juce::jlimit (area.getY(), area.getBottom() - labelHeight,
+                                     yForNote (pitch) + (rowH - labelHeight) * 0.5f);
+        return juce::Rectangle<float> (0.0f, y, (float) left - 1.0f, labelHeight);
+    };
+    std::vector<juce::Rectangle<float>> placed;
+    auto drawLabel = [&] (int pitch, bool isHovered)
+    {
+        const auto bounds = labelBounds (pitch);
+        if (std::any_of (placed.begin(), placed.end(), [&] (auto other) { return bounds.intersects (other); }))
+            return;
+
+        if (isHovered)
+        {
+            g.setColour (ui::panel.brighter (0.35f));
+            g.fillRect (bounds);
+        }
+        g.setFont (ui::font (10.0f, isHovered || pitch % 12 == prog.tonic));
+        g.setColour (ui::text.withAlpha (isHovered || labelPriority[(size_t) pitch] > 0 ? 1.0f : 0.78f));
+        g.drawText (noteName (pitch), bounds.withTrimmedLeft (6.0f).withTrimmedRight (6.0f),
+                    juce::Justification::centredLeft, false);
+        g.fillRect ((float) left - 5.0f, yForNote (pitch) + rowH * 0.5f - 0.5f, 4.0f, 1.0f);
+        placed.push_back (bounds);
+    };
+    if (hovered >= 0)
+        drawLabel (hovered, true);
+    // When rows are shorter than a label, favor the selected slot, then other sounded pitches.
+    for (int priority = 2; priority >= 0; --priority)
+        for (int pitch = high; pitch >= low; --pitch)
+            if (labelPriority[(size_t) pitch] == priority)
+                drawLabel (pitch, false);
 }
 
 void TimelineView::paint (juce::Graphics& g)
 {
     const int len = prog.lengthSteps();
+    const float left = (float) timelineLeft();
     const auto m = prog.meter();
     const int barSteps = m.stepsPerBar;
 
@@ -176,7 +280,7 @@ void TimelineView::paint (juce::Graphics& g)
         {
             const bool bar = step % barSteps == 0;
             const bool compound = step % 36 == 0;
-            const float x = juce::jlimit (0.5f, (float) getWidth() - 0.5f, xForStep (step));
+            const float x = juce::jmin ((float) getWidth() - 0.5f, juce::jmax (left + 0.5f, xForStep (step)));
             g.setColour (bar ? ui::textDim : (compound ? ui::outline.brighter (0.2f) : ui::outline.withAlpha (0.4f)));
             g.drawVerticalLine ((int) x, bar ? 2.0f : (compound ? 7.0f : 11.0f), 15.0f);
             if (bar && step < len)
@@ -191,7 +295,7 @@ void TimelineView::paint (juce::Graphics& g)
         for (int step = 0; step <= len; step += cs::kStepsPerQuarter)
         {
             const bool bar = step % barSteps == 0;
-            const float x = juce::jlimit (0.5f, (float) getWidth() - 0.5f, xForStep (step));
+            const float x = juce::jmin ((float) getWidth() - 0.5f, juce::jmax (left + 0.5f, xForStep (step)));
             g.setColour (bar ? ui::textDim : ui::outline);
             g.drawVerticalLine ((int) x, bar ? 2.0f : 8.0f, 15.0f);
             if (bar && step < len)
@@ -345,6 +449,8 @@ void TimelineView::paint (juce::Graphics& g)
     if (playhead >= 0.0)
     {
         const float x = xForStep (playhead);
+        juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (getLocalBounds().withTrimmedLeft ((int) left));
         g.setColour (juce::Colours::white.withAlpha (0.9f));
         g.fillRect (x - 1.0f, 14.0f, 2.0f, (float) getHeight() - 14.0f);
     }
@@ -353,6 +459,8 @@ void TimelineView::paint (juce::Graphics& g)
 juce::String TimelineView::getTooltip()
 {
     const auto pos = getMouseXYRelative().toFloat();
+    if (pos.x < timelineLeft())
+        return {};
     if (pos.y < separatorTop)
         return "Bar and beat positions for the current progression.";
 
@@ -382,9 +490,11 @@ juce::String TimelineView::getTooltip()
 
 void TimelineView::mouseMove (const juce::MouseEvent& e)
 {
-    const bool inStrip = e.y >= separatorTop && e.y < contentTop;
+    midiHoverY = e.position.y;
+    const bool overTimeline = e.position.x >= timelineLeft();
+    const bool inStrip = overTimeline && e.y >= separatorTop && e.y < contentTop;
     hoverCut = inStrip ? cutAt ((float) e.x) : -1;
-    hoverSlot = e.y >= contentTop ? slotAt ((float) e.x) : -1;
+    hoverSlot = overTimeline && e.y >= contentTop ? slotAt ((float) e.x) : -1;
     hoverLock = ! midiVisible && hoverSlot >= 0 && lockBounds (hoverSlot).expanded (4.0f).contains (e.position);
     hoverOptions = ! midiVisible && hoverSlot >= 0 && optionsBounds (hoverSlot).expanded (4.0f).contains (e.position);
     setMouseCursor (hoverCut > 0 && ! prog.slots[(size_t) hoverCut].cutLocked
@@ -396,6 +506,7 @@ void TimelineView::mouseMove (const juce::MouseEvent& e)
 
 void TimelineView::mouseExit (const juce::MouseEvent&)
 {
+    midiHoverY = -1.0f;
     hoverCut = hoverSlot = -1;
     hoverLock = hoverOptions = false;
     repaint();
@@ -403,7 +514,7 @@ void TimelineView::mouseExit (const juce::MouseEvent&)
 
 void TimelineView::mouseDown (const juce::MouseEvent& e)
 {
-    if (e.y < separatorTop)
+    if (e.y < separatorTop || e.position.x < timelineLeft())
         return;
 
     const int step = stepForX ((float) e.x);
@@ -462,6 +573,11 @@ void TimelineView::mouseDown (const juce::MouseEvent& e)
 
 void TimelineView::mouseDrag (const juce::MouseEvent& e)
 {
+    if (midiVisible)
+    {
+        midiHoverY = getLocalBounds().toFloat().contains (e.position) ? e.position.y : -1.0f;
+        repaint();
+    }
     if (dragCut <= 0 || dragCut >= prog.numSlots)
         return;
 
@@ -482,7 +598,8 @@ void TimelineView::mouseUp (const juce::MouseEvent&)
 
 void TimelineView::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    if (e.mods.isPopupMenu() || e.mouseWasDraggedSinceMouseDown() || e.y < separatorTop || e.y >= contentTop)
+    if (e.mods.isPopupMenu() || e.mouseWasDraggedSinceMouseDown() || e.y < separatorTop || e.y >= contentTop
+        || e.position.x < timelineLeft())
         return;
 
     const int cut = cutAt ((float) e.x);

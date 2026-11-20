@@ -9,25 +9,27 @@ class ChordPickerOverlay final : public juce::Component
 {
 public:
     explicit ChordPickerOverlay (ChordSlotsProcessor& proc);
+    ~ChordPickerOverlay() override;
 
-    void open (int slotIndex, bool showPlot);
+    void open (int slotIndex, bool showAlternatives);
     void setSlot (int slotIndex);
     int getSlot() const noexcept { return currentSlot; }
 
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& e) override;
+    void visibilityChanged() override;
 
     std::function<void()> onClose;
 
 private:
     void rebuildCandidates();
-    void selectCandidate (int index);
-    void paintPlot (juce::Graphics&);
-    void layoutPlot (juce::Rectangle<int>);
+    void layoutAlternatives (juce::Rectangle<int>);
+    void cancelGestures();
     void selectRoot (int rootPc);
     void selectQuality (int typeIdx);
     void selectBass (int bassInt);
+    void invertChord (cs::InversionDirection direction);
     void applyChord (cs::Chord c);
 
     ChordSlotsProcessor& processor;
@@ -38,22 +40,36 @@ private:
     class AuditionButton final : public juce::TextButton, private juce::Timer
     {
     public:
-        explicit AuditionButton (const juce::String& label);
+        AuditionButton (const juce::String& label, std::array<float, 3> deltas,
+                        juce::String outsideNotes, const juce::String& scaleDetails);
+        void resized() override;
         void mouseDown (const juce::MouseEvent&) override;
         void mouseUp (const juce::MouseEvent&) override;
+        void mouseDrag (const juce::MouseEvent&) override;
+        juce::String getTooltip() override;
+        void cancelGesture();
         std::function<void(bool)> onAudition;
+        std::function<void()> onRelease;
+        juce::TextButton replace { "Replace" };
 
     private:
+        void paintButton (juce::Graphics&, bool, bool) override;
         void timerCallback() override;
+        std::array<float, 3> deltas;
+        juce::String outsideNotes;
+        std::array<juce::Rectangle<int>, 3> cells;
+        juce::Rectangle<int> nameBounds;
+        bool pressed = false;
         bool fired = false;
+        bool cancelled = false;
     };
 
-    juce::TextButton closeBtn { "Close" }, swapBtn { "Swap" }, switchViewBtn { "Alternatives" };
-    juce::Label selectionLabel;
-    bool plotMode = false;
-    int selectedCandidate = -1;
-    juce::Rectangle<int> plotArea, plotCentres;
-    juce::Point<float> currentPoint, plotMin, plotMax;
+    juce::TextButton closeBtn { "Close" }, switchViewBtn { "Edit chord" };
+    juce::ToggleButton showOutside { "Show out-of-scale chords" };
+    juce::Component alternativesContent;
+    juce::Viewport alternativesViewport;
+    juce::Label outsideHeading, emptyGroup;
+    bool alternativesMode = true;
     juce::Label titleLabel;
 
     // 12 Chromatic Roots
@@ -68,21 +84,18 @@ private:
     };
     std::vector<QualityBtn> qualityButtons;
 
-    // Bass / Inversion buttons
+    juce::TextButton invertUpBtn { "Invert Up" }, invertDownBtn { "Invert Down" };
     std::vector<std::unique_ptr<juce::TextButton>> bassButtons;
 
     // Smart candidate substitutions
     struct CandidateItem
     {
         std::unique_ptr<juce::TextButton> btn;
-        cs::Chord chord;
-        juce::Point<float> metrics;
-        CandidateItem (std::unique_ptr<juce::TextButton> b, cs::Chord c, juce::Point<float> m)
-            : btn (std::move (b)), chord (c), metrics (m) {}
+        bool outside = false;
     };
     std::vector<CandidateItem> candidateButtons;
 
-    juce::Rectangle<int> rootArea, qualityArea, bassArea, candidateArea;
+    juce::Rectangle<int> rootArea, qualityArea, voicingArea, bassArea, candidateArea;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordPickerOverlay)
 };

@@ -17,6 +17,7 @@ public:
 
     void paint (juce::Graphics&) override;
     juce::String getTooltip() override;
+    void mouseEnter (const juce::MouseEvent& e) override { mouseMove (e); }
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -33,6 +34,8 @@ public:
     std::function<void(int)> onOpenAlternatives;
 
 private:
+    int timelineLeft() const;
+    double positionForX (float x) const;
     float xForStep (double step) const;
     int stepForX (float x) const;
     int cutAt (float x) const;
@@ -54,6 +57,7 @@ private:
     };
     std::vector<MidiNote> midiNotes;
     bool midiVisible = false;
+    float midiHoverY = -1.0f;
     int dragStep = -1;
 
     ChordSlotsProcessor& processor;

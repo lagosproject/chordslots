@@ -4,40 +4,153 @@
 namespace
 {
 inline juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
+constexpr std::array<int, 3> metricWidths { 76, 84, 76 };
+constexpr std::array<float, 3> thresholds { 0.005f, 0.005f, 0.0005f };
+constexpr std::array<const char*, 3> metricNames { "Tension", "Brightness", "Match" };
+constexpr int replaceWidth = 78;
+constexpr int rowHeight = 30;
+constexpr auto matchDescription = "Match measures how closely the whole progression follows its target tension and brightness curves.";
+
+std::array<juce::Rectangle<int>, 3> metricCells (juce::Rectangle<int>& area)
+{
+    std::array<juce::Rectangle<int>, 3> cells;
+    area.removeFromRight (replaceWidth);
+    for (int i = 2; i >= 0; --i)
+        cells[(size_t) i] = area.removeFromRight (metricWidths[(size_t) i]);
+    return cells;
 }
 
-ChordPickerOverlay::AuditionButton::AuditionButton (const juce::String& label) : juce::TextButton (label)
+void useReplacement (cs::Progression& p, int slot, const cs::Slot& replacement)
 {
-    setTooltip ("Click to hear this chord. Hold to hear it in the progression.");
+    auto& current = p.slots[(size_t) slot];
+    current.chord = replacement.chord;
+    current.voicing = replacement.voicing;
+    cs::updateActuals (p, slot);
+}
+}
+
+ChordPickerOverlay::AuditionButton::AuditionButton (const juce::String& label, std::array<float, 3> changes,
+                                                  juce::String notes, const juce::String& scaleDetails)
+    : juce::TextButton (label), deltas (changes), outsideNotes (std::move (notes))
+{
+    setTooltip (label + scaleDetails + "\nClick to hear this chord. Hold to hear it in the progression.");
+    replace.setTooltip ("Replace the current chord with " + label + ".");
+    addAndMakeVisible (replace);
     onClick = [this]
     {
-        if (! fired && onAudition)
+        if (! fired && ! cancelled && onAudition)
             onAudition (false);
     };
+}
+
+void ChordPickerOverlay::AuditionButton::resized()
+{
+    auto area = getLocalBounds();
+    replace.setBounds (area.removeFromRight (replaceWidth).reduced (5, 3));
+    nameBounds = getLocalBounds();
+    cells = metricCells (nameBounds);
+    nameBounds = nameBounds.reduced (9, 0);
+}
+
+void ChordPickerOverlay::AuditionButton::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    g.setColour (down ? ui::panel.brighter (0.24f) : over ? ui::panel.brighter (0.12f) : ui::panel);
+    g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f, 1.0f), 4.0f);
+    g.setColour (hasKeyboardFocus (false) ? ui::textDim : ui::outline);
+    g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f, 1.0f), 4.0f, 1.0f);
+    g.setColour (ui::text);
+    const auto nameFont = ui::font (13.0f, true);
+    g.setFont (nameFont);
+    g.drawFittedText (getButtonText(), nameBounds, juce::Justification::centredLeft, 1);
+    if (outsideNotes.isNotEmpty())
+    {
+        const auto noteFont = ui::font (11.0f);
+        const auto noteBounds = nameBounds.withTrimmedLeft (
+            juce::GlyphArrangement::getStringWidthInt (nameFont, getButtonText()) + 14);
+        if (noteBounds.getWidth() >= juce::GlyphArrangement::getStringWidthInt (noteFont, outsideNotes))
+        {
+            g.setFont (noteFont);
+            g.setColour (ui::textDim);
+            g.drawText (outsideNotes, noteBounds, juce::Justification::centredLeft);
+        }
+    }
+    g.setFont (nameFont);
+    g.setColour (ui::text);
+    for (size_t i = 0; i < cells.size(); ++i)
+    {
+        const auto symbol = deltas[i] >= thresholds[i] ? "\xe2\x96\xb2"
+                          : deltas[i] <= -thresholds[i] ? "\xe2\x96\xbc" : "\xe2\x80\x94";
+        g.drawText (juce::String::fromUTF8 (symbol), cells[i], juce::Justification::centred);
+    }
+}
+
+juce::String ChordPickerOverlay::AuditionButton::getTooltip()
+{
+    auto tooltip = juce::TextButton::getTooltip();
+    const auto pos = getMouseXYRelative();
+    for (size_t i = 0; i < cells.size(); ++i)
+    {
+        if (! cells[i].contains (pos))
+            continue;
+        const float points = 100.0f * deltas[i];
+        tooltip = juce::String (metricNames[i]) + " change: " + (points > 0.0f ? "+" : "")
+                + juce::String (points, 3) + " points (0-100 scale)";
+        if (i == 2)
+            tooltip += "\n" + juce::String (matchDescription);
+        break;
+    }
+    return tooltip;
 }
 
 void ChordPickerOverlay::AuditionButton::mouseDown (const juce::MouseEvent& e)
 {
     fired = false;
+    cancelled = false;
     juce::TextButton::mouseDown (e);
-    if (e.mods.isLeftButtonDown())
+    pressed = e.mods.isLeftButtonDown() && isDown();
+    if (pressed)
         startTimer (450);
 }
 
 void ChordPickerOverlay::AuditionButton::mouseUp (const juce::MouseEvent& e)
 {
     stopTimer();
+    if (fired && ! cancelled && onRelease)
+        onRelease();
+    pressed = false;
     juce::TextButton::mouseUp (e);
     fired = false;
+    cancelled = false;
+}
+
+void ChordPickerOverlay::AuditionButton::mouseDrag (const juce::MouseEvent& e)
+{
+    juce::TextButton::mouseDrag (e);
+    if (pressed && (! getLocalBounds().contains (e.getPosition()) || replace.getBounds().contains (e.getPosition())))
+        cancelGesture();
+}
+
+void ChordPickerOverlay::AuditionButton::cancelGesture()
+{
+    stopTimer();
+    if (fired && ! cancelled && onRelease)
+        onRelease();
+    cancelled = cancelled || pressed;
+    pressed = false;
 }
 
 void ChordPickerOverlay::AuditionButton::timerCallback()
 {
-    stopTimer();
-    if (isDown() && onAudition)
+    if (! pressed || ! isDown() || ! juce::ModifierKeys::getCurrentModifiersRealtime().isLeftButtonDown() || ! isShowing())
+    {
+        cancelGesture();
+        return;
+    }
+    if (! fired && onAudition)
     {
         fired = true;
         onAudition (true);
+        startTimer (40);
     }
 }
 
@@ -48,7 +161,6 @@ ChordPickerOverlay::ChordPickerOverlay (ChordSlotsProcessor& proc)
 
     closeBtn.setTooltip ("Close the chord picker.");
     switchViewBtn.setTooltip ("Switch between suggested alternatives and manual chord editing.");
-    swapBtn.setTooltip ("Replace the current chord with the selected alternative.");
     closeBtn.onClick = [this]
     {
         if (onClose)
@@ -56,15 +168,31 @@ ChordPickerOverlay::ChordPickerOverlay (ChordSlotsProcessor& proc)
     };
     addAndMakeVisible (closeBtn);
     addAndMakeVisible (switchViewBtn);
-    addChildComponent (swapBtn);
-    addChildComponent (selectionLabel);
-    selectionLabel.setFont (ui::font (13.0f, true));
-    swapBtn.onClick = [this]
+    addChildComponent (invertUpBtn);
+    addChildComponent (invertDownBtn);
+    invertUpBtn.setTooltip ("Raise the lowest chord voice one octave. The separate bass stays in place.");
+    invertDownBtn.setTooltip ("Lower the highest chord voice one octave. The separate bass stays in place.");
+    invertUpBtn.onClick = [this] { invertChord (cs::InversionDirection::Up); };
+    invertDownBtn.onClick = [this] { invertChord (cs::InversionDirection::Down); };
+    addAndMakeVisible (showOutside);
+    showOutside.onClick = [this]
     {
-        if (selectedCandidate >= 0)
-            applyChord (candidateButtons[(size_t) selectedCandidate].chord);
+        rebuildCandidates();
+        resized();
+        repaint();
     };
-    switchViewBtn.onClick = [this] { open (currentSlot, ! plotMode); };
+    alternativesViewport.setViewedComponent (&alternativesContent, false);
+    alternativesViewport.setScrollBarsShown (true, false);
+    addAndMakeVisible (alternativesViewport);
+    outsideHeading.setText ("Outside scale", juce::dontSendNotification);
+    emptyGroup.setText ("No in-scale alternatives", juce::dontSendNotification);
+    for (auto* label : { &outsideHeading, &emptyGroup })
+    {
+        label->setFont (ui::font (12.0f, true));
+        label->setColour (juce::Label::textColourId, ui::textDim);
+        alternativesContent.addChildComponent (*label);
+    }
+    switchViewBtn.onClick = [this] { open (currentSlot, ! alternativesMode); };
 
     titleLabel.setFont (ui::font (13.0f, true));
     titleLabel.setColour (juce::Label::textColourId, ui::text);
@@ -96,11 +224,28 @@ ChordPickerOverlay::ChordPickerOverlay (ChordSlotsProcessor& proc)
     }
 }
 
-void ChordPickerOverlay::open (int slotIndex, bool showPlot)
+ChordPickerOverlay::~ChordPickerOverlay()
 {
-    if (showPlot != plotMode || slotIndex != currentSlot)
-        selectedCandidate = -1;
-    plotMode = showPlot;
+    cancelGestures();
+}
+
+void ChordPickerOverlay::cancelGestures()
+{
+    for (auto& candidate : candidateButtons)
+        if (auto* row = dynamic_cast<AuditionButton*> (candidate.btn.get()))
+            row->cancelGesture();
+}
+
+void ChordPickerOverlay::visibilityChanged()
+{
+    if (! isShowing())
+        cancelGestures();
+}
+
+void ChordPickerOverlay::open (int slotIndex, bool showAlternatives)
+{
+    alternativesMode = showAlternatives;
+    alternativesViewport.setViewPosition (0, 0);
     setSlot (slotIndex);
 }
 
@@ -108,13 +253,17 @@ void ChordPickerOverlay::setSlot (int slotIndex)
 {
     currentSlot = slotIndex;
     prog = processor.getProgression();
+    const bool validSlot = currentSlot >= 0 && currentSlot < prog.numSlots;
+    const auto* voicing = validSlot ? &prog.slots[(size_t) currentSlot].voicing : nullptr;
+    invertUpBtn.setEnabled (voicing != nullptr && cs::canInvertChord (*voicing, cs::InversionDirection::Up));
+    invertDownBtn.setEnabled (voicing != nullptr && cs::canInvertChord (*voicing, cs::InversionDirection::Down));
 
-    if (currentSlot >= 0 && currentSlot < prog.numSlots)
+    if (validSlot)
     {
         activeChord = prog.slots[(size_t) currentSlot].chord;
         const juce::String chordName = utf8 (cs::chordName (activeChord, prog.tonic, prog.scale));
         const juce::String roman = utf8 (cs::romanNumeral (activeChord, prog.tonic, prog.scale));
-        titleLabel.setText ((plotMode ? "Alternatives for slot " : "Chord inspector - slot ") + juce::String (currentSlot + 1)
+        titleLabel.setText ((alternativesMode ? "Inspect slot " : "Edit chord - slot ") + juce::String (currentSlot + 1)
                                + "    Current: " + chordName + " (" + roman + ")",
                             juce::dontSendNotification);
 
@@ -126,7 +275,7 @@ void ChordPickerOverlay::setSlot (int slotIndex)
         for (auto& qb : qualityButtons)
             qb.btn->setToggleState (qb.typeIndex == activeChord.type, juce::dontSendNotification);
 
-        // Rebuild Inversion / Bass buttons
+        // Rebuild the separate bass choices.
         bassButtons.clear();
         const auto& t = cs::chordTypes()[(size_t) activeChord.type];
         std::vector<int> bassOptions;
@@ -140,203 +289,138 @@ void ChordPickerOverlay::setSlot (int slotIndex)
 
         for (int ivNorm : bassOptions)
         {
-            juce::String name;
-            if (ivNorm == 0)
-                name = "Root";
-            else if (ivNorm == 4 || (ivNorm == 3 && ! cs::hasMajorThird (activeChord.type)))
-                name = "1st Inv (3rd)";
-            else if (ivNorm == 7 || (ivNorm == 6 && ! cs::hasPerfectFifth (activeChord.type)) || ivNorm == 8)
-                name = "2nd Inv (5th)";
-            else if (ivNorm == 10 || ivNorm == 11 || (ivNorm == 9 && cs::seventhKind (activeChord.type) == cs::SeventhKind::Diminished7))
-                name = "3rd Inv (7th)";
-            else
-                name = "/" + utf8 (cs::pitchClassName (cs::mod12 (activeChord.root + ivNorm), prog.tonic, prog.scale));
-
+            const auto name = utf8 (cs::pitchClassName (cs::mod12 (activeChord.root + ivNorm), prog.tonic, prog.scale));
             auto b = std::make_unique<juce::TextButton> (name);
-            b->setTooltip ("Choose which chord note goes in the bass.");
+            b->setTooltip ("Set the note in the separate bass part.");
             b->setToggleState (ivNorm == activeChord.bassInt, juce::dontSendNotification);
             b->onClick = [this, ivNorm] { selectBass (ivNorm); };
             addAndMakeVisible (b.get());
             bassButtons.push_back (std::move (b));
         }
 
-        rebuildCandidates();
     }
 
+    rebuildCandidates();
     resized();
     repaint();
 }
 
 void ChordPickerOverlay::rebuildCandidates()
 {
-    cs::Chord previous = activeChord;
-    if (selectedCandidate >= 0 && selectedCandidate < (int) candidateButtons.size())
-        previous = candidateButtons[(size_t) selectedCandidate].chord;
+    cancelGestures();
     candidateButtons.clear();
-    selectedCandidate = -1;
     if (currentSlot < 0 || currentSlot >= prog.numSlots)
         return;
 
     const float currentFit = cs::fitScore (prog);
-    const auto alternatives = cs::alternatives (prog, currentSlot, plotMode ? 10 : 6);
-    for (const auto& chord : alternatives)
+    const auto& current = prog.slots[(size_t) currentSlot];
+    const auto rng = processor.copyVoicingRng();
+
+    auto addCandidate = [&] (const cs::Slot& replacement, float fitDelta, cs::ScaleMembership scale)
+    {
+        auto label = utf8 (cs::chordName (replacement.chord, prog.tonic, prog.scale));
+        if (! alternativesMode)
+        {
+            label += "  " + juce::String (fitDelta >= 0.0f ? "+" : "") + juce::String (fitDelta, 2);
+            auto button = std::make_unique<juce::TextButton> (label);
+            button->setTooltip ("Replace the current chord with this suggestion.");
+            button->onClick = [this, chord = replacement.chord] { applyChord (chord); };
+            addAndMakeVisible (*button);
+            candidateButtons.push_back ({ std::move (button), false });
+            return;
+        }
+
+        label += "   " + utf8 (cs::romanNumeral (replacement.chord, prog.tonic, prog.scale));
+        juce::String details, outsideNotes;
+        if (scale.outsideChord != 0)
+        {
+            juce::StringArray notes;
+            for (int pc = 0; pc < 12; ++pc)
+                if ((scale.outsideChord & (1u << pc)) != 0)
+                    notes.add (utf8 (cs::pitchClassName (pc, prog.tonic, prog.scale)));
+            const auto pitches = notes.joinIntoString (", ");
+            outsideNotes = "Outside: " + pitches;
+            details = "\nChord notes outside scale: " + pitches;
+        }
+        if (cs::scaleMembership (replacement.chord, prog.tonic, prog.scale).outsideBass)
+            details += "\nSeparate bass outside scale: "
+                     + utf8 (cs::pitchClassName (replacement.chord.bassPc(), prog.tonic, prog.scale));
+
+        auto row = std::make_unique<AuditionButton> (label,
+            std::array<float, 3> { replacement.tension - current.tension, replacement.brightness - current.brightness, fitDelta },
+            std::move (outsideNotes), details);
+        const int slot = currentSlot;
+        row->onAudition = [this, slot, replacement] (bool inContext)
+        {
+            auto preview = prog;
+            useReplacement (preview, slot, replacement);
+            processor.auditionAlternative (preview, slot, inContext);
+        };
+        row->onRelease = [this] { processor.stopAlternativeAudition(); };
+        row->replace.onClick = [this, slot, replacement]
+        {
+            cancelGestures();
+            processor.edit ([slot, replacement] (cs::Progression& p, cs::Rng&)
+            {
+                if (slot >= 0 && slot < p.numSlots)
+                    useReplacement (p, slot, replacement);
+            });
+            processor.auditionSlot (slot);
+            setSlot (slot);
+        };
+        alternativesContent.addAndMakeVisible (*row);
+        candidateButtons.push_back ({ std::move (row), scale.outsideChord != 0 });
+    };
+
+    if (! alternativesMode)
+    {
+        for (const auto& chord : cs::alternatives (prog, currentSlot, 6))
+        {
+            auto test = prog;
+            auto previewRng = rng;
+            cs::setChord (test, currentSlot, chord, previewRng);
+            addCandidate (test.slots[(size_t) currentSlot], cs::fitScore (test) - currentFit, {});
+        }
+        return;
+    }
+
+    for (const auto& entry : cs::inspectAlternatives (prog, currentSlot, 6, showOutside.getToggleState() ? 3 : 0, rng))
     {
         auto test = prog;
-        cs::Rng rng (123);
-        cs::setChord (test, currentSlot, chord, rng);
-        const auto& slot = test.slots[(size_t) currentSlot];
-        const float delta = cs::fitScore (test) - currentFit;
-        auto label = utf8 (cs::chordName (chord, prog.tonic, prog.scale));
-        if (! plotMode)
-            label += "  " + juce::String (delta >= 0.0f ? "+" : "") + juce::String (delta, 2);
-
-        const int index = (int) candidateButtons.size();
-        std::unique_ptr<juce::TextButton> button;
-        if (plotMode)
-        {
-            auto preview = std::make_unique<AuditionButton> (label);
-            preview->onAudition = [this, index, chord] (bool inContext)
-            {
-                selectCandidate (index);
-                processor.auditionAlternative (currentSlot, chord, inContext);
-            };
-            button = std::move (preview);
-        }
-        else
-        {
-            button = std::make_unique<juce::TextButton> (label);
-            button->setTooltip ("Replace the current chord with this suggestion.");
-            button->onClick = [this, chord] { applyChord (chord); };
-        }
-        if (chord == previous)
-            selectedCandidate = index;
-        addAndMakeVisible (button.get());
-        candidateButtons.emplace_back (std::move (button), chord, juce::Point<float> { slot.brightness, slot.tension });
+        auto replacement = current;
+        replacement.chord = entry.chord;
+        replacement.voicing = entry.voicing;
+        useReplacement (test, currentSlot, replacement);
+        addCandidate (test.slots[(size_t) currentSlot], cs::fitScore (test) - currentFit,
+                      cs::scaleMembership (entry.chord, prog.tonic, prog.scale));
     }
-    if (plotMode)
-        selectCandidate (selectedCandidate >= 0 ? selectedCandidate : (candidateButtons.empty() ? -1 : 0));
 }
 
-void ChordPickerOverlay::selectCandidate (int index)
+void ChordPickerOverlay::layoutAlternatives (juce::Rectangle<int> area)
 {
-    selectedCandidate = index;
-    swapBtn.setEnabled (index >= 0);
-    for (int i = 0; i < (int) candidateButtons.size(); ++i)
-        candidateButtons[(size_t) i].btn->setToggleState (i == index, juce::dontSendNotification);
-
-    if (index < 0)
-        selectionLabel.setText ("No alternatives", juce::dontSendNotification);
-    else
-    {
-        const auto& candidate = candidateButtons[(size_t) index];
-        const auto& current = prog.slots[(size_t) currentSlot];
-        auto delta = [] (float diff)
-        {
-            const int n = juce::roundToInt (diff * 100.0f);
-            return juce::String (n > 0 ? "+" : "") + juce::String (n);
-        };
-        selectionLabel.setText (utf8 (cs::chordName (candidate.chord, prog.tonic, prog.scale))
-                                    + "    Brightness " + delta (candidate.metrics.x - current.brightness)
-                                    + "    Tension " + delta (candidate.metrics.y - current.tension),
-                                juce::dontSendNotification);
-    }
-    repaint();
-}
-
-void ChordPickerOverlay::layoutPlot (juce::Rectangle<int> area)
-{
-    auto controls = area.removeFromBottom (27);
-    swapBtn.setBounds (controls.removeFromRight (70));
-    controls.removeFromRight (6);
-    controls.removeFromRight (8);
-    selectionLabel.setBounds (controls);
-    plotArea = area.withTrimmedLeft (60).withTrimmedRight (12).withTrimmedTop (12).withTrimmedBottom (29);
-
-    if (currentSlot < 0 || currentSlot >= prog.numSlots || plotArea.isEmpty())
-        return;
-
-    const auto& current = prog.slots[(size_t) currentSlot];
-    plotMin = plotMax = { current.brightness, current.tension };
-    for (const auto& candidate : candidateButtons)
-    {
-        plotMin.x = std::min (plotMin.x, candidate.metrics.x);
-        plotMin.y = std::min (plotMin.y, candidate.metrics.y);
-        plotMax.x = std::max (plotMax.x, candidate.metrics.x);
-        plotMax.y = std::max (plotMax.y, candidate.metrics.y);
-    }
-
-    // Round outwards and leave room on axes with tied or nearly tied scores.
-    auto padAxis = [] (float& low, float& high)
-    {
-        low = std::max (0.0f, std::floor (low * 100.0f - 1.0f) / 100.0f);
-        high = std::min (1.0f, std::ceil (high * 100.0f + 1.0f) / 100.0f);
-    };
-    padAxis (plotMin.x, plotMax.x);
-    padAxis (plotMin.y, plotMax.y);
-
-    constexpr int labelWidth = 86;
-    constexpr int labelHeight = 22;
-    const auto bounds = plotArea.reduced (4);
-    plotCentres = bounds.reduced (labelWidth / 2, labelHeight / 2);
-    auto position = [this] (juce::Point<float> metrics)
-    {
-        return juce::Point<float> {
-            plotCentres.getX() + (metrics.x - plotMin.x) / (plotMax.x - plotMin.x) * plotCentres.getWidth(),
-            plotCentres.getBottom() - (metrics.y - plotMin.y) / (plotMax.y - plotMin.y) * plotCentres.getHeight()
-        };
-    };
-    currentPoint = position ({ current.brightness, current.tension });
-
-    // The buttons are the plot markers. Shift any colliding markers to nearby free space.
-    std::vector<juce::Rectangle<int>> occupied { juce::Rectangle<int> (20, 20).withCentre (currentPoint.roundToInt()) };
+    showOutside.setBounds (area.removeFromTop (27));
+    candidateArea = area.removeFromTop (23);
+    alternativesViewport.setBounds (area);
+    const int count = (int) candidateButtons.size();
+    const bool noDiatonic = count == 0 || candidateButtons.front().outside;
+    const bool hasOutside = count > 0 && candidateButtons.back().outside;
+    const int height = rowHeight * count + (noDiatonic ? rowHeight : 0) + (hasOutside ? 22 : 0);
+    const int width = area.getWidth() - alternativesViewport.getScrollBarThickness();
+    alternativesContent.setSize (width, height);
+    auto rows = alternativesContent.getLocalBounds();
+    emptyGroup.setVisible (noDiatonic);
+    emptyGroup.setBounds (noDiatonic ? rows.removeFromTop (rowHeight) : juce::Rectangle<int>());
+    outsideHeading.setVisible (hasOutside);
+    bool startedOutside = false;
     for (auto& candidate : candidateButtons)
     {
-        const auto point = position (candidate.metrics);
-        juce::Rectangle<int> best;
-        float distance = std::numeric_limits<float>::max();
-        auto consider = [&] (juce::Rectangle<int> label)
+        if (candidate.outside && ! startedOutside)
         {
-            const float d = point.getDistanceSquaredFrom (label.getCentre().toFloat());
-            if (d < distance && std::none_of (occupied.begin(), occupied.end(),
-                                              [&] (auto other) { return other.expanded (3).intersects (label); }))
-            {
-                best = label;
-                distance = d;
-            }
-        };
-        consider (juce::Rectangle<int> (labelWidth, labelHeight).withCentre (point.roundToInt()));
-        if (best.isEmpty())
-            for (int y = bounds.getY(); y + labelHeight <= bounds.getBottom(); y += 12)
-                for (int x = bounds.getX(); x + labelWidth <= bounds.getRight(); x += 12)
-                    consider ({ x, y, labelWidth, labelHeight });
-        occupied.push_back (best);
-        candidate.btn->setBounds (best);
+            outsideHeading.setBounds (rows.removeFromTop (22));
+            startedOutside = true;
+        }
+        candidate.btn->setBounds (rows.removeFromTop (rowHeight));
     }
-}
-
-void ChordPickerOverlay::paintPlot (juce::Graphics& g)
-{
-    if (currentSlot < 0 || currentSlot >= prog.numSlots || plotArea.isEmpty())
-        return;
-    g.setColour (ui::panel);
-    g.fillRect (plotArea);
-    g.setColour (ui::outline);
-    g.drawRect (plotArea);
-    g.drawVerticalLine ((int) currentPoint.x, (float) plotArea.getY(), (float) plotArea.getBottom());
-    g.drawHorizontalLine ((int) currentPoint.y, (float) plotArea.getX(), (float) plotArea.getRight());
-    g.setFont (ui::font (11.0f));
-    g.setColour (ui::textDim);
-    g.drawText ("Tension", plotArea.getX() - 60, plotArea.getY(), 52, 15, juce::Justification::centredRight);
-    auto score = [] (float value) { return juce::String (juce::roundToInt (value * 100.0f)); };
-    g.drawText (score (plotMax.y), plotArea.getX() - 31, plotCentres.getY() - 7, 22, 14, juce::Justification::centredRight);
-    g.drawText (score (plotMin.y), plotArea.getX() - 31, plotCentres.getBottom() - 7, 22, 14, juce::Justification::centredRight);
-    const auto xAxis = plotArea.withY (plotArea.getBottom() + 4).withHeight (15);
-    g.drawText (score (plotMin.x), xAxis.withX (plotCentres.getX() - 15).withWidth (30), juce::Justification::centred);
-    g.drawText ("Brightness", xAxis, juce::Justification::centred);
-    g.drawText (score (plotMax.x), xAxis.withX (plotCentres.getRight() - 15).withWidth (30), juce::Justification::centred);
-
-    g.setColour (juce::Colours::white);
-    g.drawEllipse (currentPoint.x - 5.0f, currentPoint.y - 5.0f, 10.0f, 10.0f, 2.0f);
 }
 
 void ChordPickerOverlay::selectRoot (int rootPc)
@@ -353,8 +437,19 @@ void ChordPickerOverlay::selectQuality (int typeIdx)
 
 void ChordPickerOverlay::selectBass (int bassInt)
 {
-    activeChord.bassInt = bassInt;
-    applyChord (activeChord);
+    processor.edit ([slot = currentSlot, bassInt] (cs::Progression& p, cs::Rng&) { cs::setBass (p, slot, bassInt); });
+    processor.auditionSlot (currentSlot);
+    setSlot (currentSlot);
+}
+
+void ChordPickerOverlay::invertChord (cs::InversionDirection direction)
+{
+    processor.edit ([slot = currentSlot, direction] (cs::Progression& p, cs::Rng&)
+    {
+        cs::invertChord (p, slot, direction);
+    });
+    processor.auditionSlot (currentSlot);
+    setSlot (currentSlot);
 }
 
 void ChordPickerOverlay::applyChord (cs::Chord c)
@@ -380,9 +475,15 @@ void ChordPickerOverlay::paint (juce::Graphics& g)
     g.setColour (ui::outline.brighter (0.25f));
     g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 8.0f, 1.0f);
 
-    if (plotMode)
+    if (alternativesMode)
     {
-        paintPlot (g);
+        auto header = candidateArea.withTrimmedRight (alternativesViewport.getScrollBarThickness());
+        const auto cells = metricCells (header);
+        g.setFont (ui::font (12.0f, true));
+        g.setColour (ui::textDim);
+        g.drawText ("Chord / Degree", header.reduced (9, 0), juce::Justification::centredLeft);
+        for (size_t i = 0; i < cells.size(); ++i)
+            g.drawText (metricNames[i], cells[i], juce::Justification::centred);
         return;
     }
 
@@ -396,8 +497,11 @@ void ChordPickerOverlay::paint (juce::Graphics& g)
     if (! qualityArea.isEmpty())
         g.drawText ("QUALITY", qualityArea.getX(), qualityArea.getY() - 15, 120, 14, juce::Justification::bottomLeft);
 
+    if (! voicingArea.isEmpty())
+        g.drawText ("CHORD VOICING", voicingArea.getX(), voicingArea.getY() - 15, 140, 14, juce::Justification::bottomLeft);
+
     if (! bassArea.isEmpty())
-        g.drawText ("INVERSION / BASS", bassArea.getX(), bassArea.getY() - 15, 140, 14, juce::Justification::bottomLeft);
+        g.drawText ("CHANGE BASS", bassArea.getX(), bassArea.getY() - 15, 140, 14, juce::Justification::bottomLeft);
 
     if (! candidateArea.isEmpty())
         g.drawText ("RECOMMENDED ALTERNATIVES (FIT CHANGE)", candidateArea.getX(), candidateArea.getY() - 15, 240, 14, juce::Justification::bottomLeft);
@@ -410,21 +514,23 @@ void ChordPickerOverlay::resized()
     auto topRow = area.removeFromTop (26);
     closeBtn.setBounds (topRow.removeFromRight (64));
     topRow.removeFromRight (6);
-    switchViewBtn.setButtonText (plotMode ? "Inspect" : "Alternatives");
+    switchViewBtn.setButtonText (alternativesMode ? "Edit chord" : "Alternatives");
     switchViewBtn.setBounds (topRow.removeFromRight (100));
     titleLabel.setBounds (topRow);
 
     for (auto& button : rootButtons)
-        button->setVisible (! plotMode);
+        button->setVisible (! alternativesMode);
     for (auto& quality : qualityButtons)
-        quality.btn->setVisible (! plotMode);
+        quality.btn->setVisible (! alternativesMode);
     for (auto& button : bassButtons)
-        button->setVisible (! plotMode);
-    swapBtn.setVisible (plotMode);
-    selectionLabel.setVisible (plotMode);
-    if (plotMode)
+        button->setVisible (! alternativesMode);
+    invertUpBtn.setVisible (! alternativesMode);
+    invertDownBtn.setVisible (! alternativesMode);
+    showOutside.setVisible (alternativesMode);
+    alternativesViewport.setVisible (alternativesMode);
+    if (alternativesMode)
     {
-        layoutPlot (area);
+        layoutAlternatives (area);
         return;
     }
 
@@ -467,7 +573,11 @@ void ChordPickerOverlay::resized()
 
     area.removeFromTop (16);
 
-    // Bass / Inversion row
+    voicingArea = area.removeFromTop (28);
+    invertUpBtn.setBounds (voicingArea.withSize (112, 26));
+    invertDownBtn.setBounds (invertUpBtn.getBounds().translated (118, 0));
+
+    area.removeFromTop (16);
     bassArea = area.removeFromTop (28);
     const int bCount = (int) bassButtons.size();
     if (bCount > 0)

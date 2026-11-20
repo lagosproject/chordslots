@@ -52,6 +52,7 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
     t.setProperty ("timeSigDen", p.timeSigDen, nullptr);
     t.setProperty ("snap", p.snap, nullptr);
     t.setProperty ("adventure", p.adventure, nullptr);
+    t.setProperty ("ending", (int) p.ending, nullptr);
     t.setProperty ("variety", p.variety, nullptr);
     t.setProperty ("melodyFit", p.melodyFit, nullptr);
     t.setProperty ("syncopation", p.syncopation, nullptr);
@@ -79,6 +80,8 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
         st.setProperty ("targetT", s.targetT, nullptr);
         st.setProperty ("targetE", s.targetE, nullptr);
         st.setProperty ("velocity", s.voicing.velocity, nullptr);
+        if (s.voicing.transposeOffset != 0)
+            st.setProperty ("transposeOffset", s.voicing.transposeOffset, nullptr);
 
         juce::StringArray notes;
         for (int j = 0; j < s.voicing.n; ++j)
@@ -146,6 +149,9 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p, int stat
         snap = 12;
     p.snap = snap;
     p.adventure = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("adventure", 0.3f));
+    const int ending = (int) t.getProperty ("ending", 0);
+    if (ending >= (int) cs::Ending::Free && ending <= (int) cs::Ending::LeadBackToStart)
+        p.ending = (cs::Ending) ending;
     const float variety = (float) t.getProperty ("variety", 0.5f);
     p.variety = std::isfinite (variety) ? cs::clamp01 (variety) : 0.5f;
     const float melodyFit = (float) t.getProperty ("melodyFit", p.melodyFit);
@@ -205,7 +211,17 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p, int stat
         if (s.voicing.n == 0)
             s.voicing = cs::makeVoicing (s.chord, nullptr, cs::centreForBrightness (s.targetB), s.targetE, tmp, 1.0f, 0.0f);
         else
+        {
+            const int offset = (int) st.getProperty ("transposeOffset", 0);
+            if (offset >= -127 && offset <= 127)
+            {
+                s.voicing.transposeOffset = offset;
+                const int bass = cs::playbackBassNote (s);
+                if (bass < 0 || bass > 127)
+                    s.voicing.transposeOffset = 0;
+            }
             s.voicing.bassCount = s.voicing.computeBassCount();
+        }
     }
     cs::sanitizeRhythm (p);
     cs::updateActuals (p);
@@ -251,7 +267,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ChordSlotsProcessor::createL
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "chordRhythm", 1 }, "Chord Rhythm",
         chordRhythms, 0, juce::AudioParameterChoiceAttributes().withAutomatable (false)));
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "synthModel", 1 }, "Synth Model",
-                                                             juce::StringArray { "Clean Saw", "Rhodes EP", "Felt Piano" }, 0));
+                                                             juce::StringArray { "Clean Saw", "Rhodes EP", "Felt Piano", "Acoustic Piano" }, 0));
     return layout;
 }
 
@@ -617,6 +633,24 @@ void ChordSlotsProcessor::pushHistory (int variationIndex)
         histories[(size_t) idx].erase (histories[(size_t) idx].begin());
 }
 
+bool ChordSlotsProcessor::transposeProgression (int semitones)
+{
+    if (semitones == 0)
+        return false;
+    {
+        const juce::ScopedLock sl (modelLock);
+        const int idx = editVariation.load();
+        auto transposed = variations[(size_t) idx];
+        if (! cs::transposeProgression (transposed, semitones))
+            return false;
+        pushHistory (idx);
+        variations[(size_t) idx] = std::move (transposed);
+        publish();
+    }
+    sendChangeMessage();
+    return true;
+}
+
 void ChordSlotsProcessor::beginGesture()
 {
     const juce::ScopedLock sl (modelLock);
@@ -917,7 +951,9 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         if (lock.isLocked() && alternativeReady)
         {
             alternativeReady = false;
-            if (available)
+            if (available && pendingAlternative == nullptr)
+                releaseAlternative();
+            else if (available)
             {
                 releaseAlternative();
                 releaseAudition (0);
@@ -1922,12 +1958,27 @@ void ChordSlotsProcessor::auditionAlternative (int slot, cs::Chord chord, bool i
         return;
 
     // Audition the same voicing a subsequent swap would produce.
-    auto previewRng = [&]
-    {
-        const juce::ScopedLock lock (modelLock);
-        return rng;
-    }();
+    auto previewRng = copyVoicingRng();
     cs::setChord (p, slot, chord, previewRng);
+    auditionAlternative (p, slot, inContext);
+}
+
+cs::Rng ChordSlotsProcessor::copyVoicingRng()
+{
+    const juce::ScopedLock lock (modelLock);
+    return rng;
+}
+
+void ChordSlotsProcessor::stopAlternativeAudition()
+{
+    queueAudition (nullptr);
+}
+
+void ChordSlotsProcessor::auditionAlternative (const cs::Progression& p, int slot, bool inContext)
+{
+    if (slot < 0 || slot >= p.numSlots)
+        return;
+
     auto preview = std::make_unique<AlternativePreview>();
     const auto bpm = lastBpm.load();
     const bool split = isSplitMidi();
@@ -1960,7 +2011,8 @@ void ChordSlotsProcessor::auditionAlternative (int slot, cs::Chord chord, bool i
 
 void ChordSlotsProcessor::queueAudition (std::unique_ptr<AlternativePreview> preview)
 {
-    preview->notes.updateMatchedPairs();
+    if (preview != nullptr)
+        preview->notes.updateMatchedPairs();
     const juce::SpinLock::ScopedLockType lock (alternativeLock);
     pendingAlternative.swap (preview);
     alternativeReady = true;

@@ -111,6 +111,14 @@ set(CS_PLUGIN_SOURCES
     plugin/ui/MidiDragTile.cpp
     plugin/ui/ChordPickerOverlay.cpp)
 
+set(CS_PIANO_ASSETS plugin/assets/acoustic-piano/ATTRIBUTION.txt)
+foreach(root RANGE 21 87 6)
+    list(APPEND CS_PIANO_ASSETS "plugin/assets/acoustic-piano/piano_${root}.flac")
+endforeach()
+juce_add_binary_data(ChordSlotsPianoAssets NAMESPACE ChordSlotsPianoAssets
+    HEADER_NAME ChordSlotsPianoAssets.h SOURCES ${CS_PIANO_ASSETS})
+set_target_properties(ChordSlotsPianoAssets PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 function(cs_configure_plugin_sources target)
     target_sources(${target} PRIVATE ${CS_PLUGIN_SOURCES})
     target_include_directories(${target} PRIVATE plugin)
@@ -121,7 +129,7 @@ function(cs_configure_plugin_sources target)
         JUCE_DISPLAY_SPLASH_SCREEN=0
         JUCE_REPORT_APP_USAGE=0)
     target_link_libraries(${target}
-        PRIVATE chordslots_core juce::juce_audio_utils
+        PRIVATE chordslots_core juce::juce_audio_utils ChordSlotsPianoAssets
         PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
     if(CHORDSLOTS_LTO)
         target_link_libraries(${target} PUBLIC juce::juce_recommended_lto_flags)

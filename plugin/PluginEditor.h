@@ -34,6 +34,7 @@ private:
     void showOptionsMenu();
     void updateTooltips();
     void showSongMenu();
+    void showKeyActions();
     void saveMidi();
     void showMidiImportMenu();
     void importMidi (bool harmonize);
@@ -45,7 +46,8 @@ private:
 
     // Header controls
     juce::ComboBox keyBox, scaleBox, barsBox, meterBox, slotsBox, snapBox;
-    juce::Label keyLabel, scaleLabel, barsLabel, meterLabel, slotsLabel, snapLabel;
+    juce::Label keyLabel, barsLabel, meterLabel, slotsLabel, snapLabel;
+    juce::TextButton keyActionsButton { "Key Actions" };
     juce::TextButton inputButton { "MIDI In ▾" };
     juce::TextButton optionsButton { "Options" };
     juce::Label fitLabel, fitCaption;
@@ -80,6 +82,8 @@ private:
     juce::TextButton lockRhythm { "Rhythm" }, lockRoots { "Roots" }, lockColors { "Colors" }, lockVoicing { "Voicing" };
     juce::Label lockCaption;
     juce::Slider adventure, variety, syncopation, bassMotion;
+    juce::ComboBox endingBox;
+    juce::Label endingLabel;
     juce::Label adventureLabel, varietyLabel, syncopationLabel, bassMotionLabel;
     juce::TextButton undoButton { "Undo" }, redoButton { "Redo" }, rollButton { "ROLL" };
 
@@ -108,7 +112,7 @@ private:
 
     // Context / Hint bar & Targeted Rolls
     juce::Label hint;
-    juce::TextButton rollRootBtn { "Roll Root" }, rollColorBtn { "Roll Color" }, rollBassBtn { "Roll Bass" }, inspectBtn { "Inspect" };
+    juce::TextButton rollRootBtn { "Roll Root" }, rollColorBtn { "Roll Color" }, rollBassBtn { "Change Bass" }, inspectBtn { "Inspect" };
 
     void updateContextBar (int slot);
 

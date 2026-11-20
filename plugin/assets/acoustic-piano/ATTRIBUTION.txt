@@ -1,0 +1,12 @@
+Acoustic Piano in ChordSlots uses recordings from Salamander Grand Piano V3,
+by Alexander Holm, played on a Yamaha C5 grand piano.
+
+Original: https://archive.org/details/SalamanderGrandPianoV3
+FLAC source: https://github.com/sfzinstruments/SalamanderGrandPiano/tree/master/Samples
+License: Creative Commons Attribution 3.0 Unported (CC BY 3.0).
+https://creativecommons.org/licenses/by/3.0/
+
+ChordSlots selected the v8 recordings of A0, D#1, A1, D#2, A2, D#3,
+A3, D#4, A4, D#5, A5 and D#6. The stereo recordings were mixed to mono,
+resampled from 48 to 44.1 kHz, shortened to 3–5 seconds with a 650 ms
+end fade, and encoded as 16-bit FLAC.

@@ -98,6 +98,8 @@ struct MelodyNote
 
 constexpr size_t kMaxMelodyNotes = 4096;
 
+enum class Ending { Free, ResolveToTonic, LeadBackToStart };
+
 struct Progression
 {
     int tonic = 9; // A
@@ -111,6 +113,7 @@ struct Progression
     float melodyFit = 0.75f;
     float variety = 0.5f;     // sampling temperature for a full Roll
     float adventure = 0.3f;   // 0 = diatonic triads, 1 = borrowed chords and extensions
+    Ending ending = Ending::Free;
     float syncopation = 0.3f; // how irregular randomised cuts are
     BassStyle bassStyle = BassStyle::Sustain;
     float bassMotion = 0.0f;  // 0 = keep root in bass, 1 = smooth walking bass / pedal inversions
@@ -650,6 +653,37 @@ inline float harmonicTransitionCost (const Progression& p, CorpusStyle style, Ch
     return transitionCost (a, b, p.tonic, p.adventure, p.scale, style);
 }
 
+inline bool hasTonicFunction (const Progression& p, Chord chord)
+{
+    const unsigned mask = scaleMask (p.scale);
+    const auto& quality = chordProperties (chord.type);
+    const bool minor = scaleHasMinorThird (p.scale);
+    return chord.root == p.tonic
+        && (minor ? quality.hasMinorThird : quality.hasMajorThird)
+        && ((mask & (1u << 7)) != 0 ? quality.hasPerfectFifth : quality.hasDimFifth)
+        && tonesOutsideScale (chord, p.tonic, p.scale) == 0;
+}
+
+// Cadential movement relative to the destination. Borrowed dominants can
+// score here only if the existing candidate rules have already admitted them.
+inline float preparationBonus (const Progression& p, Chord from, Chord to)
+{
+    const int degree = mod12 (from.root - to.root);
+    const auto& quality = chordProperties (from.type);
+    if (degree == 7)
+        return quality.hasMajorThird ? 0.10f : 0.06f;
+    if (degree == 11 && quality.hasDimFifth)
+        return 0.09f;
+    if (tonesOutsideScale (from, p.tonic, p.scale) == 0)
+    {
+        if (degree == 10 || degree == 1)
+            return 0.085f; // modal bVII or bII
+        if (degree == 5)
+            return 0.065f; // plagal motion
+    }
+    return 0.0f;
+}
+
 inline float inversionCost (const Progression& p, int slot, int bassInt)
 {
     return bassInt == 0 ? 0.0f : kBassCostScale * (1.0f - p.bassMotion) * (slot == 0 ? 9.0f : 7.0f);
@@ -662,7 +696,7 @@ struct ChordVariable
 };
 
 inline ChordVariable makeChordVariable (const Progression& p, int first, int second,
-                                       const std::vector<Candidate>& pool)
+                                       const std::vector<Candidate>& pool, Ending ending)
 {
     ChordVariable variable;
     std::vector<std::pair<float, Chord>> options;
@@ -685,6 +719,8 @@ inline ChordVariable makeChordVariable (const Progression& p, int first, int sec
                     cost += contextualEditCost (p, first, candidate, nullptr, nullptr);
             if (second >= 0)
                 cost += slotUnaryCost (p, second, candidate, &secondMelody) + inversionCost (p, second, bassInt);
+            if (ending == Ending::ResolveToTonic && first == p.numSlots - 1 && hasTonicFunction (p, chord))
+                cost -= 0.22f;
             options.emplace_back (cost, chord);
         }
     }
@@ -776,12 +812,13 @@ inline void correctOscillations (const Progression& p, const RingInference& ring
 } // namespace detail
 
 /** Draws from the first-order Boltzmann distribution on the chord loop. */
-inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f)
+inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f, bool applyEnding = true)
 {
     const int n = p.numSlots;
     if (n < 1)
         return;
 
+    const auto ending = applyEnding ? p.ending : Ending::Free;
     const auto all = buildCandidates (p.tonic, p.scale, p.adventure, diatonicContextFor (p));
     if (all.empty())
         return;
@@ -812,7 +849,7 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
                     common.push_back (candidate);
             if (! common.empty())
             {
-                auto combined = detail::makeChordVariable (p, slot, partner, common);
+                auto combined = detail::makeChordVariable (p, slot, partner, common, ending);
                 if (! combined.states.empty())
                 {
                     nodeOf[(size_t) partner] = node;
@@ -821,7 +858,7 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
                 }
             }
         }
-        variables.push_back (detail::makeChordVariable (p, slot, -1, pools[(size_t) slot]));
+        variables.push_back (detail::makeChordVariable (p, slot, -1, pools[(size_t) slot], ending));
     }
 
     std::vector<detail::RingInference::Weights> unary;
@@ -875,7 +912,12 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
             for (Chord a : first)
                 for (Chord b : second)
                 {
-                    float cost = transition (a, b) + detail::jointBassCost (p, a, b);
+                    const float harmonic = transition (a, b);
+                    float cost = harmonic + detail::jointBassCost (p, a, b);
+                    if (slot == n - 1 && ending == Ending::LeadBackToStart)
+                        cost += harmonic - detail::preparationBonus (p, a, b);
+                    if (slot == n - 2 && ending == Ending::ResolveToTonic && detail::hasTonicFunction (p, b))
+                        cost -= detail::preparationBonus (p, a, b);
                     if constexpr (kUseContextualTension)
                     {
                         const auto& previous = lookupTension (a);
@@ -901,8 +943,8 @@ inline void generateChords (Progression& p, Rng& rng, float temperature = 0.012f
     }
 }
 
-/** Ranks distinct chord identities by the best joint state with the other slots fixed. */
-inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxCount)
+/** Scores distinct chord identities by the best joint state with the other slots fixed. */
+inline std::vector<std::pair<float, Chord>> harmonicAlternatives (const Progression& p, int slot, int maxCount)
 {
     const int n = p.numSlots;
     if (slot < 0 || slot >= n || maxCount <= 0)
@@ -960,11 +1002,68 @@ inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxC
         if (a.second.root != b.second.root) return a.second.root < b.second.root;
         return a.second.type < b.second.type;
     });
+    scored.resize (count);
+    return scored;
+}
+
+inline std::vector<Chord> alternatives (const Progression& p, int slot, int maxCount)
+{
     std::vector<Chord> out;
-    out.reserve (count);
-    for (size_t i = 0; i < count; ++i)
-        out.push_back (scored[i].second);
+    for (const auto& entry : harmonicAlternatives (p, slot, maxCount))
+        out.push_back (entry.second);
     return out;
+}
+
+struct VoicedAlternative
+{
+    Chord chord;
+    Voicing voicing;
+    float cost;
+};
+
+/** Returns the requested number of alternatives per scale group, in display order. */
+inline std::vector<VoicedAlternative> inspectAlternatives (const Progression& p, int slot,
+                                                         size_t inScale, size_t outside, Rng rng)
+{
+    const auto harmonic = harmonicAlternatives (p, slot, std::numeric_limits<int>::max());
+    if (harmonic.empty())
+        return {};
+
+    const auto& target = p.slots[(size_t) slot];
+    const int n = p.numSlots;
+    const auto* previous = n > 1 ? &p.slots[(size_t) ((slot + n - 1) % n)].voicing : nullptr;
+    const auto* next = n > 1 ? &p.slots[(size_t) ((slot + 1) % n)].voicing : nullptr;
+    const auto style = (VoicingStyle) p.voicingStyle;
+    std::vector<VoicedAlternative> groups[2];
+    constexpr float maxMovementCost = 0.02f;
+
+    for (auto [cost, chord] : harmonic)
+    {
+        const bool isOutside = scaleMembership (chord, p.tonic, p.scale).outsideChord != 0;
+        auto& group = groups[isOutside];
+        const size_t limit = isOutside ? outside : inScale;
+        if (limit == 0 || (group.size() == limit && cost >= group.back().cost))
+            continue;
+
+        sanitizeBass (chord);
+        auto previewRng = rng;
+        const auto v = makeVoicing (chord, previous != nullptr ? previous : &target.voicing,
+                                    centreForBrightness (target.targetB), target.targetE,
+                                    previewRng, 2.0f, 0.0f, style, next);
+        const float movement = previous != nullptr
+            ? voiceLeadingDistance (*previous, v) + voiceLeadingDistance (v, *next) : 0.0f;
+        // Only harmonically close candidates can trade places. Since the added cost
+        // is non-negative, the harmonic score alone can rule out expensive rows.
+        const VoicedAlternative entry { chord, v, cost + maxMovementCost * movement / (4.0f + movement) };
+        const auto pos = std::upper_bound (group.begin(), group.end(), entry,
+                                           [] (const auto& a, const auto& b) { return a.cost < b.cost; });
+        group.insert (pos, entry);
+        if (group.size() > limit)
+            group.pop_back();
+    }
+
+    groups[0].insert (groups[0].end(), groups[1].begin(), groups[1].end());
+    return std::move (groups[0]);
 }
 
 //==============================================================================
@@ -989,7 +1088,7 @@ inline void updateActualsLocal (Progression& p, int i)
     int upper[kMaxNotes];
     int n = 0;
     for (int j = 0; j < s.voicing.n; ++j)
-        if (s.voicing.notes[(size_t) j] >= kUpperFloor)
+        if (s.voicing.notes[(size_t) j] >= kUpperFloor + s.voicing.transposeOffset)
             upper[n++] = s.voicing.notes[(size_t) j];
 
     s.brightness = combineBrightness (contextQualityBrightness (s.chord, p.tonic, p.scale, kMinorDominantContext, diatonicContextFor (p)),
@@ -1021,41 +1120,37 @@ inline void updateActuals (Progression& p)
         updateActualsLocal (p, i);
 }
 
+inline void voiceRolledSlot (Progression& p, int i, Rng& rng, bool chordChanged)
+{
+    Slot& s = p.slots[(size_t) i];
+    if (s.locked && s.voicing.n > 0)
+        return;
+
+    const auto style = (VoicingStyle) p.voicingStyle;
+    const float centre = centreForBrightness (s.targetB);
+    if (p.locks.voicing && s.voicing.n > 0)
+    {
+        if (chordChanged)
+        {
+            const Voicing old = s.voicing;
+            s.voicing = makeVoicing (s.chord, &old, centre, s.targetE, rng, 3.0f, 0.0f, style);
+        }
+        else
+            s.voicing.velocity = std::clamp ((int) std::lround (45.0f + 75.0f * s.targetE), 1, 127);
+        return;
+    }
+
+    const auto* ref = p.numSlots > 1 ? &p.slots[(size_t) ((i + p.numSlots - 1) % p.numSlots)].voicing : nullptr;
+    s.voicing = makeVoicing (s.chord, ref, centre, s.targetE, rng, 1.0f, 0.7f, style);
+}
+
 /** Voices the whole progression with smooth voice leading.
     @param changed  per-slot flags: true if the chord changed since the stored
                     voicing was made (nullptr = treat every slot as changed) */
 inline void voiceAll (Progression& p, Rng& rng, const bool* changed = nullptr)
 {
-    const int n = p.numSlots;
-    for (int i = 0; i < n; ++i)
-    {
-        Slot& s = p.slots[(size_t) i];
-        const bool chordChanged = changed == nullptr || changed[i] || s.voicing.n == 0;
-        if (s.locked && s.voicing.n > 0)
-            continue;
-
-        if (p.locks.voicing && s.voicing.n > 0)
-        {
-            if (chordChanged) // keep the shape: stay as close as possible to the old voicing
-            {
-                const Voicing old = s.voicing;
-                s.voicing = makeVoicing (s.chord, &old, centreForBrightness (s.targetB), s.targetE, rng, 3.0f, 0.0f, (VoicingStyle) p.voicingStyle);
-            }
-            else
-            {
-                s.voicing.velocity = std::clamp ((int) std::lround (45.0f + 75.0f * s.targetE), 1, 127);
-            }
-            continue;
-        }
-
-        const Voicing* ref = nullptr;
-        if (i > 0)
-            ref = &p.slots[(size_t) (i - 1)].voicing;
-        else if (n > 1 && p.slots[(size_t) (n - 1)].voicing.n > 0)
-            ref = &p.slots[(size_t) (n - 1)].voicing;
-
-        s.voicing = makeVoicing (s.chord, ref, centreForBrightness (s.targetB), s.targetE, rng, 1.0f, 0.7f, (VoicingStyle) p.voicingStyle);
-    }
+    for (int i = 0; i < p.numSlots; ++i)
+        voiceRolledSlot (p, i, rng, changed == nullptr || changed[i]);
     updateActuals (p);
 }
 
@@ -1436,6 +1531,40 @@ inline void setChord (Progression& p, int slot, Chord c, Rng& rng)
     updateActuals (p, slot);
 }
 
+enum class InversionDirection { Up, Down };
+
+inline bool canInvertChord (const Voicing& voicing, InversionDirection direction) noexcept
+{
+    const int bassCount = voicing.computeBassCount();
+    if (voicing.n - bassCount < 2)
+        return false;
+    return direction == InversionDirection::Up
+         ? voicing.notes[(size_t) bassCount] <= 115
+         : voicing.notes[(size_t) (voicing.n - 1)] >= std::max (0, kUpperFloor + voicing.transposeOffset) + 12;
+}
+
+/** Moves an outer chord voice by one octave, leaving the separate bass in place. */
+inline void invertChord (Progression& p, int slot, InversionDirection direction)
+{
+    if (slot < 0 || slot >= p.numSlots)
+        return;
+
+    auto& voicing = p.slots[(size_t) slot].voicing;
+    if (! canInvertChord (voicing, direction))
+        return;
+
+    const auto first = voicing.notes.begin() + voicing.computeBassCount();
+    const auto end = voicing.notes.begin() + voicing.n;
+    if (direction == InversionDirection::Up)
+        *first += 12;
+    else
+        *(end - 1) -= 12;
+    std::sort (first, end);
+    // A unison on one MIDI channel is a single sounding note.
+    voicing.n = (int) (std::unique (first, end) - voicing.notes.begin());
+    updateActuals (p, slot);
+}
+
 /** Changes ONLY the bass note of a slot, preserving upper voice structure. */
 inline void setBass (Progression& p, int slot, int bassInt)
 {
@@ -1542,7 +1671,7 @@ inline void rollSlotColor (Progression& p, int slot, Rng& rng)
     }
 }
 
-/** Cycles or rerolls the bass note / inversion for a single slot. */
+/** Cycles the bass note for a single slot. */
 inline void rollSlotBass (Progression& p, int slot)
 {
     if (slot < 0 || slot >= p.numSlots)
@@ -1692,7 +1821,8 @@ inline bool removeSlot (Progression& p, int i)
 /** Re-picks the chord of selected slots only (bit i of mask = slot i), close
     to the best fit, leaving everything else untouched. Used when the user
     edits one slot's target. Locked slots and layer locks are respected. */
-inline void rerollSlots (Progression& p, unsigned mask, Rng& rng, float temperature = 0.004f)
+inline void rerollSlots (Progression& p, unsigned mask, Rng& rng, float temperature = 0.004f,
+                         bool revoiceRepeated = false, bool applyEnding = false)
 {
     bool wasLocked[kMaxSlots];
     Chord before[kMaxSlots];
@@ -1704,15 +1834,26 @@ inline void rerollSlots (Progression& p, unsigned mask, Rng& rng, float temperat
             p.slots[(size_t) i].locked = true;
     }
 
-    generateChords (p, rng, temperature);
+    generateChords (p, rng, temperature, applyEnding);
 
     for (int i = 0; i < p.numSlots; ++i)
     {
         p.slots[(size_t) i].locked = wasLocked[i];
-        if (before[i] != p.slots[(size_t) i].chord)
+        const bool chordChanged = before[i] != p.slots[(size_t) i].chord;
+        if ((mask & (1u << i)) == 0 || wasLocked[i])
+            continue;
+        if (revoiceRepeated || (chordChanged && p.locks.voicing))
+            voiceRolledSlot (p, i, rng, chordChanged);
+        else if (chordChanged)
             setChord (p, i, p.slots[(size_t) i].chord, rng);
     }
     updateActuals (p);
+}
+
+inline void rollSelectedSlot (Progression& p, int slot, Rng& rng)
+{
+    if (slot >= 0 && slot < p.numSlots)
+        rerollSlots (p, 1u << slot, rng, 0.004f, true, slot == p.numSlots - 1);
 }
 
 /** Applies the energy targets (density and velocity) while keeping each
@@ -1730,23 +1871,88 @@ inline void applyEnergy (Progression& p, Rng& rng, unsigned mask = ~0u)
     updateActuals (p);
 }
 
-/** Changes key by transposing everything (the progression stays the same,
-    relative to the tonic). Moves by the shortest distance. */
-inline void setTonic (Progression& p, int newTonic)
+inline void setTonalContext (Progression& p, int tonic, int scale)
 {
-    newTonic = mod12 (newTonic);
-    int d = mod12 (newTonic - p.tonic);
-    if (d > 6)
-        d -= 12;
-    p.tonic = newTonic;
+    p.tonic = mod12 (tonic);
+    p.scale = scale;
+    updateActuals (p);
+}
+
+inline bool hasRelativeKey (const Progression& p) noexcept
+{
+    return p.scale == 0 || p.scale == 1;
+}
+
+inline void goToRelative (Progression& p)
+{
+    if (hasRelativeKey (p))
+        setTonalContext (p, p.tonic + (p.scale == 0 ? -3 : 3), 1 - p.scale);
+}
+
+inline int playbackBassNote (const Slot& slot) noexcept
+{
+    const int bass = primaryBassNote (slot.voicing);
+    if (bass >= 0)
+        return bass;
+    const int offset = slot.voicing.transposeOffset;
+    return pickBassRegister (mod12 (slot.chord.bassPc() - offset)) + offset;
+}
+
+inline bool canTransposeProgression (const Progression& p, int semitones) noexcept
+{
+    if (semitones < -127 || semitones > 127)
+        return false;
+
+    const auto fits = [semitones] (int note)
+    {
+        return note + semitones >= 0 && note + semitones <= 127;
+    };
+    for (int i = 0; i < p.numSlots; ++i)
+    {
+        const auto& slot = p.slots[(size_t) i];
+        for (int j = 0; j < slot.voicing.n; ++j)
+            if (! fits (slot.voicing.notes[(size_t) j]))
+                return false;
+
+        const int bass = playbackBassNote (slot);
+        if (! fits (bass))
+            return false;
+        if (p.bassStyle != BassStyle::Sustain)
+        {
+            const int next = playbackBassNote (p.slots[(size_t) ((i + 1) % p.numSlots)]);
+            BassHit before[kMaxBassHitsPerSlot], after[kMaxBassHitsPerSlot];
+            const int steps = p.slotEnd (i) - slot.start;
+            const int count = getBassHits (p.bassStyle, bass, next, steps, before, kMaxBassHitsPerSlot);
+            getBassHits (p.bassStyle, bass + semitones, next + semitones, steps, after, kMaxBassHitsPerSlot);
+            for (int j = 0; j < count; ++j)
+                if (after[j].pitch != before[j].pitch + semitones)
+                    return false;
+        }
+    }
+    return true;
+}
+
+inline bool transposeProgression (Progression& p, int semitones)
+{
+    if (! canTransposeProgression (p, semitones))
+        return false;
     for (int i = 0; i < p.numSlots; ++i)
     {
         Slot& s = p.slots[(size_t) i];
-        s.chord.root = mod12 (s.chord.root + d);
+        s.chord.root = mod12 (s.chord.root + semitones);
         for (int j = 0; j < s.voicing.n; ++j)
-            s.voicing.notes[(size_t) j] = std::clamp (s.voicing.notes[(size_t) j] + d, 0, 127);
+            s.voicing.notes[(size_t) j] += semitones;
+        s.voicing.transposeOffset = std::clamp (s.voicing.transposeOffset + semitones, -127, 127);
     }
-    updateActuals (p);
+    setTonalContext (p, p.tonic + semitones, p.scale);
+    return true;
+}
+
+/** Transposes to a tonic by the shortest distance. */
+inline void setTonic (Progression& p, int newTonic)
+{
+    const int distance = mod12 (mod12 (newTonic) - p.tonic);
+    transposeProgression (p, distance > 6 ? distance - 12 : distance);
 }
 
 //==============================================================================
@@ -1847,16 +2053,12 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
         const int bCount = s.voicing.bassCount > 0 ? s.voicing.bassCount : s.voicing.computeBassCount();
         o.bassCount = bCount;
 
-        int pb = primaryBassNote (s.voicing);
-        if (pb < 0)
-            pb = pickBassRegister (s.chord.bassPc(), -1, kUpperFloor);
+        const int pb = playbackBassNote (s);
         o.primaryBass = pb;
         if (p.bassStyle != BassStyle::Sustain)
         {
             const auto& next = p.slots[(size_t) ((i + 1) % p.numSlots)];
-            int nextBass = primaryBassNote (next.voicing);
-            if (nextBass < 0)
-                nextBass = pickBassRegister (next.chord.bassPc(), -1, kUpperFloor);
+            const int nextBass = playbackBassNote (next);
             o.numBassHits = getBassHits (p.bassStyle, pb, nextBass, o.end - o.start, o.bassHits, kMaxBassHitsPerSlot);
         }
 

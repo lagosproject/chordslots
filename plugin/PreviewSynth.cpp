@@ -1,7 +1,82 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PreviewSynth.h"
+#include "ChordSlotsPianoAssets.h"
 
+#include <juce_audio_formats/juce_audio_formats.h>
+#include <array>
 #include <cmath>
+
+class PreviewPianoBank final : private juce::Thread
+{
+public:
+    struct Sample
+    {
+        juce::AudioBuffer<float> audio;
+        int root = 0;
+    };
+
+    PreviewPianoBank() : Thread ("ChordSlots piano loader") { startThread(); }
+
+    ~PreviewPianoBank() override { stopThread (-1); }
+
+    void request() noexcept
+    {
+        requested.store (true, std::memory_order_relaxed);
+    }
+
+    const Sample* find (int note) const noexcept
+    {
+        if (! ready.load (std::memory_order_acquire))
+            return nullptr;
+
+        const int index = juce::jlimit (0, (int) samples.size() - 1, (note - 21 + 3) / 6);
+        return &samples[(size_t) index];
+    }
+
+    static constexpr double sampleRate = 44100.0;
+
+private:
+    void run() override
+    {
+        // Parameter listeners can run on the audio thread. They only set a flag.
+        while (! threadShouldExit() && ! requested.load (std::memory_order_relaxed))
+            wait (20);
+
+        juce::FlacAudioFormat format;
+        for (size_t i = 0; i < samples.size(); ++i)
+        {
+            if (threadShouldExit())
+                return;
+
+            auto& sample = samples[i];
+            sample.root = 21 + 6 * (int) i;
+            const auto resource = "piano_" + juce::String (sample.root) + "_flac";
+            int bytes = 0;
+            const auto* data = ChordSlotsPianoAssets::getNamedResource (resource.toRawUTF8(), bytes);
+            if (data == nullptr)
+                return;
+
+            std::unique_ptr<juce::AudioFormatReader> reader (format.createReaderFor (
+                new juce::MemoryInputStream (data, (size_t) bytes, false), true));
+            if (reader == nullptr || reader->numChannels != 1 || reader->sampleRate != sampleRate
+                || reader->lengthInSamples < 2 || reader->lengthInSamples > 5 * sampleRate)
+                return;
+
+            const auto frames = (int) reader->lengthInSamples;
+            sample.audio.setSize (1, frames + 1);
+            if (! reader->read (&sample.audio, 0, frames, 0, true, false))
+                return;
+            sample.audio.setSample (0, frames, 0.0f);
+        }
+
+        // The bank is immutable after publication and lives as long as its voices.
+        ready.store (true, std::memory_order_release);
+    }
+
+    std::array<Sample, 12> samples;
+    std::atomic<bool> requested { false };
+    std::atomic<bool> ready { false };
+};
 
 namespace
 {
@@ -31,9 +106,11 @@ inline float polyBlep (float t, float dt) noexcept
 class PreviewVoice final : public juce::SynthesiserVoice
 {
 public:
+    explicit PreviewVoice (const PreviewPianoBank& bank) : piano (bank) {}
+
     bool canPlaySound (juce::SynthesiserSound* s) override { return dynamic_cast<PreviewSound*> (s) != nullptr; }
 
-    void setModel (PreviewSoundModel m) noexcept { model = m; }
+    void setModel (PreviewSoundModel m) noexcept { nextModel = m; }
 
     void setCurrentPlaybackSampleRate (double newRate) override
     {
@@ -51,14 +128,36 @@ public:
             adsr.setParameters ({ 0.002f, 1.2f, 0.45f, 0.35f });
         else if (model == PreviewSoundModel::FeltPiano)
             adsr.setParameters ({ 0.012f, 0.85f, 0.50f, 0.40f });
+        else if (model == PreviewSoundModel::AcousticPiano)
+            adsr.setParameters ({ 0.002f, 0.0f, 1.0f, 0.23f });
         else
             adsr.setParameters ({ 0.004f, 0.45f, 0.62f, 0.22f });
     }
 
     void startNote (int midiNote, float velocity, juce::SynthesiserSound*, int) override
     {
-        updateAdsrParams();
+        model = nextModel;
         const double sr = getSampleRate();
+        if (model == PreviewSoundModel::AcousticPiano)
+        {
+            if (const auto* sample = piano.find (midiNote))
+            {
+                sampleData = sample->audio.getReadPointer (0);
+                sampleFrames = sample->audio.getNumSamples() - 1;
+                samplePosition = 0.0;
+                sampleStep = PreviewPianoBank::sampleRate / sr * std::exp2 ((midiNote - sample->root) / 12.0);
+                level = velocity;
+                adsr.reset();
+                updateAdsrParams();
+                adsr.noteOn();
+                return;
+            }
+
+            // Keep preview responsive if a note arrives during the first load.
+            model = PreviewSoundModel::FeltPiano;
+        }
+
+        updateAdsrParams();
         const double hz = juce::MidiMessage::getMidiNoteInHertz (midiNote);
         const double detune = std::pow (2.0, 7.0 / 1200.0);
         inc[0] = (float) (hz * detune / sr);
@@ -102,6 +201,12 @@ public:
     {
         if (! adsr.isActive())
             return;
+
+        if (model == PreviewSoundModel::AcousticPiano)
+        {
+            renderPiano (out, start, num);
+            return;
+        }
 
         const float sr = (float) getSampleRate();
         const float twoPi = juce::MathConstants<float>::twoPi;
@@ -196,6 +301,34 @@ public:
     }
 
 private:
+    void renderPiano (juce::AudioBuffer<float>& out, int start, int num)
+    {
+        auto* left = out.getWritePointer (0, start);
+        auto* right = out.getNumChannels() > 1 ? out.getWritePointer (1, start) : nullptr;
+        for (int i = 0; i < num && samplePosition < sampleFrames && adsr.isActive(); ++i)
+        {
+            const auto frame = (int) samplePosition;
+            const auto fraction = (float) (samplePosition - frame);
+            const float value = sampleData[frame] + fraction * (sampleData[frame + 1] - sampleData[frame]);
+            const float signal = value * level * adsr.getNextSample();
+            left[i] += signal;
+            if (right != nullptr)
+                right[i] += signal;
+            samplePosition += sampleStep;
+        }
+
+        if (samplePosition >= sampleFrames || ! adsr.isActive())
+        {
+            adsr.reset();
+            clearCurrentNote();
+        }
+    }
+
+    const PreviewPianoBank& piano;
+    const float* sampleData = nullptr;
+    double samplePosition = 0.0, sampleStep = 0.0;
+    int sampleFrames = 0;
+    PreviewSoundModel nextModel = PreviewSoundModel::CleanSaw;
     PreviewSoundModel model = PreviewSoundModel::CleanSaw;
     juce::ADSR adsr;
     float phase[2] = {}, inc[2] = {};
@@ -211,16 +344,17 @@ private:
 PreviewSynth::PreviewSynth()
 {
     for (int i = 0; i < 24; ++i)
-        synth.addVoice (new PreviewVoice());
+        synth.addVoice (new PreviewVoice (*piano));
     synth.addSound (new PreviewSound());
 }
 
-void PreviewSynth::setSoundModel (PreviewSoundModel model)
+PreviewSynth::~PreviewSynth() = default;
+
+void PreviewSynth::setSoundModel (PreviewSoundModel model) noexcept
 {
-    currentModel = model;
-    for (int i = 0; i < synth.getNumVoices(); ++i)
-        if (auto* pv = dynamic_cast<PreviewVoice*> (synth.getVoice (i)))
-            pv->setModel (model);
+    if (model == PreviewSoundModel::AcousticPiano)
+        piano->request();
+    requestedModel.store (model, std::memory_order_relaxed);
 }
 
 void PreviewSynth::prepare (double sampleRate)
@@ -231,6 +365,14 @@ void PreviewSynth::prepare (double sampleRate)
 
 void PreviewSynth::render (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, float gain)
 {
+    const auto model = requestedModel.load (std::memory_order_relaxed);
+    if (model != currentModel)
+    {
+        currentModel = model;
+        for (int i = 0; i < synth.getNumVoices(); ++i)
+            static_cast<PreviewVoice*> (synth.getVoice (i))->setModel (model);
+    }
+
     synth.renderNextBlock (buffer, midi, 0, buffer.getNumSamples());
     smoothedGain.setTargetValue (gain);
     smoothedGain.applyGain (buffer, buffer.getNumSamples());

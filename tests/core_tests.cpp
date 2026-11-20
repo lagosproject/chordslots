@@ -2075,6 +2075,122 @@ static void testCandidatePoolMinor()
     CHECK (tonesOutsideScale (ch (4, "7"), A, minorScale, true) == 0);
 }
 
+static void testHarmonicEndings()
+{
+    CHECK (Progression {}.ending == Ending::Free);
+    for (int scale : { 0, 2 })
+    {
+        Progression base;
+        base.tonic = scale == 0 ? 0 : 9;
+        base.scale = scale;
+        base.adventure = 0.10f;
+        base.locks.rhythm = true;
+        for (int i = 0; i < base.numSlots; ++i)
+            base.slots[(size_t) i].start = 96 * i;
+
+        int tonic[3] {}, preparedEnd[3] {}, preparedWrap[3] {};
+        float wrapCost[3] {};
+        for (int seed = 1; seed <= 96; ++seed)
+        {
+            for (int mode = 0; mode < 3; ++mode)
+            {
+                auto p = base;
+                p.ending = (Ending) mode;
+                Rng rng ((unsigned) seed);
+                roll (p, rng);
+                const auto first = p.slots[0].chord, last = p.slots[3].chord;
+                tonic[mode] += detail::hasTonicFunction (p, last);
+                preparedEnd[mode] += detail::hasTonicFunction (p, last)
+                    && detail::preparationBonus (p, p.slots[2].chord, last) > 0.0f;
+                preparedWrap[mode] += detail::preparationBonus (p, last, first) > 0.0f;
+                wrapCost[mode] += detail::harmonicTransitionCost (p, styleForProgression (p), last, first);
+                for (int i = 0; i < p.numSlots; ++i)
+                    CHECK (tonesOutsideScale (p.slots[(size_t) i].chord, p.tonic, p.scale) == 0);
+            }
+        }
+        for (int mode = 0; mode < 3; ++mode)
+            std::printf ("Ending scale=%d mode=%d tonic=%d preparedEnd=%d preparedWrap=%d wrapCost=%.4f\n",
+                         scale, mode, tonic[mode], preparedEnd[mode], preparedWrap[mode], wrapCost[mode] / 96.0f);
+        CHECK (tonic[1] > tonic[0]);
+        CHECK (preparedEnd[1] > preparedEnd[0]);
+        CHECK (preparedWrap[2] > preparedWrap[0]);
+        CHECK (wrapCost[2] < wrapCost[0]);
+    }
+
+    Progression p;
+    p.tonic = 0;
+    p.scale = 0;
+    p.adventure = 0.1f;
+    p.numSlots = 2;
+    p.slots[1].start = 192;
+    p.slots[0].locked = true;
+    Rng rng (42);
+    setChord (p, 0, ch (5, ""), rng);
+    int prepared[3] {};
+    for (unsigned seed = 1; seed <= 32; ++seed)
+    {
+        for (int variant = 0; variant < 3; ++variant)
+        {
+            auto fixedStart = p;
+            fixedStart.ending = variant == 0 ? Ending::Free : Ending::LeadBackToStart;
+            Rng seeded (seed);
+            if (variant == 2)
+                rollSelectedSlot (fixedStart, 1, seeded);
+            else
+                roll (fixedStart, seeded);
+            CHECK (fixedStart.slots[0].chord == ch (5, ""));
+            const Chord last = fixedStart.slots[1].chord;
+            prepared[variant] += detail::preparationBonus (fixedStart, last, ch (5, ""))
+                              > detail::preparationBonus (fixedStart, last, ch (0, ""));
+        }
+    }
+    std::printf ("Ending locked F: stronger preparation toward F in %d/32 Free, %d/32 Lead, %d/32 selected Lead\n",
+                 prepared[0], prepared[1], prepared[2]);
+    CHECK (prepared[1] > prepared[0]);
+    CHECK (prepared[2] > 16);
+
+    roll (p, rng);
+    const Slot locked = p.slots[1];
+    p.slots[1].locked = true;
+    for (auto ending : { Ending::Free, Ending::ResolveToTonic, Ending::LeadBackToStart })
+    {
+        p.ending = ending;
+        roll (p, rng);
+        rollSelectedSlot (p, 1, rng);
+        CHECK (p.slots[1].chord == locked.chord);
+        CHECK (p.slots[1].voicing.notes == locked.voicing.notes);
+        CHECK (p.slots[1].voicing.n == locked.voicing.n);
+        CHECK (p.slots[1].voicing.velocity == locked.voicing.velocity);
+    }
+
+    Progression single;
+    single.tonic = 9;
+    single.scale = 2;
+    single.numSlots = 1;
+    auto lead = single;
+    lead.ending = Ending::LeadBackToStart;
+    Rng freeRng (91), leadRng (91);
+    roll (single, freeRng);
+    roll (lead, leadRng);
+    CHECK (single.slots[0].chord == lead.slots[0].chord);
+    CHECK (single.slots[0].voicing.notes == lead.slots[0].voicing.notes);
+    lead.ending = Ending::ResolveToTonic;
+    rollSelectedSlot (lead, 0, leadRng);
+    CHECK (detail::hasTonicFunction (lead, lead.slots[0].chord));
+    CHECK (! detail::hasTonicFunction (lead, ch (9, "")));
+    CHECK (detail::preparationBonus (lead, ch (7, ""), ch (9, "m")) > 0.0f);
+    const auto admitsE7 = [] (float adventure)
+    {
+        const auto candidates = buildCandidates (9, 2, adventure);
+        return std::any_of (candidates.begin(), candidates.end(), [] (const Candidate& c)
+        {
+            return c.chord == ch (4, "7");
+        });
+    };
+    CHECK (! admitsE7 (0.1f));
+    CHECK (admitsE7 (0.5f));
+}
+
 int main()
 {
     testSongPrimitives();
@@ -2085,6 +2201,7 @@ int main()
     testMelodyHarmonization();
     testExactRing();
     testVariety();
+    testHarmonicEndings();
     CHECK (chordTypes().size() == std::size (kPythonQualityClasses));
     for (size_t type = 0; type < std::size (kPythonQualityClasses); ++type)
         CHECK (int (qualityClassOf (int (type))) == kPythonQualityClasses[type]);

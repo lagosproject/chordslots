@@ -198,10 +198,16 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     setLookAndFeel (&lnf);
 
     // Header Combos
-    setupCombo (keyBox, keyLabel, "KEY",
-              "Transpose the progression to a different root note.");
-    setupCombo (scaleBox, scaleLabel, "SCALE",
-              "Choose the scale and generate chords for it using the current slot timings.");
+    setupCombo (keyBox, keyLabel, "TONIC",
+              "Choose the tonic for scale highlighting, suggestions and Roll.");
+    keyBox.setName ("Tonic");
+    scaleBox.setName ("Scale");
+    scaleBox.setTooltip ("Choose the scale for highlighting, suggestions and Roll.");
+    scaleBox.setTextWhenNothingSelected ("Scale");
+    addAndMakeVisible (scaleBox);
+    keyActionsButton.setTooltip ("Transpose the progression or go to the relative key.");
+    keyActionsButton.onClick = [this] { showKeyActions(); };
+    addAndMakeVisible (keyActionsButton);
     setupCombo (barsBox, barsLabel, "BARS",
               "Set the length of the progression in bars.");
     setupCombo (meterBox, meterLabel, "METER",
@@ -215,7 +221,12 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         keyBox.addItem (utf8 (cs::pitchClassName (pc, pc, 0)), pc + 1);
 
     for (int i = 0; i < cs::numScales(); ++i)
-        scaleBox.addItem (cs::scales()[(size_t) i].name, i + 1);
+    {
+        const char* name = cs::scales()[(size_t) i].name;
+        if (i == 0) name = "Major (Ionian)";
+        if (i == 1) name = "Natural Minor (Aeolian)";
+        scaleBox.addItem (name, i + 1);
+    }
 
     for (int b : { 1, 2, 4, 8 })
         barsBox.addItem (juce::String (b), b);
@@ -253,21 +264,16 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     {
         if (refreshing) return;
         const int tonic = keyBox.getSelectedId() - 1;
-        processor.edit ([tonic] (cs::Progression& pr, cs::Rng&) { cs::setTonic (pr, tonic); });
+        if (tonic >= 0)
+            processor.edit ([tonic] (cs::Progression& pr, cs::Rng&) { cs::setTonalContext (pr, tonic, pr.scale); });
     };
 
     scaleBox.onChange = [this]
     {
         if (refreshing) return;
         const int scale = scaleBox.getSelectedId() - 1;
-        processor.edit ([scale] (cs::Progression& pr, cs::Rng& rng)
-        {
-            pr.scale = scale;
-            const bool keep = pr.locks.rhythm;
-            pr.locks.rhythm = true; // a new scale needs new chords, not new cuts
-            cs::roll (pr, rng);
-            pr.locks.rhythm = keep;
-        });
+        if (scale >= 0)
+            processor.edit ([scale] (cs::Progression& pr, cs::Rng&) { cs::setTonalContext (pr, pr.tonic, scale); });
     };
 
     barsBox.onChange = [this]
@@ -580,6 +586,18 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     }
 
     // Knobs with numeric text boxes
+    setupCombo (endingBox, endingLabel, "Ending", "Harmonic ending preference for the next Roll.");
+    endingBox.setComponentID ("ending");
+    endingBox.addItem ("Free", 1);
+    endingBox.addItem ("Resolve to Tonic", 2);
+    endingBox.addItem ("Lead Back to Start", 3);
+    endingBox.onChange = [this]
+    {
+        const int id = endingBox.getSelectedId();
+        if (! refreshing && id != 0)
+            processor.edit ([id] (cs::Progression& p, cs::Rng&) { p.ending = (cs::Ending) (id - 1); }, false);
+    };
+
     setupKnob (adventure, adventureLabel, "ADVENTURE",
               "Raise this to let Roll use more borrowed chords and extensions.");
     setupKnob (variety, varietyLabel, "VARIETY",
@@ -695,6 +713,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     synthModelBox.addItem ("Clean Saw", 1);
     synthModelBox.addItem ("Rhodes EP", 2);
     synthModelBox.addItem ("Felt Piano", 3);
+    synthModelBox.addItem ("Acoustic Piano", 4);
     synthModelAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "synthModel", synthModelBox);
 #if defined (CHORDSLOTS_MIDI_FX) && CHORDSLOTS_MIDI_FX
     synthModelLabel.setVisible (false);
@@ -770,7 +789,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     };
     addChildComponent (rollColorBtn);
 
-    rollBassBtn.setTooltip ("Cycle or reroll the bass inversion of this slot");
+    rollBassBtn.setTooltip ("Cycle the note in this slot's separate bass part");
     rollBassBtn.onClick = [this]
     {
         const int s = timeline.getSelectedSlot();
@@ -785,7 +804,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         const int s = timeline.getSelectedSlot();
         if (s >= 0)
         {
-            pickerOverlay.open (s, false);
+            pickerOverlay.open (s, true);
             pickerOverlay.setVisible (true);
             pickerOverlay.toFront (true);
         }
@@ -968,6 +987,42 @@ void ChordSlotsEditor::updateTooltips()
     }
 }
 
+void ChordSlotsEditor::showKeyActions()
+{
+    const auto progression = processor.getProgression();
+    juce::PopupMenu menu;
+    juce::PopupMenu transpose;
+    static constexpr int minShift = -24, maxShift = 24, transposeId = 100;
+    bool canTranspose = false;
+    const auto label = [] (int shift) { return (shift > 0 ? "+" : "") + juce::String (shift); };
+    for (int start : { -24, -12, 1, 13 })
+    {
+        const int last = start + 11;
+        juce::PopupMenu range;
+        bool rangeEnabled = false;
+        for (int shift = start; shift <= last; ++shift)
+        {
+            const bool enabled = cs::canTransposeProgression (progression, shift);
+            range.addItem (transposeId + shift, label (shift) + " st", enabled);
+            rangeEnabled |= enabled;
+        }
+        transpose.addSubMenu (label (start) + " to " + label (last) + " st", range, rangeEnabled);
+        canTranspose |= rangeEnabled;
+    }
+    menu.addSubMenu ("Transpose", transpose, canTranspose);
+    menu.addItem (1, "Go to Relative", cs::hasRelativeKey (progression));
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&keyActionsButton),
+        [editor = juce::Component::SafePointer<ChordSlotsEditor> (this)] (int result)
+        {
+            if (editor == nullptr)
+                return;
+            if (result == 1)
+                editor->processor.edit ([] (cs::Progression& p, cs::Rng&) { cs::goToRelative (p); });
+            else if (result >= transposeId + minShift && result <= transposeId + maxShift)
+                editor->processor.transposeProgression (result - transposeId);
+        });
+}
+
 void ChordSlotsEditor::showSongMenu()
 {
     const auto song = processor.getSong();
@@ -1144,6 +1199,8 @@ void ChordSlotsEditor::refresh()
     rebuildKeyNames (p.scale);
     keyBox.setSelectedId (p.tonic + 1, juce::dontSendNotification);
     scaleBox.setSelectedId (p.scale + 1, juce::dontSendNotification);
+    keyLabel.setText (keyBox.getText() + " " + (p.scale == 1 ? "Natural Minor" : cs::scales()[(size_t) p.scale].name),
+                      juce::dontSendNotification);
     barsBox.setSelectedId (p.bars, juce::dontSendNotification);
 
     if (processor.isFollowingHostMeter())
@@ -1188,6 +1245,7 @@ void ChordSlotsEditor::refresh()
     lockVoicing.setToggleState (p.locks.voicing, juce::dontSendNotification);
 
     adventure.setValue (p.adventure, juce::dontSendNotification);
+    endingBox.setSelectedId (1 + (int) p.ending, juce::dontSendNotification);
     variety.setValue (p.variety, juce::dontSendNotification);
     syncopation.setValue (p.syncopation, juce::dontSendNotification);
     bassMotion.setValue (p.bassMotion, juce::dontSendNotification);
@@ -1230,14 +1288,14 @@ void ChordSlotsEditor::showGrooveView (bool show)
     grooveViewButton.setToggleState (show, juce::dontSendNotification);
 
     for (juce::Component* control : std::initializer_list<juce::Component*> {
-             &keyBox, &keyLabel, &scaleBox, &scaleLabel, &barsBox, &barsLabel,
+             &keyBox, &keyLabel, &scaleBox, &keyActionsButton, &barsBox, &barsLabel,
              &meterBox, &meterLabel, &slotsBox, &slotsLabel, &snapBox, &snapLabel,
              &fitLabel, &fitCaption, &midiViewBtn, &lanes,
              &moodBox, &moodLabel, &styleBox, &styleLabel, &voicingBox, &voicingLabel,
              &shapeBox, &shapeLabel, &resetCurvesBtn, &analyzeMidiBtn, &melodyFit,
              &melodyFitLabel, &lockCaption, &lockRhythm, &lockRoots, &lockColors,
              &lockVoicing, &adventure, &adventureLabel, &variety, &varietyLabel,
-             &syncopation, &syncopationLabel, &bassMotion, &bassMotionLabel, &rollButton })
+             &syncopation, &syncopationLabel, &bassMotion, &bassMotionLabel, &endingBox, &endingLabel, &rollButton })
         control->setVisible (! show);
 
     for (juce::Component* control : std::initializer_list<juce::Component*> {
@@ -1516,7 +1574,7 @@ bool ChordSlotsEditor::keyPressed (const juce::KeyPress& key)
         {
             processor.edit ([sel] (cs::Progression& pr, cs::Rng& rng)
             {
-                cs::rerollSlots (pr, 1u << sel, rng);
+                cs::rollSelectedSlot (pr, sel, rng);
             });
         }
         else
@@ -1606,25 +1664,32 @@ void ChordSlotsEditor::resized()
     {
         midiViewBtn.setBounds (sharedControls.removeFromRight (94).withTrimmedRight (4));
         auto loopRow = area.removeFromTop (43);
+        static constexpr int loopGap = 4;
         auto place = [&loopRow] (juce::ComboBox& box, juce::Label& label, int width)
         {
             auto cell = loopRow.removeFromLeft (width);
-            loopRow.removeFromLeft (8);
+            loopRow.removeFromLeft (loopGap);
             label.setBounds (cell.removeFromTop (15));
             box.setBounds (cell);
         };
 
-        place (keyBox, keyLabel, 50);
-        place (scaleBox, scaleLabel, 96);
-        place (barsBox, barsLabel, 60);
-        place (meterBox, meterLabel, 60);
-        place (slotsBox, slotsLabel, 54);
-        place (snapBox, snapLabel, 66);
+        auto keyArea = loopRow.removeFromLeft (210);
+        keyLabel.setBounds (keyArea.removeFromTop (15));
+        keyBox.setBounds (keyArea.removeFromLeft (42));
+        keyArea.removeFromLeft (8);
+        scaleBox.setBounds (keyArea);
+        loopRow.removeFromLeft (loopGap);
+        keyActionsButton.setBounds (loopRow.removeFromLeft (86).withTrimmedTop (15));
+        loopRow.removeFromLeft (loopGap);
+        place (barsBox, barsLabel, 42);
+        place (meterBox, meterLabel, 48);
+        place (slotsBox, slotsLabel, 46);
+        place (snapBox, snapLabel, 54);
 
-        loopRow.removeFromLeft (10);
-        place (moodBox, moodLabel, 100);
-        place (styleBox, styleLabel, 132);
-        place (voicingBox, voicingLabel, 106);
+        loopRow.removeFromLeft (8);
+        place (moodBox, moodLabel, 80);
+        place (styleBox, styleLabel, 100);
+        place (voicingBox, voicingLabel, 102);
 
         auto fitArea = loopRow.removeFromRight (60);
         fitCaption.setBounds (fitArea.removeFromTop (14));
@@ -1661,7 +1726,7 @@ void ChordSlotsEditor::resized()
     harmonyPanelBounds = grooveView ? juce::Rectangle<int>{} : stagePanel;
     groovePanelBounds = grooveView ? stagePanel : juce::Rectangle<int>{};
     footer.removeFromLeft (gap);
-    previewPanelBounds = footer.removeFromLeft (170);
+    previewPanelBounds = footer.removeFromLeft (192);
     footer.removeFromLeft (gap);
     outputPanelBounds = footer;
 
@@ -1673,8 +1738,11 @@ void ChordSlotsEditor::resized()
         auto hInner = harmonyPanelBounds.reduced (8, 4);
         hInner.removeFromTop (16);
 
-        auto harmActions = hInner.removeFromRight (74);
-        rollButton.setBounds (harmActions.withSizeKeepingCentre (74, 36));
+        auto harmActions = hInner.removeFromRight (142);
+        endingLabel.setBounds (harmActions.removeFromTop (13));
+        endingBox.setBounds (harmActions.removeFromTop (20));
+        harmActions.removeFromTop (3);
+        rollButton.setBounds (harmActions.withSizeKeepingCentre (74, 34));
         hInner.removeFromRight (6);
 
         auto lockButtons = hInner.removeFromTop (20);
@@ -1732,7 +1800,7 @@ void ChordSlotsEditor::resized()
     // Synth preview
     {
         auto preview = previewPanelBounds.reduced (8, 4).withTrimmedTop (16);
-        auto sound = preview.removeFromLeft (84);
+        auto sound = preview.removeFromLeft (106);
         synthModelLabel.setBounds (sound.removeFromTop (13));
         synthModelBox.setBounds (sound.removeFromTop (26));
         sound.removeFromTop (5);
@@ -1769,7 +1837,7 @@ void ChordSlotsEditor::resized()
     // =========================================================================
     // Main Area: Timeline Cards & Lanes & Lane Toolbar
     // =========================================================================
-    pickerOverlay.setBounds (juce::Rectangle<int> (juce::jmin (680, getWidth() - 40), 350)
+    pickerOverlay.setBounds (juce::Rectangle<int> (juce::jmin (680, getWidth() - 40), 394)
                                  .withCentre ({ getWidth() / 2, getHeight() / 2 }));
 
     if (grooveView)

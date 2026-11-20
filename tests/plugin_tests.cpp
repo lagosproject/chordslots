@@ -3,10 +3,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "../plugin/PluginProcessor.h"
+#include "../plugin/ui/ChordPickerOverlay.h"
+#include "../plugin/ui/TimelineView.h"
 
+#include <chrono>
 #include <cstdio>
 #include <map>
 #include <memory>
+#include <thread>
+#include <tuple>
 
 static int failures = 0;
 static int checks = 0;
@@ -300,6 +305,157 @@ void testPreviewAndAudition()
     CHECK (h.heldAfterReplay() == 0);
 }
 
+void testAcousticPianoPreview()
+{
+    // The legacy project value is the choice index, regardless of the host's normalized range.
+    Host original;
+    auto* choice = dynamic_cast<juce::AudioParameterChoice*> (original.processor.apvts.getParameter ("synthModel"));
+    CHECK (choice != nullptr);
+    if (choice == nullptr)
+        return;
+
+    CHECK (choice->choices == juce::StringArray ({ "Clean Saw", "Rhodes EP", "Felt Piano", "Acoustic Piano" }));
+    Host restored;
+    for (const int index : { 2, 3 })
+    {
+        *choice = index;
+        juce::MemoryBlock state;
+        original.processor.getStateInformation (state);
+        restored.processor.setStateInformation (state.getData(), (int) state.getSize());
+        CHECK (juce::roundToInt (restored.processor.apvts.getRawParameterValue ("synthModel")->load()) == index);
+    }
+
+    PreviewSynth synth;
+    synth.prepare (48000.0);
+    synth.setSoundModel (PreviewSoundModel::AcousticPiano);
+    juce::AudioBuffer<float> audio (2, 2048);
+    juce::MidiBuffer note;
+    note.addEvent (juce::MidiMessage::noteOn (1, 28, 0.8f), 0);
+    const auto renderNote = [&]
+    {
+        synth.allNotesOff();
+        audio.clear();
+        synth.render (audio, note, 1.0f);
+        return audio.getMagnitude (0, audio.getNumSamples());
+    };
+    const auto channelsMatch = [&]
+    {
+        return std::equal (audio.getReadPointer (0), audio.getReadPointer (0) + audio.getNumSamples(),
+                           audio.getReadPointer (1));
+    };
+
+    // Sample playback is mono in both channels. The loading fallback is stereo.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds (5);
+    bool loaded = false;
+    do
+    {
+        loaded = renderNote() > 0.001f && channelsMatch();
+        if (! loaded)
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+    while (! loaded && std::chrono::steady_clock::now() < deadline);
+    CHECK (loaded);
+
+    synth.setSoundModel (PreviewSoundModel::FeltPiano);
+    juce::MidiBuffer empty;
+    audio.clear();
+    synth.render (audio, empty, 1.0f);
+    CHECK (audio.getMagnitude (0, audio.getNumSamples()) > 0.001f && channelsMatch());
+    CHECK (renderNote() > 0.001f && ! channelsMatch());
+
+    restored.processor.setPreviewPlaying (true);
+    restored.run (4);
+    CHECK (restored.peak > 0.0f && ! restored.nonFinite);
+    auto* restoredChoice = dynamic_cast<juce::AudioParameterChoice*> (restored.processor.apvts.getParameter ("synthModel"));
+    *restoredChoice = 2;
+    restored.run (8);
+    *restoredChoice = 3;
+    restored.run (8);
+    restored.processor.setPreviewPlaying (false);
+    restored.run (4);
+    CHECK (restored.heldAfterReplay() == 0);
+}
+
+int renderPianoComparison (const juce::File& directory)
+{
+    PreviewSynth synth; // Retain the shared bank warmed by the test.
+    testAcousticPianoPreview();
+    if (failures != 0 || directory.createDirectory().failed())
+        return 1;
+
+    constexpr int rate = 48000, blockSize = 256, blocks = 1500;
+    juce::AudioBuffer<float> block (2, blockSize);
+    juce::AudioBuffer<float> take (2, blocks * blockSize);
+    synth.prepare (rate);
+
+    std::vector<juce::MidiBuffer> events (blocks);
+    const auto chord = [&] (double time, double duration, std::initializer_list<int> notes)
+    {
+        const int start = (int) (time * rate);
+        const int end = (int) ((time + duration) * rate);
+        for (const int key : notes)
+        {
+            events[(size_t) (start / blockSize)].addEvent (juce::MidiMessage::noteOn (1, key, 0.8f), start % blockSize);
+            events[(size_t) (end / blockSize)].addEvent (juce::MidiMessage::noteOff (1, key), end % blockSize);
+        }
+    };
+    chord (0.1, 0.75, { 28, 52, 55, 59, 64 });              // Em
+    chord (1.0, 3.50, { 33, 52, 55, 60, 64 });              // Am7
+    for (const double time : { 4.8, 5.05, 5.30, 5.55 })
+        chord (time, 0.15, { 35, 51, 57, 59, 66 });         // B7
+    chord (6.0, 1.25, { 28, 52, 55, 59, 64 });              // Em
+
+    juce::WavAudioFormat wav;
+    for (const auto model : { PreviewSoundModel::FeltPiano, PreviewSoundModel::AcousticPiano })
+    {
+        synth.setSoundModel (model);
+        for (int b = 0; b < blocks; ++b)
+        {
+            block.clear();
+            synth.render (block, events[(size_t) b], 1.0f);
+            for (int channel = 0; channel < 2; ++channel)
+                take.copyFrom (channel, b * blockSize, block, channel, 0, blockSize);
+        }
+
+        const auto name = model == PreviewSoundModel::FeltPiano ? "felt" : "acoustic";
+        const auto path = directory.getChildFile (juce::String (name) + ".wav");
+        if (path.existsAsFile() && ! path.deleteFile())
+            return 1;
+        std::unique_ptr<juce::OutputStream> stream = path.createOutputStream();
+        auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions()
+            .withSampleRate (rate).withNumChannels (2).withBitsPerSample (24));
+        if (writer == nullptr || ! writer->writeFromAudioSampleBuffer (take, 0, take.getNumSamples()))
+            return 1;
+
+        juce::MidiBuffer polyphonic;
+        for (int key : { 28, 40, 47, 52, 55, 59, 64, 67 })
+            polyphonic.addEvent (juce::MidiMessage::noteOn (1, key, 0.8f), 0);
+        juce::MidiBuffer empty;
+        constexpr int iterations = 16000, phraseBlocks = 96;
+        juce::ScopedNoDenormals noDenormals;
+        std::array<double, 5> timings {};
+        for (auto& timing : timings)
+        {
+            const auto start = std::chrono::steady_clock::now();
+            for (int i = 0; i < iterations; ++i)
+            {
+                const bool restart = i % phraseBlocks == 0;
+                if (restart)
+                    synth.allNotesOff();
+                block.clear();
+                synth.render (block, restart ? polyphonic : empty, 1.0f);
+            }
+            timing = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - start).count()
+                / iterations;
+        }
+        synth.allNotesOff();
+        std::sort (timings.begin(), timings.end());
+        std::printf ("%s: %.3f us/block (median of five runs), peak %.2f dBFS\n", name, timings[2],
+                     (double) juce::Decibels::gainToDecibels (take.getMagnitude (0, take.getNumSamples())));
+    }
+    return 0;
+}
+
 void testCompStyleAudition()
 {
     Host h;
@@ -427,9 +583,134 @@ void testSeparatorLocksAndAlternativeAudition()
     restored.run (loopBlocks + 4);
     CHECK (restored.events.size() > isolated.size() * 2);
     CHECK (restored.heldAfterReplay() == 0);
+    restored.processor.auditionAlternative (1, alternatives.front(), true);
+    restored.run (1);
+    restored.processor.stopAlternativeAudition();
+    restored.run (1);
+    CHECK (restored.heldAfterReplay() == 0);
+    const auto stopped = restored.events.size();
+    restored.run (loopBlocks);
+    CHECK (restored.events.size() == stopped);
     const auto after = restored.processor.getProgression();
     for (int i = 0; i < before.numSlots; ++i)
         CHECK (before.slots[(size_t) i].chord == after.slots[(size_t) i].chord);
+}
+
+void testInspectAlternatives()
+{
+    constexpr int tonic = 9, dorian = 2, slot = 0;
+    CHECK (cs::scaleMembership ({ 2, 0 }, tonic, dorian).outsideChord == 0); // D
+    CHECK (cs::scaleMembership ({ 2, 1 }, tonic, dorian).outsideChord == (1u << 5)); // Dm: F
+    CHECK (cs::scaleMembership ({ 4, 9 }, tonic, dorian).outsideChord == (1u << 8)); // E7: G#
+    const auto extension = cs::scaleMembership ({ 2, 7 }, tonic, dorian); // Dmaj7: C#
+    CHECK (extension.outsideChord == (1u << 1) && ! extension.outsideBass);
+    const auto bassOnly = cs::scaleMembership ({ 2, 0, 1 }, tonic, dorian); // D/Eb
+    CHECK (bassOnly.outsideChord == 0 && bassOnly.outsideBass);
+
+    Host host;
+    host.processor.edit ([=] (cs::Progression& p, cs::Rng& rng)
+    {
+        p.tonic = tonic;
+        p.scale = dorian;
+        p.adventure = 1.0f;
+        cs::setChord (p, slot, { tonic, 1 }, rng);
+    });
+    const auto before = host.processor.getProgression();
+    const auto rng = host.processor.copyVoicingRng();
+    const auto expected = cs::inspectAlternatives (before, slot, 6, 3, rng);
+    CHECK (expected.size() == 9);
+    for (size_t i = 0; i < expected.size(); ++i)
+        CHECK ((cs::scaleMembership (expected[i].chord, tonic, dorian).outsideChord != 0) == (i >= 6));
+    const auto predict = [&] (size_t index)
+    {
+        auto p = before;
+        p.slots[slot].chord = expected[index].chord;
+        p.slots[slot].voicing = expected[index].voicing;
+        cs::updateActuals (p, slot);
+        return p;
+    };
+
+    ChordPickerOverlay inspect (host.processor);
+    inspect.setSize (420, 272);
+    inspect.open (slot, true);
+    juce::Viewport* viewport = nullptr;
+    juce::ToggleButton* toggle = nullptr;
+    for (auto* child : inspect.getChildren())
+    {
+        if (auto* v = dynamic_cast<juce::Viewport*> (child)) viewport = v;
+        if (auto* t = dynamic_cast<juce::ToggleButton*> (child)) toggle = t;
+    }
+    CHECK (viewport != nullptr && toggle != nullptr);
+    if (viewport == nullptr || toggle == nullptr)
+        return;
+    const auto rows = [&]
+    {
+        std::vector<juce::TextButton*> result;
+        for (auto* component : viewport->getViewedComponent()->getChildren())
+            if (auto* row = dynamic_cast<juce::TextButton*> (component))
+                result.push_back (row);
+        return result;
+    };
+    CHECK (! toggle->getToggleState() && rows().size() == 6);
+    toggle->setToggleState (true, juce::dontSendNotification);
+    toggle->onClick();
+    const auto allRows = rows();
+    CHECK (allRows.size() == expected.size());
+    CHECK (viewport->getViewedComponent()->getHeight() > viewport->getHeight());
+    if (allRows.size() != expected.size() || expected.empty())
+        return;
+
+    size_t oppositeRow = expected.size();
+    for (size_t i = 0; i < expected.size(); ++i)
+    {
+        const auto test = predict (i);
+        const auto& predicted = test.slots[slot];
+        CHECK (allRows[i]->getButtonText().startsWith (juce::String::fromUTF8 (
+            cs::chordName (predicted.chord, tonic, dorian).c_str()) + "   "));
+        CHECK (allRows[i]->getWidth() == viewport->getViewedComponent()->getWidth());
+        if ((predicted.tension - before.slots[slot].tension) * (predicted.brightness - before.slots[slot].brightness) < 0
+            && std::abs (predicted.tension - before.slots[slot].tension) >= 0.005f
+            && std::abs (predicted.brightness - before.slots[slot].brightness) >= 0.005f)
+            oppositeRow = i;
+    }
+    CHECK (oppositeRow < expected.size());
+    const auto selected = oppositeRow < expected.size() ? oppositeRow : 0;
+    auto* row = allRows[selected];
+    row->onClick();
+    host.run (1);
+    std::vector<int> heard;
+    for (const auto& event : host.events)
+        if (event.on)
+            heard.push_back (event.note);
+
+    const auto predicted = predict (selected);
+    const auto firstContextEvent = host.events.size();
+    host.processor.auditionAlternative (predicted, slot, true);
+    host.run (1);
+    std::vector<int> heardInContext;
+    for (size_t i = firstContextEvent; i < host.events.size(); ++i)
+        if (host.events[i].on)
+            heardInContext.push_back (host.events[i].note);
+    host.processor.stopAlternativeAudition();
+    host.run (1);
+    CHECK (host.heldAfterReplay() == 0);
+
+    auto* replace = dynamic_cast<juce::TextButton*> (row->getChildComponent (0));
+    CHECK (replace != nullptr && replace->getButtonText() == "Replace");
+    if (replace == nullptr)
+        return;
+    replace->onClick();
+    const auto after = host.processor.getProgression();
+    const auto& v = after.slots[slot].voicing;
+    CHECK (after.slots[slot].chord == predicted.slots[slot].chord);
+    CHECK (v.n == expected[selected].voicing.n && v.notes == expected[selected].voicing.notes);
+    CHECK (std::abs (after.slots[slot].tension - predicted.slots[slot].tension) < 1.0e-6f);
+    CHECK (std::abs (after.slots[slot].brightness - predicted.slots[slot].brightness) < 1.0e-6f);
+    CHECK (std::abs (cs::fitScore (after) - cs::fitScore (predicted)) < 1.0e-6f);
+    std::sort (heard.begin(), heard.end());
+    std::sort (heardInContext.begin(), heardInContext.end());
+    CHECK (heard == std::vector<int> (v.notes.begin(), v.notes.begin() + v.n));
+    CHECK (heardInContext == heard);
 }
 
 void testEditWhilePlaying()
@@ -522,6 +803,7 @@ void testStateRoundTrip()
         p.style = (int) cs::CorpusStyle::SoulRnb;
         p.voicingStyle = (int) cs::VoicingStyle::Spread;
         p.variety = 0.83f;
+        p.ending = cs::Ending::LeadBackToStart;
         p.locks.colors = true;
         cs::roll (p, rng);
         p.slots[2].locked = true;
@@ -540,6 +822,7 @@ void testStateRoundTrip()
     CHECK (pa.voicingStyle == pb.voicingStyle && pb.voicingStyle == (int) cs::VoicingStyle::Spread);
     CHECK (std::abs (pa.adventure - pb.adventure) < 1.0e-4f);
     CHECK (std::abs (pb.variety - 0.83f) < 1.0e-4f);
+    CHECK (pb.ending == cs::Ending::LeadBackToStart);
     for (int i = 0; i < pa.numSlots; ++i)
     {
         const cs::Slot& x = pa.slots[(size_t) i];
@@ -568,6 +851,7 @@ void testStateRoundTrip()
         hV3.processor.setStateInformation (v3Block.getData(), (int) v3Block.getSize());
         CHECK (hV3.processor.getProgression().style == -1);
         CHECK (hV3.processor.getProgression().variety == 0.5f);
+        CHECK (hV3.processor.getProgression().ending == cs::Ending::Free);
         CHECK (hV3.processor.getProgression().voicingStyle == (int) cs::VoicingStyle::Close);
     }
 
@@ -825,6 +1109,324 @@ void testIncomingMidiTriggerIntegration()
     h.injectNoteOff (60);
     h.run (1);
     CHECK (h.heldAfterReplay() == 0);
+}
+
+void testModalSuggestionsAndRoll()
+{
+    const auto compare = [] (cs::Chord tonic, int mode, int reference,
+                             cs::Chord characteristic, cs::Chord referenceChord, cs::CorpusStyle autoStyle)
+    {
+        cs::Progression start;
+        cs::Rng init (123);
+        cs::roll (start, init);
+        for (int i = 0; i < start.numSlots; ++i)
+            cs::setChord (start, i, i == 1 ? cs::Chord { 7, 0 } : tonic, init);
+        start.locks.rhythm = true;
+        auto modal = start;
+        auto other = start;
+        cs::setTonalContext (modal, tonic.root, mode);
+        cs::setTonalContext (other, tonic.root, reference);
+        CHECK (cs::styleForProgression (modal) == autoStyle && cs::styleForProgression (other) == autoStyle);
+        CHECK (cs::tonesOutsideScale (characteristic, tonic.root, mode) == 0);
+        CHECK (cs::tonesOutsideScale (characteristic, tonic.root, reference) == 1);
+
+        const auto matches = [] (cs::Chord a, cs::Chord b) { return a.root == b.root && a.type == b.type; };
+        const auto rank = [&] (const std::vector<cs::Chord>& suggestions, cs::Chord chord)
+        {
+            const auto found = std::find_if (suggestions.begin(), suggestions.end(),
+                                             [&] (cs::Chord candidate) { return matches (candidate, chord); });
+            CHECK (found != suggestions.end());
+            return found - suggestions.begin();
+        };
+        for (int style : { -1, (int) cs::CorpusStyle::Free })
+        {
+            modal.style = other.style = style;
+            const auto modalSuggestions = cs::alternatives (modal, 1, 999);
+            const auto otherSuggestions = cs::alternatives (other, 1, 999);
+            CHECK (rank (modalSuggestions, characteristic) < rank (otherSuggestions, characteristic));
+            CHECK (rank (otherSuggestions, referenceChord) < rank (modalSuggestions, referenceChord));
+        }
+
+        const auto rollCount = [&] (cs::Progression p)
+        {
+            p.style = -1;
+            int count = 0;
+            for (int seed = 1; seed <= 64; ++seed)
+            {
+                auto rolled = p;
+                cs::Rng rng (seed);
+                cs::roll (rolled, rng);
+                count += std::any_of (rolled.slots.begin(), rolled.slots.begin() + rolled.numSlots,
+                                      [&] (const cs::Slot& s) { return matches (s.chord, characteristic); });
+            }
+            return count;
+        };
+        CHECK (rollCount (modal) > rollCount (other));
+    };
+
+    compare ({ 9, 1 }, 2, 1, { 2, 0 }, { 2, 1 }, cs::CorpusStyle::MinorLoops);
+    compare ({ 0, 0 }, 5, 0, { 10, 0 }, { 4, 1 }, cs::CorpusStyle::PopRock);
+}
+
+void testTonalContextAndTranspose()
+{
+    Host host;
+    auto& processor = host.processor;
+
+    // Project state in the previous format, with explicit inversions and no transposition metadata.
+    const auto legacy = juce::parseXML (R"(
+        <ChordSlotsState version="4">
+          <ProgressionA><Progression tonic="0" scale="0" bars="2" snap="12">
+            <Slot start="0" root="0" type="" notes="36 64 67 72"/>
+            <Slot start="36" root="7" type="" bassInt="4" locked="1" notes="47 62 67 71"/>
+            <Slot start="96" root="9" type="m" notes="45 60 64 69"/>
+            <Slot start="132" root="5" type="" notes="41 60 65 69"/>
+          </Progression></ProgressionA>
+        </ChordSlotsState>)");
+    juce::MemoryBlock state;
+    juce::AudioProcessor::copyXmlToBinary (*legacy, state);
+    processor.setStateInformation (state.getData(), (int) state.getSize());
+    processor.apvts.getParameter ("splitMidi")->setValueNotifyingHost (1.0f);
+
+    using MidiNote = std::tuple<double, int, int, bool>;
+    const auto exportedNotes = [] (const ChordSlotsProcessor& source)
+    {
+        std::vector<MidiNote> notes;
+        const auto file = source.createMidiFile();
+        for (int track = 0; track < file.getNumTracks(); ++track)
+            for (const auto* event : *file.getTrack (track))
+            {
+                const auto& m = event->message;
+                if (m.isNoteOnOrOff())
+                    notes.emplace_back (m.getTimeStamp(), m.getChannel(), m.getNoteNumber(), m.isNoteOn());
+            }
+        std::sort (notes.begin(), notes.end());
+        return notes;
+    };
+    const auto audition = [&host]
+    {
+        host.events.clear();
+        host.processor.auditionSlot (1);
+        host.run (1);
+        std::vector<std::pair<int, int>> notes;
+        for (const auto& event : host.events)
+            if (event.on)
+                notes.emplace_back (event.channel, event.note);
+        return notes;
+    };
+
+    const auto original = processor.getProgression();
+    const auto originalMidi = exportedNotes (processor);
+    const auto originalPreview = audition();
+    CHECK (originalMidi.size() == 32);
+    CHECK (originalPreview.size() == 4);
+    CHECK (std::find (originalPreview.begin(), originalPreview.end(), std::make_pair (2, 47)) != originalPreview.end());
+
+    const auto sameVoicings = [&original] (const cs::Progression& p, int shift)
+    {
+        CHECK (p.numSlots == original.numSlots && p.bars == original.bars);
+        for (int i = 0; i < original.numSlots; ++i)
+        {
+            const auto& before = original.slots[(size_t) i];
+            const auto& after = p.slots[(size_t) i];
+            CHECK (after.start == before.start && after.locked == before.locked);
+            CHECK (after.chord.root == cs::mod12 (before.chord.root + shift));
+            CHECK (after.chord.type == before.chord.type && after.chord.bassInt == before.chord.bassInt);
+            CHECK (after.voicing.n == before.voicing.n && after.voicing.bassCount == before.voicing.bassCount);
+            for (int j = 0; j < before.voicing.n; ++j)
+                CHECK (after.voicing.notes[(size_t) j] == before.voicing.notes[(size_t) j] + shift);
+        }
+    };
+
+    CHECK (cs::romanNumeral (original.slots[2].chord, original.tonic) == "vi");
+    processor.edit ([] (cs::Progression& p, cs::Rng&) { cs::goToRelative (p); });
+    const auto relative = processor.getProgression();
+    CHECK (relative.tonic == 9 && relative.scale == 1);
+    CHECK (cs::romanNumeral (relative.slots[2].chord, relative.tonic) == "i");
+    sameVoicings (relative, 0);
+    CHECK (exportedNotes (processor) == originalMidi);
+    CHECK (audition() == originalPreview);
+    CHECK (cs::alternatives (relative, 2, 10) != cs::alternatives (original, 2, 10));
+    processor.edit ([] (cs::Progression& p, cs::Rng&) { cs::goToRelative (p); });
+    CHECK (processor.getProgression().tonic == 0 && processor.getProgression().scale == 0);
+
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    const auto select = [&editor] (const juce::String& name, int selectedId)
+    {
+        for (auto* child : editor->getChildren())
+            if (auto* box = dynamic_cast<juce::ComboBox*> (child); box != nullptr && box->getName() == name)
+            {
+                box->setSelectedId (selectedId, juce::dontSendNotification);
+                box->onChange();
+                return;
+            }
+        CHECK (false);
+    };
+    TimelineView* timeline = nullptr;
+    for (auto* child : editor->getChildren())
+    {
+        if (auto* box = dynamic_cast<juce::ComboBox*> (child); box != nullptr && box->getName() == "Scale")
+        {
+            CHECK (box->getNumItems() == cs::numScales());
+            CHECK (box->getItemText (0) == "Major (Ionian)" && box->getItemId (0) == 1);
+            CHECK (box->getItemText (1) == "Natural Minor (Aeolian)" && box->getItemId (1) == 2);
+            for (int i = 2; i < cs::numScales(); ++i)
+                CHECK (box->getItemText (i) == cs::scales()[(size_t) i].name && box->getItemId (i) == i + 1);
+        }
+        if (auto* view = dynamic_cast<TimelineView*> (child))
+            timeline = view;
+    }
+    select ("Tonic", 10);
+    CHECK (processor.getProgression().tonic == 9 && processor.getProgression().scale == 0);
+    sameVoicings (processor.getProgression(), 0);
+    CHECK (timeline != nullptr);
+    if (timeline != nullptr && ! originalMidi.empty())
+    {
+        int low = 127, high = 0;
+        for (const auto& event : originalMidi)
+        {
+            low = std::min (low, std::get<2> (event));
+            high = std::max (high, std::get<2> (event));
+        }
+        timeline->setMidiVisible (true);
+        const auto rowColour = [&] (int pc)
+        {
+            const int pitch = low + cs::mod12 (pc - low);
+            CHECK (pitch <= high);
+            const float rowHeight = (float) (timeline->getHeight() - 35) / (high - low + 1);
+            const int y = (int) (35 + (high - pitch + 0.5f) * rowHeight);
+            const auto image = timeline->createComponentSnapshot (timeline->getLocalBounds());
+            return image.getPixelAt (4, y); // Pitch column, before the note labels.
+        };
+        const auto checkModeRows = [&] (int tonicId, int firstScale, int secondScale, int pc)
+        {
+            select ("Tonic", tonicId);
+            select ("Scale", firstScale);
+            processor.dispatchPendingMessages();
+            const auto highlighted = rowColour (pc);
+            select ("Scale", secondScale);
+            processor.dispatchPendingMessages();
+            CHECK (highlighted != rowColour (pc));
+            sameVoicings (processor.getProgression(), 0);
+            CHECK (exportedNotes (processor) == originalMidi);
+            CHECK (audition() == originalPreview);
+        };
+        checkModeRows (10, 3, 2, 6); // F-sharp in A Dorian.
+        checkModeRows (10, 2, 3, 5); // F in A Aeolian.
+        checkModeRows (1, 6, 1, 10); // B-flat in C Mixolydian.
+        timeline->setMidiVisible (false);
+    }
+    select ("Tonic", 1);
+    select ("Scale", 1);
+    select ("Scale", 2);
+    const auto minor = processor.getProgression();
+    CHECK (minor.tonic == 0 && minor.scale == 1);
+    CHECK ((cs::scaleMask (minor.scale) & (1u << 4)) == 0);
+    CHECK ((cs::scaleMask (minor.scale) & (1u << 3)) != 0);
+    sameVoicings (minor, 0);
+    CHECK (exportedNotes (processor) == originalMidi);
+    CHECK (audition() == originalPreview);
+    processor.getStateInformation (state);
+    Host restored;
+    restored.processor.setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (restored.processor.getProgression().tonic == 0 && restored.processor.getProgression().scale == 1);
+    CHECK (exportedNotes (restored.processor) == originalMidi);
+    CHECK (processor.undo());
+
+    CHECK (processor.transposeProgression (2));
+    const auto transposed = processor.getProgression();
+    CHECK (transposed.tonic == 2 && transposed.scale == 0);
+    sameVoicings (transposed, 2);
+    auto shiftedMidi = originalMidi;
+    for (auto& event : shiftedMidi)
+        std::get<2> (event) += 2;
+    CHECK (exportedNotes (processor) == shiftedMidi);
+    auto shiftedPreview = originalPreview;
+    for (auto& note : shiftedPreview)
+        note.second += 2;
+    CHECK (audition() == shiftedPreview);
+    processor.getStateInformation (state);
+    restored.processor.setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (restored.processor.getProgression().tonic == 2 && restored.processor.getProgression().scale == 0);
+    sameVoicings (restored.processor.getProgression(), 2);
+    CHECK (exportedNotes (restored.processor) == shiftedMidi);
+
+    processor.edit ([] (cs::Progression& p, cs::Rng&)
+    {
+        p.slots[0].voicing.notes[0] = 0;
+        p.slots[3].voicing.notes[3] = 127;
+    });
+    const auto atLimits = exportedNotes (processor);
+    CHECK (! processor.transposeProgression (1));
+    CHECK (! processor.transposeProgression (-1));
+    CHECK (processor.getProgression().tonic == 2);
+    CHECK (exportedNotes (processor) == atLimits);
+    CHECK (processor.undo());
+    CHECK (exportedNotes (processor) == shiftedMidi);
+}
+
+void testChordInversion()
+{
+    Host h;
+    h.processor.apvts.getParameter ("splitMidi")->setValueNotifyingHost (1.0f);
+    h.processor.edit ([] (cs::Progression& p, cs::Rng&)
+    {
+        p.numSlots = 1;
+        p.bassStyle = cs::BassStyle::Sustain;
+        auto& slot = p.slots[0];
+        slot.start = 0;
+        slot.chord = { 10, 0, 0 };
+        slot.voicing = { 4, { 34, 58, 62, 65 }, 96, 1 };
+    });
+
+    const auto verify = [] (Host& host, const std::vector<int>& expectedChord, int expectedBass)
+    {
+        host.events.clear();
+        host.processor.auditionSlot (0);
+        host.run (1);
+        std::vector<int> preview[2], exported[2];
+        for (const auto& event : host.events)
+            if (event.on && (event.channel == 1 || event.channel == 2))
+                preview[event.channel - 1].push_back (event.note);
+
+        const auto file = host.processor.createMidiFile (ChordSlotsProcessor::MidiExportMode::Master);
+        CHECK (file.getNumTracks() == 2);
+        for (int track = 0; track < file.getNumTracks(); ++track)
+            for (const auto* event : *file.getTrack (track))
+            {
+                const auto& message = event->message;
+                if (message.isNoteOn() && (message.getChannel() == 1 || message.getChannel() == 2))
+                    exported[message.getChannel() - 1].push_back (message.getNoteNumber());
+            }
+
+        CHECK (preview[0] == expectedChord);
+        CHECK (preview[1] == std::vector<int> { expectedBass });
+        CHECK (exported[0] == preview[0]);
+        CHECK (exported[1] == preview[1]);
+    };
+    const auto invert = [&] (cs::InversionDirection direction)
+    {
+        h.processor.edit ([direction] (cs::Progression& p, cs::Rng&) { cs::invertChord (p, 0, direction); });
+    };
+
+    verify (h, { 58, 62, 65 }, 34);
+    invert (cs::InversionDirection::Up);
+    verify (h, { 62, 65, 70 }, 34);
+    invert (cs::InversionDirection::Up);
+    verify (h, { 65, 70, 74 }, 34);
+
+    h.processor.edit ([] (cs::Progression& p, cs::Rng&) { cs::setBass (p, 0, 4); });
+    verify (h, { 65, 70, 74 }, 38);
+    juce::MemoryBlock state;
+    h.processor.getStateInformation (state);
+    Host restored;
+    restored.processor.setStateInformation (state.getData(), (int) state.getSize());
+    verify (restored, { 65, 70, 74 }, 38);
+
+    invert (cs::InversionDirection::Down);
+    verify (h, { 62, 65, 70 }, 38);
+    invert (cs::InversionDirection::Down);
+    verify (h, { 58, 62, 65 }, 38);
 }
 
 void testSplitMidiOutput()
@@ -1937,9 +2539,79 @@ void testHostTempoChangeRepublish()
 
 } // namespace
 
+void testEndingSelector()
+{
+    Host host;
+    const auto before = host.processor.getProgression();
+    std::unique_ptr<juce::AudioProcessorEditor> editor (host.processor.createEditor());
+    auto* ending = dynamic_cast<juce::ComboBox*> (editor->findChildWithID ("ending"));
+    CHECK (ending != nullptr);
+    if (ending == nullptr)
+        return;
+    CHECK (ending->isVisible() && ! ending->getBounds().isEmpty());
+    CHECK (ending->getSelectedId() == 1 && ending->getNumItems() == 3);
+    CHECK (ending->getItemText (0) == "Free");
+    CHECK (ending->getItemText (1) == "Resolve to Tonic");
+    CHECK (ending->getItemText (2) == "Lead Back to Start");
+    for (int id : { 2, 3, 1 })
+    {
+        ending->setSelectedId (id, juce::dontSendNotification);
+        ending->onChange();
+        const auto after = host.processor.getProgression();
+        CHECK (after.ending == (cs::Ending) (id - 1));
+        CHECK (after.numSlots == before.numSlots);
+        for (int i = 0; i < before.numSlots; ++i)
+        {
+            const auto& a = after.slots[(size_t) i];
+            const auto& b = before.slots[(size_t) i];
+            CHECK (a.start == b.start && a.chord == b.chord);
+            CHECK (a.voicing.notes == b.voicing.notes && a.voicing.velocity == b.voicing.velocity);
+        }
+    }
+}
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
+
+    if (argc == 3 && juce::String (argv[1]) == "--preview-piano-ab")
+        return renderPianoComparison (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]));
+
+    if (argc == 4 && juce::String (argv[1]) == "--ending-midi")
+    {
+        const auto directory = juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]);
+        if (directory.createDirectory().failed())
+            return 1;
+        const auto seed = (unsigned) juce::String (argv[3]).getIntValue();
+        ChordSlotsProcessor processor;
+        for (int scale : { 0, 2 })
+            for (int mode = 0; mode < 3; ++mode)
+            {
+                processor.edit ([=] (cs::Progression& p, cs::Rng&)
+                {
+                    p = cs::Progression {};
+                    p.tonic = scale == 0 ? 0 : 9;
+                    p.scale = scale;
+                    p.adventure = 0.10f;
+                    p.ending = (cs::Ending) mode;
+                    p.locks.rhythm = true;
+                    for (int i = 0; i < p.numSlots; ++i)
+                        p.slots[(size_t) i].start = 96 * i;
+                    cs::Rng seeded (seed);
+                    cs::roll (p, seeded);
+                }, false);
+                const char* names[] { "Free", "Resolve-to-Tonic", "Lead-Back-to-Start" };
+                const auto name = juce::String (scale == 0 ? "C-major-" : "A-dorian-") + names[mode];
+                const auto path = directory.getChildFile (name + ".mid");
+                if (! path.deleteFile())
+                    return 1;
+                juce::FileOutputStream out (path);
+                if (! out.openedOk() || ! processor.createMidiFile().writeTo (out, 1))
+                    return 1;
+                std::printf ("%s: %s\n", name.toRawUTF8(), processor.describeProgression().toRawUTF8());
+            }
+        return 0;
+    }
 
     // `--snapshot out.png [mood] [--groove]` renders the editor off-screen instead of running the tests.
     if (argc > 2 && juce::String (argv[1]) == "--snapshot")
@@ -1987,17 +2659,23 @@ int main (int argc, char** argv)
     testHostSyncedPlayback();
     testGateAndRelocation();
     testPreviewAndAudition();
+    testAcousticPianoPreview();
     testCompStyleAudition();
     testShldRhythmStateAndPhase();
     testBassAndArpAuditions();
     testSeparatorLocksAndAlternativeAudition();
+    testInspectAlternatives();
     testEditWhilePlaying();
     testStateRoundTrip();
+    testEndingSelector();
+    testTonalContextAndTranspose();
+    testModalSuggestionsAndRoll();
     testHarmonizeMelody();
     testMidiFile();
     testSongMode();
     testPerformanceAndStrum();
     testIncomingMidiTriggerIntegration();
+    testChordInversion();
     testSplitMidiOutput();
     testChordMarkersP74();
     testExportPlaybackParity();

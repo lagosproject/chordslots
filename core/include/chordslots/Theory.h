@@ -345,6 +345,24 @@ inline unsigned chordMask (Chord c)
     return m;
 }
 
+/** Pitch classes outside the active scale in the chord proper and in the separate bass. */
+struct ScaleMembership
+{
+    unsigned outsideChord;
+    bool outsideBass;
+};
+
+inline ScaleMembership scaleMembership (Chord c, int tonic, int scaleIdx)
+{
+    const unsigned scale = scaleMask (scaleIdx);
+    const auto outside = [=] (int pc) { return (scale & (1u << mod12 (pc - tonic))) == 0; };
+    unsigned pitches = 0;
+    for (int interval : chordTypes()[(size_t) c.type].iv)
+        if (const int pc = mod12 (c.root + interval); outside (pc))
+            pitches |= 1u << pc;
+    return { pitches, outside (c.bassPc()) };
+}
+
 /** When true, the leading tone (the major third of a V-family chord) does not
     count as outside a scale with a minor third. In a minor key the raised
     seventh belongs to the dominant (harmonic-minor practice), so V and V7 are

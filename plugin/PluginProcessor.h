@@ -75,6 +75,8 @@ public:
         sendChangeMessage();
     }
 
+    bool transposeProgression (int semitones);
+
     /** Stores an undo point without changing anything (call before a drag). */
     void beginGesture();
     bool undo();
@@ -89,6 +91,9 @@ public:
     bool isPreviewPlaying() const noexcept { return previewOn.load(); }
     void auditionSlot (int slot) noexcept { auditionRequest.store (slot); }
     void auditionAlternative (int slot, cs::Chord chord, bool inContext);
+    void auditionAlternative (const cs::Progression& preview, int slot, bool inContext);
+    void stopAlternativeAudition();
+    cs::Rng copyVoicingRng();
     void auditionCompStyle (cs::CompStyle style);
     void auditionBassPattern (const cs::Progression& preview);
     /** Loop position in sixteenth steps, or a negative value when stopped. */

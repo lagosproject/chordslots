@@ -142,12 +142,13 @@ struct Voicing
     std::array<int, kMaxNotes> notes {};
     int velocity = 96;
     int bassCount = 0;
+    int transposeOffset = 0; // Moves the bass/upper split with the stored notes.
 
     int computeBassCount (int upperFloor = kUpperFloor) const noexcept
     {
         int c = 0;
         for (int i = 0; i < n; ++i)
-            if (notes[(size_t) i] < upperFloor)
+            if (notes[(size_t) i] < upperFloor + transposeOffset)
                 c++;
         return c;
     }
@@ -189,7 +190,7 @@ inline int primaryBassNote (const Voicing& v, int upperFloor = kUpperFloor) noex
 {
     int best = -1;
     for (int i = 0; i < v.n; ++i)
-        if (v.notes[(size_t) i] < upperFloor)
+        if (v.notes[(size_t) i] < upperFloor + v.transposeOffset)
             if (best < 0 || v.notes[(size_t) i] > best)
                 best = v.notes[(size_t) i];
     return best;
@@ -246,16 +247,23 @@ inline void revoiceBass (Voicing& v, Chord c, int refBassNote = -1, float energy
 {
     std::vector<int> upper;
     for (int i = 0; i < v.n; ++i)
-        if (v.notes[(size_t) i] >= upperFloor)
+        if (v.notes[(size_t) i] >= upperFloor + v.transposeOffset)
             upper.push_back (v.notes[(size_t) i]);
 
     if (upper.empty())
         return;
 
-    const int bass = pickBassRegister (c.bassPc(), refBassNote, upper.front());
+    const int offset = v.transposeOffset;
+    int bass = pickBassRegister (mod12 (c.bassPc() - offset),
+                                 refBassNote < 0 ? -1 : refBassNote - offset,
+                                 upper.front() - offset) + offset;
+    if (bass < 0)
+        bass = mod12 (bass);
+    if (bass >= upperFloor + offset || bass >= upper.front() || bass > 127)
+        return;
     std::vector<int> all = upper;
     all.push_back (bass);
-    if (energy > 0.85f && bass - 12 >= 24)
+    if (energy > 0.85f && bass - 12 >= std::max (0, 24 + offset) && (int) all.size() < kMaxNotes)
         all.push_back (bass - 12);
 
     std::sort (all.begin(), all.end());
@@ -269,17 +277,8 @@ inline void revoiceBass (Voicing& v, Chord c, int refBassNote = -1, float energy
 
 //==============================================================================
 // Assignment-based Voice Leading Distance
-inline float voiceLeadingDistance (const std::vector<int>& u1, const std::vector<int>& u2)
+inline float upperVoiceDistance (const std::vector<int>& a, const std::vector<int>& b)
 {
-    std::vector<int> a;
-    for (int x : u1)
-        if (x >= kUpperFloor)
-            a.push_back (x);
-    std::vector<int> b;
-    for (int x : u2)
-        if (x >= kUpperFloor)
-            b.push_back (x);
-
     if (a.empty() || b.empty())
         return 0.0f;
 
@@ -348,25 +347,32 @@ inline float voiceLeadingDistance (const std::vector<int>& u1, const std::vector
     return bestTotalCost / (float) N;
 }
 
+inline std::vector<int> upperNotes (const Voicing& v)
+{
+    return { v.notes.begin() + v.computeBassCount(), v.notes.begin() + v.n };
+}
+
+inline float voiceLeadingDistance (const std::vector<int>& a, const std::vector<int>& b)
+{
+    const auto upper = [] (const std::vector<int>& notes)
+    {
+        std::vector<int> result;
+        for (int note : notes)
+            if (note >= kUpperFloor)
+                result.push_back (note);
+        return result;
+    };
+    return upperVoiceDistance (upper (a), upper (b));
+}
+
 inline float voiceLeadingDistance (const Voicing& a, const std::vector<int>& b)
 {
-    std::vector<int> au;
-    for (int i = 0; i < a.n; ++i)
-        if (a.notes[(size_t) i] >= kUpperFloor)
-            au.push_back (a.notes[(size_t) i]);
-    return voiceLeadingDistance (au, b);
+    return upperVoiceDistance (upperNotes (a), b);
 }
 
 inline float voiceLeadingDistance (const Voicing& a, const Voicing& b)
 {
-    std::vector<int> au, bu;
-    for (int i = 0; i < a.n; ++i)
-        if (a.notes[(size_t) i] >= kUpperFloor)
-            au.push_back (a.notes[(size_t) i]);
-    for (int i = 0; i < b.n; ++i)
-        if (b.notes[(size_t) i] >= kUpperFloor)
-            bu.push_back (b.notes[(size_t) i]);
-    return voiceLeadingDistance (au, bu);
+    return upperVoiceDistance (upperNotes (a), upperNotes (b));
 }
 
 //==============================================================================
@@ -1191,7 +1197,7 @@ inline Voicing assembleVoicing (Chord c, const std::vector<int>& upper, float en
 /** Builds a playable voicing using the specified style, omission rules and hard filter. */
 inline Voicing makeVoicing (Chord c, const Voicing* ref, float centre, float energy,
                             Rng& rng, float refWeight = 1.0f, float jitter = 0.7f,
-                            VoicingStyle style = VoicingStyle::Piano)
+                            VoicingStyle style = VoicingStyle::Piano, const Voicing* next = nullptr)
 {
     const auto a = analyzeChordTones (c);
     auto cands = generateUpperCandidates (c, style);
@@ -1219,7 +1225,13 @@ inline Voicing makeVoicing (Chord c, const Voicing* ref, float centre, float ene
         mean /= (float) upper.size();
 
         float cost = 0.5f * std::abs (mean - centre);
-        if (ref != nullptr && ref->n > 0)
+        if (next != nullptr)
+        {
+            if (ref != nullptr)
+                cost += refWeight * voiceLeadingDistance (*ref, v);
+            cost += refWeight * voiceLeadingDistance (v, *next);
+        }
+        else if (ref != nullptr && ref->n > 0)
             cost += refWeight * voiceLeadingDistance (*ref, upper);
         cost += jitter * rand01 (rng);
         sc.cost = cost;

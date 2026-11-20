@@ -3,28 +3,34 @@
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>
+#include <atomic>
 
 enum class PreviewSoundModel : int
 {
     CleanSaw = 0,
-    RhodesEP,
-    FeltPiano
+    RhodesEP = 1,
+    FeltPiano = 2,
+    AcousticPiano = 3
 };
 
-/** Built-in synth with Clean Saw, 2-op FM Rhodes EP, and warm Felt Piano models.
-    Deliberately plain and instant: it is there to audition harmony, not to be the sound. */
+class PreviewPianoBank;
+
+/** Built-in instruments for auditioning harmony without external routing. */
 class PreviewSynth
 {
 public:
     PreviewSynth();
+    ~PreviewSynth();
 
     void prepare (double sampleRate);
     void render (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, float gain);
     void allNotesOff();
-    void setSoundModel (PreviewSoundModel model);
+    void setSoundModel (PreviewSoundModel model) noexcept;
 
 private:
+    juce::SharedResourcePointer<PreviewPianoBank> piano;
     juce::Synthesiser synth;
     juce::SmoothedValue<float> smoothedGain;
+    std::atomic<PreviewSoundModel> requestedModel { PreviewSoundModel::CleanSaw };
     PreviewSoundModel currentModel { PreviewSoundModel::CleanSaw };
 };

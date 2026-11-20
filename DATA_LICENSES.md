@@ -58,3 +58,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Acoustic Piano preview recordings
+
+The plugin embeds twelve adapted Yamaha C5 recordings from **Salamander Grand Piano V3** by Alexander Holm. CC BY 3.0 Unported permits redistribution and adaptation with attribution. The original collection, source files and license are linked below. The sample attribution is also embedded in each plugin binary.
+
+- [Original collection](https://archive.org/details/SalamanderGrandPianoV3)
+- [Source FLAC recordings](https://github.com/sfzinstruments/SalamanderGrandPiano/tree/master/Samples)
+- [CC BY 3.0 Unported](https://creativecommons.org/licenses/by/3.0/)
+- [Sample selection and edits](plugin/assets/acoustic-piano/ATTRIBUTION.txt)
