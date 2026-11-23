@@ -81,6 +81,12 @@ figcaption { color: var(--muted); padding: .55rem .4rem .1rem; font-size: .875re
 .reference h3 { margin-top: 1.5rem; }
 .reference li { margin-top: .5rem; color: var(--muted); }
 .reference strong { color: var(--text); }
+.manual .product { margin-block: 1.15rem 1.6rem; }
+.manual .controls { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 2.6fr); margin: 1rem 0 0; }
+.manual .controls dt, .manual .controls dd { border-top: 1px solid var(--line); padding: .7rem 0; margin: 0; }
+.manual .controls dt { padding-right: 1rem; color: var(--green); font-weight: 680; }
+.manual .controls dd { color: var(--muted); }
+kbd { font: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: .25rem; padding-inline: .24em; }
 pre { background: #13201f; color: #d6f4e0; border: 1px solid var(--line); border-radius: .45rem; padding: .9rem 1rem; overflow-x: auto; line-height: 1.55; }
 code { font-family: Consolas, "Liberation Mono", monospace; font-size: .91em; }
 @media (max-width: 54rem) {
@@ -91,6 +97,9 @@ code { font-family: Consolas, "Liberation Mono", monospace; font-size: .91em; }
   .toc strong { flex-basis: 100%; }
 }
 @media (max-width: 36rem) {
+  .manual .controls { display: block; }
+  .manual .controls dt { padding-bottom: .15rem; }
+  .manual .controls dd { border-top: 0; padding-top: 0; }
   .tiles, .extras { grid-template-columns: minmax(0, 1fr); }
   .top { align-items: flex-start; }
   nav { gap: .5rem 1rem; }
