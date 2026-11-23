@@ -49,6 +49,12 @@ p { color: var(--muted); margin: .7rem 0 0; }
 .product img { display: block; width: 100%; height: auto; border-radius: .38rem; }
 figcaption { color: var(--muted); padding: .55rem .4rem .1rem; font-size: .875rem; }
 .band { background: #101820; border-block: 1px solid var(--line); }
+.demo { display: grid; grid-template-columns: minmax(0, .68fr) minmax(0, 1fr); gap: clamp(1.4rem, 5vw, 4rem); align-items: center; }
+.demo video { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: .7rem; background: var(--background); }
+.demo details { margin-top: 1.25rem; color: var(--muted); }
+.demo summary { color: var(--green); cursor: pointer; width: fit-content; }
+.demo li { margin-top: .4rem; }
+.band + .band { border-top: 0; }
 .section { padding-block: clamp(2.75rem, 5.5vw, 5.25rem); }
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1.6rem; }
 .tile { border: 1px solid var(--line); border-top: 3px solid var(--accent, var(--line)); border-radius: .6rem; padding: clamp(1.1rem, 2vw, 1.7rem); background: var(--panel); }
@@ -78,7 +84,7 @@ figcaption { color: var(--muted); padding: .55rem .4rem .1rem; font-size: .875re
 pre { background: #13201f; color: #d6f4e0; border: 1px solid var(--line); border-radius: .45rem; padding: .9rem 1rem; overflow-x: auto; line-height: 1.55; }
 code { font-family: Consolas, "Liberation Mono", monospace; font-size: .91em; }
 @media (max-width: 54rem) {
-  .hero, .workflow { grid-template-columns: minmax(0, 1fr); }
+  .hero, .workflow, .demo { grid-template-columns: minmax(0, 1fr); }
   .hero { padding-block: 3rem; }
   .doc-layout { grid-template-columns: minmax(0, 1fr); }
   .toc { position: static; display: flex; }
