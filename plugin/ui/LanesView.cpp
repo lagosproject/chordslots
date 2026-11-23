@@ -55,7 +55,7 @@ void LanesView::paint (juce::Graphics& g)
                 juce::Path clip;
                 clip.addRoundedRectangle (col, 4.0f);
                 g.reduceClipRegion (clip);
-                g.setColour (c.withAlpha (0.28f * alpha));
+                g.setColour (c.withAlpha (0.18f * alpha));
                 g.fillRect (col.withTop (ty));
                 g.setColour (c.withAlpha (alpha));
                 g.fillRect (col.getX(), ty - 1.0f, col.getWidth(), 2.0f);
@@ -67,6 +67,8 @@ void LanesView::paint (juce::Graphics& g)
             const float half = juce::jmin (9.0f, col.getWidth() * 0.5f - 1.0f);
             if (half > 1.0f)
             {
+                g.setColour (ui::background.withAlpha (0.9f));
+                g.fillRoundedRectangle (cx - half, ay - 2.5f, half * 2.0f, 5.0f, 2.5f);
                 g.setColour (juce::Colours::white.withAlpha (0.92f * alpha));
                 g.fillRoundedRectangle (cx - half, ay - 1.5f, half * 2.0f, 3.0f, 1.5f);
             }
@@ -89,8 +91,12 @@ void LanesView::paint (juce::Graphics& g)
         const auto lb = laneBounds (lane);
         const float x0 = (float) (s.start / len) * lb.getWidth();
         const float x1 = (float) (prog.slotEnd (slot) / len) * lb.getWidth();
-        const juce::String text = juce::String (laneNames[lane]) + "  Slot " + juce::String (slot + 1) + "  Target " + juce::String (juce::roundToInt (100.0f * targetOf (s, lane))) + "%"
-                                + "  Result " + juce::String (juce::roundToInt (100.0f * actualOf (s, lane))) + "%";
+        const int target = juce::roundToInt (100.0f * targetOf (s, lane));
+        const int actual = juce::roundToInt (100.0f * actualOf (s, lane));
+        const int delta = actual - target;
+        const auto text = juce::String (laneNames[lane]) + "   " + juce::String (target)
+            + juce::String::fromUTF8 (" → ") + juce::String (actual)
+            + " (" + (delta > 0 ? "+" : "") + juce::String (delta) + ")";
         g.setFont (ui::font (11.0f, true));
         const float w = juce::jmin ((float) getWidth(), juce::jmax (46.0f, (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), text) + 10.0f));
         const float cx = (x0 + x1) * 0.5f;

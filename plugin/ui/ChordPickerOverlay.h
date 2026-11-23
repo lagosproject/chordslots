@@ -1,4 +1,4 @@
-// ChordSlots - bottom-docked selected-slot inspector (historical class name).
+// ChordSlots - selected-slot editor and substitutions.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
@@ -17,12 +17,12 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
-    void mouseDown (const juce::MouseEvent& e) override;
     void visibilityChanged() override;
 
     std::function<void()> onClose;
 
 private:
+    void setSubstitutionsVisible (bool show);
     void rebuildCandidates();
     void layoutAlternatives (juce::Rectangle<int>);
     void cancelGestures();
@@ -65,7 +65,7 @@ private:
         bool cancelled = false;
     };
 
-    juce::TextButton closeBtn { "Close" }, switchViewBtn { "Edit chord" };
+    juce::TextButton closeBtn { "Close" }, substitutionsTab { "Substitutions" }, inspectorTab { "Inspector" };
     juce::TextButton chordLock { "Chord lock" };
     juce::TextButton rollRoot { "Roll Root" }, rollColor { "Roll Color" }, changeBass { "Change Bass" };
     juce::Label lockScope;
@@ -92,6 +92,7 @@ private:
     };
     std::vector<CandidateItem> candidateButtons;
 
+    juce::Rectangle<int> tabDivider, targetSummaryBounds;
     juce::Rectangle<int> rootArea, qualityArea, voicingArea, bassArea, candidateArea;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordPickerOverlay)

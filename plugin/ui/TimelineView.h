@@ -15,6 +15,7 @@ public:
     void setPlayhead (double step);
     double getPlayhead() const noexcept { return playhead; }
     void setMidiVisible (bool show);
+    void setFeelView (bool show) { feelView = show; repaint(); }
 
     void paint (juce::Graphics&) override;
     juce::String getTooltip() override;
@@ -58,6 +59,7 @@ private:
     };
     std::vector<MidiNote> midiNotes;
     bool midiVisible = false;
+    bool feelView = false;
     float midiHoverY = -1.0f;
     int dragStep = -1;
 

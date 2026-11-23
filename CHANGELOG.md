@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 Test Release
+
+- Harmony groups loop settings into a single summary and puts generation, preview, and MIDI export in a shared footer. Roll Settings offers quick access to generation controls.
+- Feel pairs the piano roll and accent lane with a dedicated performance panel. Song uses section cards and a separate panel for editing the selected section.
+- Improved slider tracks, Strum's zero marker, timing handles, chord selection, and the contrast of target and actual values.
+- Refined button states, Match readouts, and the chord inspector for compact plugin windows.
+
 ## 0.4.0 Test Release
 
 - Harmony groups Roll, Play, and Match and labels target and measured values on the slot-aligned curves.

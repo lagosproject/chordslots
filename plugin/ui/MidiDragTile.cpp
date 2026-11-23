@@ -44,7 +44,8 @@ void MidiDragTile::paint (juce::Graphics& g)
 
         g.setColour (ui::text);
         g.setFont (ui::font (11.0f, true));
-        g.drawText (tileLabel, r.withTrimmedLeft (16.0f).toNearestInt(), juce::Justification::centredLeft, false);
+        g.drawFittedText (tileLabel, r.withTrimmedLeft (16.0f).withTrimmedRight (4.0f).toNearestInt(),
+                          juce::Justification::centredLeft, 2, 0.75f);
     }
 }
 

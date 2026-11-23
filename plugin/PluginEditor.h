@@ -21,12 +21,15 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void mouseDown (const juce::MouseEvent&) override;
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
     void refresh();
     void updateDragTileVisibility();
+    void updateTransport();
+    void setRollSettingsOpen (bool open);
     void showGrooveView (bool show);
     void rebuildKeyNames (int scale);
     void setupCombo (juce::ComboBox&, juce::Label&, const juce::String& caption, const juce::String& tooltip);
@@ -51,19 +54,21 @@ private:
     juce::TextButton keyActionsButton { "Key Actions" };
     juce::TextButton inputButton { "MIDI In ▾" };
     juce::TextButton optionsButton { "Options" };
-    juce::Label fitLabel, fitCaption;
+    juce::Label fitLabel;
+    juce::TextButton loopSummary, moreOptions { "More options" }, playAfterRoll { "Play after Roll" }, gestures { "Gestures" };
+    juce::Label gestureHelp;
+    int inspectedSlot = -1;
 
     // Variations
-    juce::Label variationLabel;
     juce::TextButton varButtons[cs::kNumVariations];
     juce::TextButton followButton { "Follow" };
     juce::TextButton copyVarButton { "Copy..." };
 
     // Views
-    juce::TextButton harmonyViewButton { "Harmony" }, grooveViewButton { "Groove & Feel" };
+    juce::TextButton harmonyViewButton { "Harmony" }, grooveViewButton { "Feel" };
     bool grooveView = false;
     TimelineView timeline;
-    juce::TextButton midiViewBtn { "MIDI view" };
+    juce::TextButton midiViewBtn { "Notes" };
     std::unique_ptr<juce::TooltipWindow> tooltips;
     ChordPickerOverlay pickerOverlay;
 
@@ -71,7 +76,7 @@ private:
     juce::ComboBox moodBox, styleBox, voicingBox;
     juce::TextButton shapeBox { juce::String::fromUTF8 ("Shape Stamps ▾") };
     juce::TextButton bassPatternBox;
-    juce::Label moodLabel, styleLabel, voicingLabel, shapeLabel, bassPatternLabel;
+    juce::Label moodLabel, styleLabel, voicingLabel, bassPatternLabel;
     juce::TextButton resetCurvesBtn { "Reset" };
     juce::TextButton analyzeMidiBtn;
     juce::Slider melodyFit;
@@ -87,6 +92,11 @@ private:
     juce::Label endingLabel;
     juce::Label adventureLabel, varietyLabel, syncopationLabel, bassMotionLabel;
     juce::TextButton undoButton { "Undo" }, redoButton { "Redo" }, rollButton { "ROLL" };
+    juce::TextButton rollSettingsButton { "Roll settings" };
+    struct RollSettingsPanel final : juce::Component
+    {
+        void paint (juce::Graphics&) override;
+    } rollSettingsPanel;
 
     // Footer Panel 2: Groove & Feel
     juce::TextButton compBox;
@@ -96,7 +106,7 @@ private:
     void refreshCompingSelection();
     juce::Slider strum, accent, humanize;
     juce::Label strumLabel, accentLabel, humanizeLabel;
-    juce::TextButton refeelButton { "Re-Feel" };
+    juce::TextButton refeelButton { "Roll feel" };
 
     // Footer Panel 3: Output & Export
     juce::ComboBox synthModelBox;
@@ -113,10 +123,7 @@ private:
     SongPanel songPanel;
 
     // Context / Hint bar & Targeted Rolls
-    juce::Label hint;
-    juce::TextButton inspectBtn { "Slot inspector" };
 
-    void updateContextBar (int slot);
 
     // Attachments
     juce::AudioProcessorValueTreeState::SliderAttachment gateAttachment, volumeAttachment,
@@ -128,7 +135,7 @@ private:
     int keyNamesScale = -1;
     bool refreshing = false;
 
-    juce::Rectangle<int> targetCurvesBounds, harmonyPanelBounds, groovePanelBounds, previewPanelBounds, outputPanelBounds;
+    juce::Rectangle<int> targetCurvesBounds, railBounds, footerBounds, footerSeparator;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordSlotsEditor)
 };

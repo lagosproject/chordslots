@@ -60,18 +60,27 @@ void ChordSlotsLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Butto
 {
     const auto r = b.getLocalBounds().toFloat().reduced (0.75f);
     const bool primary = b.getProperties().getWithDefault ("primary", false);
-    juce::Colour fill = primary ? ui::accent : (b.getToggleState() ? ui::accent.withAlpha (0.75f) : ui::panelHi);
+    juce::Colour fill = primary ? ui::accent
+                                : ui::panelHi.interpolatedWith (ui::accent, b.getToggleState() ? 0.34f : 0.0f);
     if (down)
         fill = fill.darker (0.25f);
     else if (over)
         fill = fill.brighter (0.12f);
+    else if (! primary && ! b.getToggleState() && ! b.hasKeyboardFocus (false)
+             && (bool) b.getProperties().getWithDefault ("safeNote", false))
+        fill = fill.interpolatedWith (ui::energy, 0.16f);
     if (! b.isEnabled())
         fill = fill.withAlpha (0.35f);
 
     g.setColour (fill);
     g.fillRoundedRectangle (r, 5.0f);
-    g.setColour (b.getToggleState() || primary ? ui::accent.brighter (0.3f) : ui::outline);
+    g.setColour (b.getToggleState() || primary ? ui::accent : ui::outline.withAlpha (0.6f));
     g.drawRoundedRectangle (r, 5.0f, 1.0f);
+    if (b.hasKeyboardFocus (false))
+    {
+        g.setColour (ui::text);
+        g.drawRoundedRectangle (r.reduced (1.5f), 4.0f, 1.0f);
+    }
 }
 
 void ChordSlotsLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool over, bool down)
@@ -87,7 +96,8 @@ void ChordSlotsLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton&
     const int textWidth = juce::GlyphArrangement::getStringWidthInt (font, button.getButtonText());
     constexpr int iconWidth = 12;
     constexpr int gap = 5;
-    const int contentWidth = iconWidth + gap + textWidth;
+    const bool iconOnly = icon == ui::ButtonIcon::Undo || icon == ui::ButtonIcon::Redo || icon == ui::ButtonIcon::Settings;
+    const int contentWidth = iconOnly ? iconWidth : iconWidth + gap + textWidth;
 
     if (contentWidth + 8 > button.getWidth())
     {
@@ -138,6 +148,17 @@ void ChordSlotsLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton&
             shape.lineTo (6.0f, 4.5f);
             shape.cubicTo (1.0f, 4.5f, 1.0f, 11.0f, 6.0f, 11.0f);
             break;
+        case ui::ButtonIcon::Settings:
+            for (int i = 0; i < 3; ++i)
+            {
+                const float y = 2.0f + 4.0f * (float) i;
+                const float x = i == 1 ? 8.5f : 3.5f;
+                shape.startNewSubPath (0.5f, y);
+                shape.lineTo (11.5f, y);
+                shape.startNewSubPath (x, y - 1.6f);
+                shape.lineTo (x, y + 1.6f);
+            }
+            break;
         case ui::ButtonIcon::None:
             break;
     }
@@ -148,8 +169,11 @@ void ChordSlotsLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton&
         g.strokePath (shape, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
                       position);
 
-    g.setFont (font);
-    g.drawText (button.getButtonText(), content.withTrimmedLeft (gap), juce::Justification::centred, false);
+    if (! iconOnly)
+    {
+        g.setFont (font);
+        g.drawText (button.getButtonText(), content.withTrimmedLeft (gap), juce::Justification::centred, false);
+    }
 }
 
 juce::Font ChordSlotsLookAndFeel::getTextButtonFont (juce::TextButton& b, int h)
@@ -171,7 +195,7 @@ void ChordSlotsLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, i
     track.addCentredArc (centre.x, centre.y, radius - thickness * 0.5f, radius - thickness * 0.5f, 0.0f, startAngle, endAngle, true);
     value.addCentredArc (centre.x, centre.y, radius - thickness * 0.5f, radius - thickness * 0.5f, 0.0f, startAngle, angle, true);
 
-    g.setColour (ui::panelHi);
+    g.setColour (ui::outline.brighter (0.22f));
     g.strokePath (track, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     g.setColour (s.findColour (juce::Slider::rotarySliderFillColourId));
     g.strokePath (value, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
@@ -183,8 +207,46 @@ void ChordSlotsLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, i
         g.fillEllipse (juce::Rectangle<float> (inner * 2.0f, inner * 2.0f).withCentre (centre));
         g.setColour (ui::text);
         juce::Path tick;
-        tick.addRoundedRectangle (-1.2f, -inner + 2.0f, 2.4f, inner * 0.5f, 1.2f);
+        tick.addRoundedRectangle (-1.2f, -inner + 1.0f, 2.4f, inner * 0.68f, 1.2f);
         g.fillPath (tick, juce::AffineTransform::rotation (angle).translated (centre.x, centre.y));
+    }
+}
+
+void ChordSlotsLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos,
+                                             float minPos, float maxPos, juce::Slider::SliderStyle style,
+                                             juce::Slider& slider)
+{
+    if (style != juce::Slider::LinearHorizontal || w <= 0 || h <= 0)
+    {
+        juce::LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, minPos, maxPos, style, slider);
+        return;
+    }
+
+    const auto start = static_cast<float> (x);
+    const auto width = static_cast<float> (w);
+    const float centreY = static_cast<float> (y) + static_cast<float> (h) * 0.5f;
+    const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
+    const float origin = bipolar ? start + width * static_cast<float> (slider.valueToProportionOfLength (0.0)) : start;
+    const bool enabled = slider.isEnabled();
+
+    g.setColour (ui::outline.brighter (0.22f).withAlpha (enabled ? 1.0f : 0.5f));
+    g.fillRoundedRectangle (start, centreY - 2.0f, width, 4.0f, 2.0f);
+    g.setColour (ui::accent.withAlpha (enabled ? 0.85f : 0.3f));
+    g.fillRoundedRectangle (juce::jmin (origin, pos), centreY - 2.0f, std::abs (pos - origin), 4.0f, 2.0f);
+
+    if (bipolar)
+    {
+        g.setColour (ui::textDim.withAlpha (enabled ? 0.9f : 0.4f));
+        g.fillRect (origin - 0.5f, centreY - 7.0f, 1.0f, 14.0f);
+    }
+
+    const juce::Rectangle<float> thumb (pos - 4.5f, centreY - 4.5f, 9.0f, 9.0f);
+    g.setColour (enabled ? ui::accent : ui::textMuted);
+    g.fillEllipse (thumb);
+    if (enabled && (slider.isMouseOverOrDragging() || slider.hasKeyboardFocus (true)))
+    {
+        g.setColour (ui::text);
+        g.drawEllipse (thumb.expanded (1.0f), 1.0f);
     }
 }
 
@@ -203,6 +265,17 @@ void ChordSlotsLookAndFeel::drawComboBox (juce::Graphics& g, int w, int h, bool,
     arrow.lineTo (cx + 3.5f, cy - 2.0f);
     g.setColour (ui::textDim);
     g.strokePath (arrow, juce::PathStrokeType (1.6f));
+}
+
+juce::Label* ChordSlotsLookAndFeel::createSliderTextBox (juce::Slider& slider)
+{
+    auto* label = juce::LookAndFeel_V4::createSliderTextBox (slider);
+    if (slider.getTextBoxPosition() == juce::Slider::TextBoxRight)
+    {
+        label->setJustificationType (juce::Justification::centredRight);
+        label->setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
+    }
+    return label;
 }
 
 juce::Font ChordSlotsLookAndFeel::getComboBoxFont (juce::ComboBox&) { return ui::font (13.5f); }
@@ -232,7 +305,7 @@ void ChordSlotsLookAndFeel::drawLabel (juce::Graphics& g, juce::Label& label)
         g.setColour (label.findColour (juce::Label::outlineColourId));
     }
 
-    g.drawRect (label.getLocalBounds());
+    g.drawRoundedRectangle (label.getLocalBounds().toFloat().reduced (0.75f), 5.0f, 1.0f);
 }
 
 void ChordSlotsLookAndFeel::fillTextEditorBackground (juce::Graphics& g, int width, int height, juce::TextEditor&)

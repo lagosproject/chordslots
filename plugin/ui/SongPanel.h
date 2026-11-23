@@ -2,140 +2,199 @@
 #pragma once
 #include "../PluginProcessor.h"
 #include "LookAndFeel.h"
-#include "MidiDragTile.h"
 
-// Child panel: all section controls stay inside the editor, including long chains.
-class SongPanel final : public juce::Component, private juce::Timer
+class SongPanel final : public juce::Component
 {
 public:
-    explicit SongPanel (ChordSlotsProcessor& p) : processor (p), drag (p, ChordSlotsProcessor::MidiExportMode::Song, "Drag Song")
+    explicit SongPanel (ChordSlotsProcessor& p) : processor (p)
     {
+        for (auto* control : std::initializer_list<juce::Component*> {
+                 &title, &empty, &chain, &sectionTitle, &variation, &transpose, &remove, &enable, &add, &clear })
+            addAndMakeVisible (*control);
+
         setComponentID ("song-panel");
-        setOpaque (true);
-        for (auto* c : std::initializer_list<juce::Component*> { &title, &help, &empty, &close, &enable, &add, &clear, &play, &save, &drag, &viewport }) addAndMakeVisible (*c);
-        title.setText ("SONG CHAIN", juce::dontSendNotification);
-        help.setText ("Plays top to bottom. Each section uses a variation's full length. Transpose is in semitones.", juce::dontSendNotification);
-        empty.setText ("Your Song chain is empty.\nAdd a section to arrange your variations.", juce::dontSendNotification);
+        variation.setComponentID ("song-variation");
+        transpose.setComponentID ("song-transpose");
+        title.setFont (ui::font (17.0f, true));
+        sectionTitle.setFont (ui::font (16.0f, true));
+        empty.setText ("Add a section to arrange your variations.", juce::dontSendNotification);
         empty.setJustificationType (juce::Justification::centred);
-        viewport.setViewedComponent (&rows, false);
-        viewport.setScrollBarsShown (true, false);
-        close.onClick = [this] { if (onClose) onClose(); };
-        enable.onClick = [this] { processor.setSongEnabled (! processor.isSongEnabled()); refresh(); };
-        add.onClick = [this] {
-            auto song = processor.getSong();
-            if (song.numEntries < cs::kMaxSongEntries) song.entries[song.numEntries++] = { processor.getEditVariation(), 0 };
-            processor.setSong (song); refresh();
-            viewport.setViewPosition (0, rows.getHeight());
-        };
-        clear.onClick = [this] { processor.setSong ({}); refresh(); };
-        play.onClick = [this] {
-            const bool starting = ! processor.isPreviewPlaying();
-            if (starting) processor.setSongEnabled (true);
-            processor.setPreviewPlaying (starting); refresh();
-        };
-        save.onClick = [this] {
-            chooser = std::make_unique<juce::FileChooser> ("Save Song MIDI...", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("ChordSlots Song.mid"), "*.mid");
-            juce::Component::SafePointer<SongPanel> safe (this);
-            chooser->launchAsync (juce::FileBrowserComponent::saveMode,
-                [safe] (const juce::FileChooser& fc) {
-                    if (! safe || fc.getResult() == juce::File()) return;
-                    const auto file = fc.getResult().withFileExtension ("mid");
-                    auto write = [safe, file] {
-                        if (! safe) return;
-                        const auto result = saveMidiTo (file, safe->processor.createSongMidiFile());
-                        if (result.failed())
-                            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
-                                "Song MIDI export failed", result.getErrorMessage());
-                    };
-                    // Confirm the actual destination after normalizing the extension.
-                    if (file.exists())
-                        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon,
-                            "Replace Song MIDI?", "Replace " + file.getFullPathName() + "?",
-                            "Replace", "Cancel", safe.getComponent(),
-                            juce::ModalCallbackFunction::create ([write] (int result) { if (result == 1) write(); }));
-                    else
-                        write();
-                });
-        };
-        for (int i = 0; i < cs::kMaxSongEntries; ++i)
+        chain.setViewedComponent (&blocks, false);
+        chain.setScrollBarsShown (false, true);
+        for (size_t i = 0; i < sections.size(); ++i)
         {
-            auto& r = sections[(size_t) i];
-            for (auto* c : std::initializer_list<juce::Component*> { &r.number, &r.variation, &r.transpose, &r.remove }) rows.addChildComponent (*c);
-            r.number.setText (juce::String (i + 1).paddedLeft ('0', 2), juce::dontSendNotification);
-            for (int v = 0; v < cs::kNumVariations; ++v) r.variation.addItem ("Variation " + juce::String::charToString ('A' + v), v + 1);
-            r.variation.setComponentID ("song-variation-" + juce::String (i));
-            r.transpose.setComponentID ("song-transpose-" + juce::String (i));
-            r.transpose.setSliderStyle (juce::Slider::IncDecButtons);
-            r.transpose.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 65, 28);
-            r.transpose.setRange (cs::kMinSongTranspose, cs::kMaxSongTranspose, 1);
-            r.transpose.setTextValueSuffix (" st");
-            r.transpose.setTooltip ("Transpose this section in semitones");
-            r.variation.onChange = [this, i] { auto s = processor.getSong(); if (i < s.numEntries) { s.entries[i].variation = sections[(size_t) i].variation.getSelectedId() - 1; processor.setSong (s); } };
-            r.transpose.onValueChange = [this, i] { auto s = processor.getSong(); if (i < s.numEntries) { s.entries[i].transpose = (int) sections[(size_t) i].transpose.getValue(); processor.setSong (s); } };
-            r.remove.onClick = [this, i] { auto s = processor.getSong(); if (i < s.numEntries) { for (int n = i; n + 1 < s.numEntries; ++n) s.entries[n] = s.entries[n + 1]; s.entries[--s.numEntries] = {}; processor.setSong (s); refresh(); } };
+            auto& button = sections[i];
+            blocks.addChildComponent (button);
+            button.setComponentID ("song-section-" + juce::String ((int) i));
+            button.onClick = [this, i] { selected = (int) i; refresh(); };
         }
-        refresh(); startTimerHz (10);
+        for (int v = 0; v < cs::kNumVariations; ++v)
+            variation.addItem ("Variation " + juce::String::charToString ('A' + v), v + 1);
+        transpose.setSliderStyle (juce::Slider::IncDecButtons);
+        transpose.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 74, 27);
+        transpose.setColour (juce::Slider::textBoxBackgroundColourId, ui::panelHi);
+        transpose.setColour (juce::Slider::textBoxOutlineColourId, ui::outline);
+        transpose.setRange (cs::kMinSongTranspose, cs::kMaxSongTranspose, 1);
+        transpose.setTextValueSuffix (" st");
+        transpose.setTooltip ("Shift the selected section in semitones.");
+        variation.onChange = [this]
+        {
+            editSection ([this] (auto& entry) { entry.variation = variation.getSelectedId() - 1; });
+        };
+        transpose.onValueChange = [this]
+        {
+            editSection ([this] (auto& entry) { entry.transpose = (int) transpose.getValue(); });
+        };
+        enable.setTooltip ("Use the Song chain for host playback.");
+        enable.onClick = [this] { processor.setSongEnabled (! processor.isSongEnabled()); refresh(); };
+        add.onClick = [this]
+        {
+            auto song = processor.getSong();
+            if (song.numEntries >= cs::kMaxSongEntries) return;
+            selected = song.numEntries;
+            song.entries[song.numEntries++] = { processor.getEditVariation(), 0 };
+            processor.setSong (song);
+            refresh();
+            chain.setViewPosition (sections[(size_t) selected].getX(), 0);
+        };
+        clear.onClick = [this] { selected = -1; processor.setSong ({}); refresh(); };
+        remove.onClick = [this]
+        {
+            auto song = processor.getSong();
+            if (! hasSelection (song.numEntries)) return;
+            for (int i = selected; i + 1 < song.numEntries; ++i)
+                song.entries[i] = song.entries[i + 1];
+            song.entries[--song.numEntries] = {};
+            selected = juce::jmin (selected, song.numEntries - 1);
+            processor.setSong (song);
+            refresh();
+        };
+        refresh();
     }
-    // Stage the complete MIDI beside the destination before replacing it.
-    static juce::Result saveMidiTo (const juce::File& file, const juce::MidiFile& midi)
+
+    static juce::Result saveMidiTo (const juce::File& file, const juce::MidiFile& midi, int format = 1)
     {
         juce::TemporaryFile temporary (file);
         {
             juce::FileOutputStream out (temporary.getFile());
             if (! out.openedOk()) return juce::Result::fail ("Cannot create temporary MIDI file: " + out.getStatus().getErrorMessage());
-            const bool written = midi.writeTo (out, 1);
+            const bool written = midi.writeTo (out, format);
             out.flush();
             if (! written || out.getStatus().failed())
-                return juce::Result::fail ("Cannot write Song MIDI: " + out.getStatus().getErrorMessage());
+                return juce::Result::fail ("Cannot write MIDI: " + out.getStatus().getErrorMessage());
         }
         if (! temporary.overwriteTargetFileWithTemporary())
             return juce::Result::fail ("Cannot replace " + file.getFullPathName() + ". The destination was not changed.");
         return juce::Result::ok();
     }
-    std::function<void()> onClose;
+
+    std::function<void()> onChange;
     void refresh()
     {
         const auto song = processor.getSong();
-        title.setText ("SONG CHAIN   " + juce::String (song.numEntries) + "/16", juce::dontSendNotification);
+        selected = juce::jmin (selected, song.numEntries - 1);
+        title.setText ("Song chain  " + juce::String (song.numEntries) + "/16", juce::dontSendNotification);
         enable.setToggleState (processor.isSongEnabled(), juce::dontSendNotification);
-        play.setButtonText (processor.isPreviewPlaying() ? "Stop" : "Play Song");
         add.setEnabled (song.numEntries < cs::kMaxSongEntries);
-        play.setEnabled (song.numEntries > 0 || processor.isPreviewPlaying());
-        for (auto* c : std::initializer_list<juce::Component*> { &clear, &save, &drag }) c->setEnabled (song.numEntries > 0);
+        add.getProperties().set ("primary", song.numEntries == 0);
+        add.setColour (juce::TextButton::textColourOffId, song.numEntries == 0 ? ui::background : ui::text);
+        clear.setEnabled (song.numEntries > 0);
         empty.setVisible (song.numEntries == 0);
-        for (int i = 0; i < cs::kMaxSongEntries; ++i) {
-            auto& r = sections[(size_t) i];
-            for (auto* c : std::initializer_list<juce::Component*> { &r.number, &r.variation, &r.transpose, &r.remove }) c->setVisible (i < song.numEntries);
-            if (i < song.numEntries) {
-                r.variation.setSelectedId (song.entries[i].variation + 1, juce::dontSendNotification);
-                r.transpose.setValue (song.entries[i].transpose, juce::dontSendNotification);
-            }
+        const bool editing = hasSelection (song.numEntries);
+        sectionTitle.setText (editing ? "Section " + juce::String (selected + 1) : "Select a section",
+                              juce::dontSendNotification);
+        for (auto* control : std::initializer_list<juce::Component*> { &variation, &transpose, &remove })
+            control->setVisible (editing);
+        if (editing)
+        {
+            const auto entry = song.entries[(size_t) selected];
+            variation.setSelectedId (entry.variation + 1, juce::dontSendNotification);
+            transpose.setValue (entry.transpose, juce::dontSendNotification);
         }
-        resized();
+
+        std::array<int, cs::kNumVariations> bars {};
+        for (int v = 0; v < cs::kNumVariations; ++v)
+            bars[(size_t) v] = processor.getProgression (v).bars;
+        int x = 0;
+        for (size_t i = 0; i < sections.size(); ++i)
+        {
+            auto& button = sections[i];
+            const bool visible = (int) i < song.numEntries;
+            button.setVisible (visible);
+            if (! visible) continue;
+            const auto entry = song.entries[i];
+            const int length = bars[(size_t) entry.variation];
+            const auto description = juce::String::charToString ('A' + entry.variation)
+                + "  /  " + juce::String (length) + (length == 1 ? " bar" : " bars");
+            button.setButtonText (description);
+            button.setTooltip ("Section " + juce::String ((int) i + 1) + " · " + description
+                               + " · " + juce::String (entry.transpose) + " st");
+            button.setToggleState ((int) i == selected, juce::dontSendNotification);
+            const int width = 68 + 19 * length;
+            button.setBounds (x, 0, width, 60);
+            x += width + 5;
+        }
+        blocks.setSize (juce::jmax (0, x - 5), 60);
+        if (onChange) onChange();
     }
-    void paint (juce::Graphics& g) override {
-        g.fillAll (juce::Colour (0xff1c1e28));
-        g.setColour (juce::Colour (0xff464253)); g.drawRect (getLocalBounds());
+
+    void paint (juce::Graphics& g) override
+    {
+        for (auto bounds : { stageBounds, railBounds })
+        {
+            g.setColour (ui::panel);
+            g.fillRoundedRectangle (bounds.toFloat(), 7.0f);
+            g.setColour (ui::outline);
+            g.drawRoundedRectangle (bounds.toFloat().reduced (0.5f), 7.0f, 1.0f);
+        }
     }
-    void resized() override {
-        auto a = getLocalBounds().reduced (20);
-        auto h = a.removeFromTop (32); close.setBounds (h.removeFromRight (70)); enable.setBounds (h.removeFromRight (150)); title.setBounds (h);
-        help.setBounds (a.removeFromTop (30)); a.removeFromTop (8);
-        auto f = a.removeFromBottom (38); add.setBounds (f.removeFromLeft (130)); f.removeFromLeft (8); clear.setBounds (f.removeFromLeft (100));
-        drag.setBounds (f.removeFromRight (110)); f.removeFromRight (8); save.setBounds (f.removeFromRight (130)); f.removeFromRight (8); play.setBounds (f.removeFromRight (100));
-        a.removeFromBottom (12); viewport.setBounds (a); empty.setBounds (a);
-        rows.setSize (juce::jmax (1, a.getWidth() - 16), processor.getSong().numEntries * 44);
-        for (int i = 0; i < cs::kMaxSongEntries; ++i) { auto r = juce::Rectangle<int> (0, i * 44, rows.getWidth(), 36); auto& s = sections[(size_t) i]; s.number.setBounds (r.removeFromLeft (50)); s.remove.setBounds (r.removeFromRight (90)); r.removeFromRight (16); s.transpose.setBounds (r.removeFromRight (150)); r.removeFromRight (16); s.variation.setBounds (r); }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        railBounds = area.removeFromRight (328);
+        area.removeFromRight (10);
+        stageBounds = area;
+        auto stage = stageBounds.reduced (12);
+        auto header = stage.removeFromTop (32);
+        title.setBounds (header.removeFromLeft (170));
+        add.setBounds (header.removeFromRight (105));
+        header.removeFromRight (5);
+        clear.setBounds (header.removeFromRight (90));
+        stage.removeFromTop (12);
+        chain.setBounds (stage.removeFromTop (83));
+        enable.setBounds (stage.removeFromBottom (28).withWidth (150));
+        empty.setBounds (stageBounds.reduced (12).withTrimmedTop (50).withTrimmedBottom (30));
+
+        auto rail = railBounds.reduced (12);
+        sectionTitle.setBounds (rail.removeFromTop (32));
+        variation.setBounds (rail.removeFromTop (30));
+        rail.removeFromTop (8);
+        transpose.setBounds (rail.removeFromTop (30));
+        rail.removeFromTop (12);
+        remove.setBounds (rail.removeFromTop (30).withWidth (104));
     }
+
 private:
-    void timerCallback() override { if (isVisible()) refresh(); }
+    bool hasSelection (int count) const noexcept { return selected >= 0 && selected < count; }
+    template <typename Edit>
+    void editSection (Edit edit)
+    {
+        auto song = processor.getSong();
+        if (! hasSelection (song.numEntries)) return;
+        edit (song.entries[(size_t) selected]);
+        processor.setSong (song);
+        refresh();
+    }
+
     ChordSlotsProcessor& processor;
-    struct Section { juce::Label number; juce::ComboBox variation; juce::Slider transpose; juce::TextButton remove { "Remove" }; };
-    std::array<Section, cs::kMaxSongEntries> sections;
-    juce::Label title, help, empty;
-    juce::TextButton close { "Close" }, enable { "Song playback" }, add { "Add section" }, clear { "Clear chain" }, play { "Play Song" }, save { "Save Song MIDI" };
-    MidiDragTile drag;
-    juce::Component rows;
-    juce::Viewport viewport;
-    std::unique_ptr<juce::FileChooser> chooser;
+    int selected = -1;
+    juce::Rectangle<int> stageBounds, railBounds;
+    juce::Label title, empty, sectionTitle;
+    juce::TextButton enable { "Song playback" }, add { "+ Add section" }, clear { "Clear chain" }, remove { "Remove section" };
+    juce::ComboBox variation;
+    juce::Slider transpose;
+    std::array<juce::TextButton, cs::kMaxSongEntries> sections;
+    juce::Component blocks;
+    juce::Viewport chain;
 };

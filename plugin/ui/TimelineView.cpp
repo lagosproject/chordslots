@@ -7,6 +7,7 @@ namespace
 constexpr int separatorTop = 17;
 constexpr int contentTop = 35;
 constexpr int pitchColumnWidth = 44;
+constexpr float compactCardWidth = 60.0f;
 inline juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 }
 
@@ -58,7 +59,7 @@ int TimelineView::stepForX (float x) const
 int TimelineView::cutAt (float x) const
 {
     int closest = -1;
-    float distance = 5.0f;
+    float distance = 8.0f;
     for (int i = 1; i < prog.numSlots; ++i)
     {
         const float candidate = std::abs (x - xForStep (prog.slots[(size_t) i].start));
@@ -125,7 +126,22 @@ void TimelineView::updateMidiNotes()
 
 void TimelineView::paintMidi (juce::Graphics& g)
 {
-    const auto area = getLocalBounds().toFloat().withTrimmedTop ((float) contentTop + 26.0f);
+    auto area = getLocalBounds().toFloat().withTrimmedTop ((float) contentTop + 38.0f);
+    if (feelView)
+    {
+        auto accents = area.removeFromBottom (47.0f);
+        g.setColour (ui::panel);
+        g.fillRect (accents);
+        g.setColour (ui::textDim);
+        g.setFont (ui::font (10.0f));
+        g.drawText ("Accent", accents.withWidth ((float) timelineLeft()).toNearestInt(), juce::Justification::centred);
+        for (const auto& note : midiNotes)
+        {
+            const float height = 38.0f * (float) note.velocity / 127.0f;
+            g.setColour ((note.bass ? ui::energy : ui::accent).withAlpha (0.75f));
+            g.fillRect (xForStep (note.start), accents.getBottom() - height - 3.0f, 2.0f, height);
+        }
+    }
     if (area.isEmpty())
         return;
 
@@ -172,7 +188,7 @@ void TimelineView::paintMidi (juce::Graphics& g)
         }
         if ((scale & (1u << degree)) != 0)
         {
-            g.setColour (ui::accent.withAlpha (degree == 0 ? 0.28f : 0.12f));
+            g.setColour (ui::accent.withAlpha (degree == 0 ? 0.18f : 0.07f));
             g.fillRect (0.0f, y, area.getWidth(), rowH);
         }
         if (degree == 0)
@@ -186,13 +202,13 @@ void TimelineView::paintMidi (juce::Graphics& g)
     const int grid = std::gcd (beat, prog.snap);
     for (int step = 0; step < prog.lengthSteps(); step += grid)
     {
-        const float alpha = step % meter.stepsPerBar == 0 ? 0.95f : (step % beat == 0 ? 0.6f : 0.22f);
+        const float alpha = step % meter.stepsPerBar == 0 ? 0.95f : (step % beat == 0 ? 0.45f : 0.12f);
         g.setColour (ui::outline.brighter (0.4f).withAlpha (alpha));
         g.drawVerticalLine ((int) xForStep (step), area.getY(), area.getBottom());
     }
     if (hasSelection)
     {
-        g.setColour (ui::accent.withAlpha (0.15f));
+        g.setColour (ui::accent.withAlpha (0.09f));
         g.fillRect (slotBounds (selected).withTrimmedTop (26.0f));
     }
     if (hovered >= 0)
@@ -312,16 +328,23 @@ void TimelineView::paint (juce::Graphics& g)
         // Same step transform as the notes, including the pitch-label gutter.
         for (int i = 0; i < prog.numSlots; ++i)
         {
-            const auto r = slotBounds (i).withHeight (24.0f);
+            const auto r = slotBounds (i).withHeight (35.0f);
             g.setColour (i == selected ? ui::accent.withAlpha (0.35f) : ui::panel);
             g.fillRoundedRectangle (r, 3.0f);
-            g.setColour (i == selected ? ui::accent.brighter (0.5f) : ui::outline);
+            g.setColour (i == selected ? ui::text : ui::outline);
             g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, i == selected ? 2.0f : 1.0f);
             g.setColour (ui::text);
             g.setFont (ui::font (12.0f, true));
             // Readable type with ellipsis; full names remain in tooltip and context bar.
             g.drawText (utf8 (cs::chordName (prog.slots[(size_t) i].chord, prog.tonic, prog.scale)),
-                        r.reduced (4.0f, 0.0f), juce::Justification::centredLeft, true);
+                        r.withHeight (19.0f).reduced (4.0f, 0.0f), juce::Justification::centredLeft, true);
+            g.setColour (ui::textDim);
+            g.setFont (ui::font (10.0f));
+            const auto& slot = prog.slots[(size_t) i];
+            const auto match = juce::String (juce::roundToInt (100.0f * cs::slotFit (slot))) + "%";
+            g.drawText (match, r.withTrimmedTop (18.0f).reduced (4.0f, 0.0f), juce::Justification::centredRight);
+            if (slot.locked && r.getWidth() >= 60.0f)
+                g.drawText ("Kept", r.withTrimmedTop (18.0f).reduced (4.0f, 0.0f), juce::Justification::centredLeft);
         }
     }
 
@@ -330,7 +353,7 @@ void TimelineView::paint (juce::Graphics& g)
         const cs::Slot& s = prog.slots[(size_t) i];
         const auto r = slotBounds (i);
         const juce::Colour fill = ui::colourForBrightness (s.brightness);
-        const bool lightText = fill.getPerceivedBrightness() < 0.6f;
+        const bool lightText = fill.getPerceivedBrightness() < 0.52f;
         const juce::Colour ink = lightText ? juce::Colours::white : juce::Colour (0xff1a1630);
 
         g.setColour (i == hoverSlot && hoverCut < 0 ? fill.brighter (0.12f) : fill);
@@ -354,16 +377,43 @@ void TimelineView::paint (juce::Graphics& g)
             g.setColour (ui::energy.brighter (0.4f));
             g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 2.5f);
         }
-        else if (s.locked || i == selected)
+        if (i == selected)
         {
-            g.setColour (s.locked ? ui::accent.brighter (0.35f) : juce::Colours::white.withAlpha (0.85f));
-            g.drawRoundedRectangle (r.reduced (1.0f), 6.0f, s.locked ? 2.2f : 1.5f);
+            g.setColour (ui::background.withAlpha (0.85f));
+            g.drawRoundedRectangle (r.reduced (1.5f), 5.0f, 3.0f);
+            g.setColour (ui::text);
+            g.drawRoundedRectangle (r.reduced (1.5f), 5.0f, 1.5f);
         }
 
         const float rw = r.getWidth();
         const float rh = r.getHeight();
 
-        if (rw > 28.0f)
+        const auto match = juce::String (juce::roundToInt (100.0f * cs::slotFit (s))) + "%";
+        const auto name = utf8 (cs::chordName (s.chord, prog.tonic, prog.scale));
+        g.setColour (ink);
+        if (rw < compactCardWidth)
+        {
+            g.setFont (ui::font (12.0f, true));
+            g.drawFittedText (name, r.withHeight (23.0f).withCentre ({ r.getCentreX(), r.getCentreY() - 7.0f })
+                                     .reduced (2.0f, 0.0f).toNearestInt(),
+                              juce::Justification::centred, 1, 0.62f);
+            g.setFont (ui::font (10.0f));
+            g.setColour (ink.withAlpha (0.9f));
+            if (rw >= 22.0f)
+                g.drawText (match, r.withY (r.getCentreY() + 6.0f).withHeight (14.0f), juce::Justification::centred);
+            if (s.locked && rw >= 17.0f)
+                ui::drawPadlock (g, { r.getCentreX() - 5.0f, r.getY() + 5.0f, 10.0f, 12.0f }, ink, true);
+            continue;
+        }
+
+        g.setFont (ui::font (11.0f));
+        g.setColour (ink.withAlpha (0.88f));
+        g.drawText (match, r.withY (r.getBottom() - 40.0f).withHeight (15.0f).reduced (5.0f, 0.0f),
+                    juce::Justification::centredRight);
+        if (s.locked && rw >= 90.0f)
+            g.drawText ("Kept", r.withY (r.getY() + 6.0f).withHeight (15.0f).reduced (24.0f, 0.0f),
+                        juce::Justification::centredRight);
+
         {
             // Top row: Roman numeral + Lock icon
             const juce::String roman = utf8 (cs::romanNumeral (s.chord, prog.tonic));
@@ -379,7 +429,6 @@ void TimelineView::paint (juce::Graphics& g)
             }
 
             // Middle: Chord Name
-            const juce::String name = utf8 (cs::chordName (s.chord, prog.tonic, prog.scale));
             const float nameSize = juce::jlimit (14.0f, 24.0f, rw / juce::jmax (2.0f, (float) name.length() * 0.55f));
             g.setColour (ink);
             g.setFont (ui::font (nameSize, true));
@@ -446,14 +495,17 @@ void TimelineView::paint (juce::Graphics& g)
         const float x = xForStep (i == dragCut && dragStep >= 0 ? dragStep : s.start);
         const bool highlighted = i == hoverCut || i == dragCut;
         const auto colour = s.cutLocked ? ui::accent.brighter (0.55f) : (highlighted ? ui::text : ui::textDim);
-        g.setColour (colour.withAlpha (highlighted ? 0.9f : 0.4f));
+        g.setColour (colour.withAlpha (i == dragCut ? 0.7f : (highlighted ? 0.45f : 0.22f)));
         g.drawVerticalLine ((int) x, (float) contentTop, (float) getHeight());
+        g.setColour (ui::panelHi);
+        g.fillRoundedRectangle (x - 8.0f, 18.0f, 16.0f, 16.0f, 3.0f);
         if (s.cutLocked)
             ui::drawPadlock (g, { x - 5.0f, 20.0f, 10.0f, 12.0f }, colour, true);
         else
         {
             g.setColour (colour);
-            g.fillRoundedRectangle (x - 3.0f, 21.0f, 6.0f, 10.0f, 2.0f);
+            g.fillRoundedRectangle (x - 2.5f, 22.0f, 1.5f, 8.0f, 0.75f);
+            g.fillRoundedRectangle (x + 1.0f, 22.0f, 1.5f, 8.0f, 0.75f);
         }
     }
 
@@ -487,19 +539,22 @@ juce::String TimelineView::getTooltip()
             : "Drag to move this timing boundary. Double-click for a separator lock (timing only), or right-click for options.";
     }
 
-    if (midiVisible)
-        return utf8 (cs::chordName (prog.slots[(size_t) slotAt (pos.x)].chord, prog.tonic, prog.scale))
-            + " — Click to select and hear this slot. Right-click for slot actions.";
+
 
     const int slot = slotAt (pos.x);
+    const auto& info = prog.slots[(size_t) slot];
+    const auto match = juce::String (juce::roundToInt (100.0f * cs::slotFit (info))) + "% match";
+    if (midiVisible)
+        return utf8 (cs::chordName (info.chord, prog.tonic, prog.scale)) + " · " + match
+            + (feelView || pos.y >= contentTop + 36 ? ". Click to hear this slot." : ". Click to inspect this chord.");
     const float width = slotBounds (slot).getWidth();
-    if (width > 45.0f && optionsBounds (slot).expanded (4.0f).contains (pos))
+    if (width >= compactCardWidth && optionsBounds (slot).expanded (4.0f).contains (pos))
         return "Open slot actions such as auditioning, replacing or locking the chord.";
-    if (width > 38.0f && lockBounds (slot).expanded (4.0f).contains (pos))
+    if (width >= compactCardWidth && lockBounds (slot).expanded (4.0f).contains (pos))
         return "Chord lock keeps this slot's chord when rolling. Separator locks protect timing; generation locks apply across the progression.";
 
     return utf8 (cs::chordName (prog.slots[(size_t) slot].chord, prog.tonic, prog.scale))
-        + " — Card color: measured Brightness. Bottom bar: measured Tension. Click for alternatives. Shift-click to hear it; right-click for actions.";
+        + " · " + match + " — Card color: measured Brightness. Bottom bar: measured Tension. Click for alternatives. Shift-click to hear it; right-click for actions.";
 }
 
 void TimelineView::mouseMove (const juce::MouseEvent& e)
@@ -559,13 +614,13 @@ void TimelineView::mouseDown (const juce::MouseEvent& e)
 
     const float width = slotBounds (slot).getWidth();
     if (e.mods.isPopupMenu()
-        || (! midiVisible && width > 45.0f && optionsBounds (slot).expanded (4.0f).contains (e.position)))
+        || (! midiVisible && width >= compactCardWidth && optionsBounds (slot).expanded (4.0f).contains (e.position)))
     {
         showSlotMenu (slot, step);
         return;
     }
 
-    if (! midiVisible && width > 38.0f && lockBounds (slot).expanded (4.0f).contains (e.position))
+    if (! midiVisible && width >= compactCardWidth && lockBounds (slot).expanded (4.0f).contains (e.position))
     {
         processor.edit ([slot] (cs::Progression& p, cs::Rng&)
         {
@@ -576,12 +631,12 @@ void TimelineView::mouseDown (const juce::MouseEvent& e)
     }
 
     selected = slot;
-    if (onSlotSelected)
-        onSlotSelected (selected);
-    if (midiVisible || e.mods.isShiftDown())
+    if ((midiVisible && (feelView || e.y >= contentTop + 36)) || e.mods.isShiftDown())
         processor.auditionSlot (slot);
     else if (onOpenAlternatives)
         onOpenAlternatives (slot);
+    if (onSlotSelected)
+        onSlotSelected (selected);
     repaint();
 }
 
@@ -671,8 +726,11 @@ void TimelineView::showSlotMenu (int slot, int step)
         return;
 
     juce::PopupMenu menu;
-    menu.addItem (4, "Chord alternatives");
-    menu.addSeparator();
+    if (! feelView)
+    {
+        menu.addItem (4, "Chord alternatives");
+        menu.addSeparator();
+    }
 
     // Bass note submenu
     juce::PopupMenu bassMenu;
