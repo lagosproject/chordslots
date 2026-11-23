@@ -4,7 +4,7 @@
 
 [Download ChordSlots v0.4.0 for testing](https://github.com/lagosproject/chordslots/releases/tag/v0.4.0) · [Release notes](CHANGELOG.md#040-test-release) · **[Help decide how the chords sound: 45 minute listening survey](https://lagosproject.github.io/chordslots/listening-test.html)**
 
-![ChordSlots Harmony tab with the chord timeline and target curves](docs/chordslots-v0.3-harmony.png)
+![ChordSlots Harmony tab with the chord timeline and target curves](docs/chordslots-v0.4.1-harmony.png)
 
 ChordSlots is a JUCE instrument plugin with an optional CLAP build. Its preview synth can play the result, and its MIDI output can drive another instrument or become a dragged MIDI clip.
 
@@ -18,9 +18,9 @@ ChordSlots is a JUCE instrument plugin with an optional CLAP build. Its preview 
 - **Arrange a song.** Build a chain of up to 16 entries. Each entry selects a variation and signed semitone transposition. Song playback follows the chain. Drag Song exports it as a MIDI clip with chord and section markers, with chords and bass always on two separate tracks, whatever the Split setting. Drag Chords and Drag Bass export individual parts.
 - **Perform and export.** Use Strum, Accent, Humanize, and Re-Feel to shape timing and velocity. Host playback follows tempo and position. Incoming MIDI can trigger slots with selectable mapping and held-note priority. MIDI export includes the current performance timing.
 
-Use **Harmony** to shape a progression, then open **Groove & Feel** to adjust bass patterns, comping, timing, and dynamics with the MIDI preview in view. Both tabs share variation selection, Undo, synth preview, and MIDI export.
+Use **Harmony** to shape a progression, then open **Feel** to adjust bass patterns, comping, timing, and dynamics with the MIDI preview in view. Both tabs share variation selection, Undo, synth preview, and MIDI export.
 
-![ChordSlots Groove & Feel tab with the MIDI preview and performance controls](docs/chordslots-v0.3-groove.png)
+![ChordSlots Feel tab with the MIDI preview and performance controls](docs/chordslots-v0.4.1-feel.png)
 
 ## How the musical model works
 
