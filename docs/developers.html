@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ChordSlots developer reference for harmonic search, Brightness, Tension, Energy, voicing, and MIDI rendering.">
+  <title>ChordSlots · Developer reference</title>
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top wrap">
+  <a class="brand" href="./"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>ChordSlots</a>
+  <nav aria-label="Main navigation">
+    <a href="./">For producers</a>
+    <a href="developers.html" aria-current="page">For developers</a>
+    <a class="button secondary" href="listening-test.html">Listening survey</a>
+  </nav>
+</header>
+<main id="main">
+  <div class="wrap section doc-hero">
+    <p class="eyebrow">Developer reference · 0.4.1</p>
+    <h1>How the engine works</h1>
+    <p class="lede">ChordSlots uses a C++17 musical core to search for a loop, assign voices, and render timed MIDI events. JUCE provides the editor, plugin hosting interfaces, and preview playback.</p>
+  </div>
+  <div class="wrap doc-layout">
+    <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <a href="#search">Harmonic search</a>
+      <a href="#brightness">Brightness</a>
+      <a href="#tension">Tension</a>
+      <a href="#energy">Energy and Match</a>
+      <a href="#voicing">Voicing and bass</a>
+      <a href="#playback">Performance and MIDI</a>
+      <a href="#build">Build and validate</a>
+    </nav>
+    <article class="reference" aria-label="Engine calculations">
+      <section id="search">
+        <h2>Harmonic search</h2>
+        <h3>Targets, pools, and locks</h3>
+        <p>A progression stores slot starts on a meter-aware step grid. Roll randomizes the cuts when rhythm is unlocked and sanitizes the existing grid when it is locked. A mood supplies preset Brightness, Tension, and Energy curves, interpolated at normalized slot indices <code>(i + 0.5) / N</code>, as well as Adventure, Syncopation, and optionally a scale. Explicit Chord Transitions settings override mood defaults.</p>
+        <p>Candidate identities are built by combining the 12 pitch classes with interval templates. Adventure <code>A</code> allows zero outside notes below 0.2, one below 0.6, and two thereafter. Roots outside the scale enter at 0.4. Each slot prunes the pool using its own targets, while fixed slots contribute their existing chord.</p>
+        <pre><code>unary = (B − targetB)² + (T − targetT)²
+      + (1 − A)² × (0.06 × complexity + 0.08 × outsideNotes)
+      + melodyCost − firstSlotTonicBonus</code></pre>
+        <p>The first-slot tonic-root bonus is 0.012. A melody profile sums note overlap in steps by pitch class, weighting strong-beat onsets by 1.5. The melody cost is Melody Fit times the weighted mean interval penalty. Chord tones cost 0, preferred extensions 0.12, other non-chord tones 0.55, and specified clashes 1.4.</p>
+        <h3>Transitions and sampling</h3>
+        <p>The corpus adds a key-relative transition prior. A chord token combines its root relative to the tonic with its quality class. The preparation script collapses repeated chord symbols and aggregates bigrams from 890 McGill Billboard annotations via ChoCo and 200 RS200 songs. Its major, minor, and extended sets contain 917, 173, and 377 annotations respectively. The extended set overlaps the others and requires at least 30% extended chords. Sparse rows interpolate with unigram frequencies using a backoff parameter of 200. Runtime reads quantized surprise costs and adjusts them for scale membership.</p>
+        <pre><code>transition = 0.03 × (repeatPenalty
+           + 2.2 × (1 − 0.75 × A) × corpusCost
+           + 0.3 × (1 − A) × chordDistance)
+sampling weight ∝ exp(−cost / temperature)</code></pre>
+        <p>Identical chords have a repeat penalty of 3. Same-root changes cost 0.6, or 0.2 for changes in the bass state. Free uses a constant corpus cost. The search also accounts for bass movement, ending rules, and the change in squared Tension error after adding context. The edge from the final slot to the first closes the loop. Compatible slots in a repeated phrase can share a chord variable. Variable elimination and conditional sampling draw one assignment from the resulting graph, followed by an oscillation correction pass. Variety maps the sampling temperature logarithmically from 0.004 through 0.012 at the midpoint to 0.030.</p>
+        <p><a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Generator.h">Generator.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/RingInference.h">RingInference.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/tools/build_corpus.py">Corpus preparation</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/DATA_LICENSES.md">Data sources and licences</a></p>
+      </section>
+      <section id="brightness">
+        <h2>Brightness</h2>
+        <p>The implementation uses the line of fifths described by David Temperley. It averages chord-tone fifths positions relative to the <strong>root</strong> for quality and relative to the <strong>tonic</strong> for modal color. Positive positions lie on the sharp side. Interval spelling includes an augmented-fifth adjustment and a key-dependent tritone spelling. Register uses the mean MIDI pitch of the upper voices. Search uses a neutral register value of 0.5 before voicing.</p>
+        <pre><code>clamp(x) = min(1, max(0, x))
+norm(x, lo, hi) = clamp((x − lo) / (hi − lo))
+quality = norm(meanRootRelativeFifths, −3, 4)
+modal   = norm(meanTonicRelativeFifths, −5, 6)
+register = norm(meanUpperMidiPitch, 48, 84)
+B = norm(0.55 × quality + 0.25 × modal + 0.20 × register,
+         0.24, 0.74)</code></pre>
+        <p>The calibration comes from inspecting the engine’s chord tables across scales. The soft-clipping and minor-key quality adjustments are experimental switches with a default weight of zero. <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Metrics.h">Metrics.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Theory.h">Theory.h</a></p>
+      </section>
+      <section id="tension">
+        <h2>Tension</h2>
+        <h3>Roughness, consonance, and key distance</h3>
+        <p>Roughness uses the Plomp–Levelt model in Sethares’ parameterization. Convert MIDI pitch to hertz using <code>440 × 2^((note − 69) / 12)</code>. Each note supplies six integer harmonics with amplitudes <code>0.88^(k−1)</code>. For each pair of partials, let <code>d</code> be their frequency difference and <code>s = 0.24 / (0.021 × lowerFrequency + 19)</code>. Sum <code>minAmplitude × (exp(−3.5sd) − exp(−5.75sd))</code> and divide by note count. Candidate roughness uses a close-position chord rooted at MIDI 60, while measured roughness uses the voiced notes.</p>
+        <p>Bernardes et al.’s Tonal Interval Space represents unique pitch classes as six weighted complex DFT coefficients. For coefficient <code>k</code>, average <code>exp(−2πik × pitchClass / 12)</code> over the set and multiply by its weight from <code>[3, 8, 11.5, 15, 14.5, 7.5]</code>. The vector norm estimates consonance. Euclidean distances to the tonic triad and full scale estimate tonal distance, with weights 0.6 and 0.4. Inter-chord distance uses the same representation, divided by 22 and clamped.</p>
+        <pre><code>rough = norm(roughnessPerNote, 0.13, 0.63)  [voiced]
+rough = norm(roughnessPerNote, 0.05, 0.55)  [candidate]
+dissonance = 0.5 × rough + 0.5 × (1 − norm(TIV norm, 9, 20))
+staticT = clamp(0.45 × dissonance
+        + 0.35 × norm(tonalDistance, 5, 23) + 0.20 × pull)</code></pre>
+        <p>Functional pull is 0 for tonic, 0.4 for subdominant, and 1 for dominant. A root ten semitones above the tonic uses 0.7 in minor-third scales and 0.4 elsewhere. The experimental tritone term has zero weight.</p>
+        <h3>Context around the loop</h3>
+        <p>The Spiral Array places spelled pitches on a helix ordered by fifths. The chord centroid averages spelled chord tones during search and voiced notes during measurement. Strain is the distance from that centroid to a tonic, dominant, and subdominant key center. Momentum is the centroid distance from the previous slot, wrapping at the start of the loop and using zero for a one-slot loop. These geometric distances use the scaling documented in <code>SpiralTension.h</code>.</p>
+        <pre><code>T = clamp(0.86 × staticT
+        + 0.09 × clamp(strain / 0.33)
+        + 0.05 × clamp(momentum / 0.36))</code></pre>
+        <p>These are symbolic MIDI estimates. The instrument, its spectrum, and the surrounding arrangement can change the tension a listener hears. <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/SpiralTension.h">SpiralTension.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/docs/RESEARCH-BASE.md">Research and audit sources</a></p>
+      </section>
+      <section id="energy">
+        <h2>Energy and Match</h2>
+        <p>Target Energy sets base MIDI velocity and can add doublings above style-dependent thresholds. The density measurement includes bass and any doublings. Piano normalizes between 3 and 8 notes, Close between 2 and 6, Rootless between 2 and 5, and the other styles between 3 and 7. Energy edits reapply voicing performance to affected unlocked slots while preserving their chord identities.</p>
+        <pre><code>velocity = round(45 + 75 × targetEnergy)
+density = norm(noteCount, styleMin, styleMax)
+E = clamp(0.60 × norm(velocity, 45, 120) + 0.40 × density)
+slotMatch = clamp(1 − 2 × sqrt(((B − targetB)² + (T − targetT)²) / 2))
+Match = mean(slotMatch)</code></pre>
+        <p>Match weights every slot equally and uses Brightness and Tension. Energy describes the base voicing, with later timing and velocity changes applied by the performance renderer. <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Generator.h">Generator.h</a></p>
+      </section>
+      <section id="voicing">
+        <h2>Voicing and bass</h2>
+        <p>Voicing turns a chord symbol into pitches. The Brightness target sets a preferred MIDI center of <code>57 + 14 × targetB</code>. Candidate layouts follow their selected voicing style and enforce constraints on spacing, omitted tones, and close intervals in the low register. With voice leading enabled, the loop optimizer uses dynamic programming over candidate upper voicings to balance local fit against movement between neighbors.</p>
+        <p>Bass intervals can be part of the sampled chord state. Bass Motion weighs movement between bass pitches, with additional costs for inversions. The voicer places the selected bass pitch class below the upper voices and can add a sub-octave above 0.85 target Energy if there is room. The chosen bass pattern turns the bass pitch into timed hits, including octave, offbeat, legato, and walking patterns.</p>
+        <p><a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Voicing.h">Voicing.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/BassPatterns.h">BassPatterns.h</a></p>
+      </section>
+      <section id="playback">
+        <h2>Performance and MIDI</h2>
+        <p><code>toPlayData</code> flattens the progression into a playback snapshot. Comping patterns provide grid hits, while Strum offsets individual voices, Accent shapes velocity, and Humanize adds seeded timing and velocity variation. The plugin schedules events against host tempo and position or triggers chords from incoming MIDI. Variation switches can be immediate or quantized to a slot or bar.</p>
+        <p>Split routes chords on MIDI channel 1 and bass on channel 2. Song playback selects and transposes variations per entry, and its MIDI export writes separate chord and bass tracks with chord and section markers. The built-in preview synth can audition the result, and the separate Logic AU MIDI FX emits MIDI for a downstream instrument.</p>
+        <p><a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Performance.h">Performance.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Trigger.h">Trigger.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/plugin/PluginProcessor.cpp">PluginProcessor.cpp</a></p>
+      </section>
+      <section id="build">
+        <h2>Build and validate</h2>
+        <p>Configure with CMake 3.22 or later and a C++17 compiler. CMake uses the repository’s JUCE checkout if present and can fetch its pinned dependency otherwise.</p>
+        <pre><code>cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure</code></pre>
+        <p>Use <code>-DCHORDSLOTS_BUILD_PLUGIN=OFF</code> for the core and CLI, or enable CLAP with <code>-DCHORDSLOTS_BUILD_CLAP=ON</code>. The CLI can print metric tables and generated loops. CTest covers the core, performance, triggers, and processor paths. The project’s audits and listening survey evaluate how the engineered metrics relate to listener judgments.</p>
+        <p><a href="https://github.com/lagosproject/chordslots/tree/v0.4.1#build">Build instructions</a> · <a href="https://github.com/lagosproject/chordslots/tree/v0.4.1/docs/audits">Audit reports</a></p>
+      </section>
+      <div class="survey"><div><h2>Compare the engine by ear</h2><p>Hear the paired examples used to evaluate proposed changes.</p></div><a class="button primary" href="listening-test.html">Take the listening survey</a></div>
+    </article>
+  </div>
+</main>
+<footer class="wrap footer"><span>ChordSlots · AGPL-3.0-or-later</span><a href="./">Producer guide</a><a href="https://github.com/lagosproject/chordslots">GitHub</a></footer>
+</body>
+</html>

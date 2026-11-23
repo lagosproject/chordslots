@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Draw brightness, tension, and energy across a loop, then turn it into editable MIDI with ChordSlots.">
+  <title>ChordSlots · Harmony for music producers</title>
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top wrap">
+  <a class="brand" href="./"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>ChordSlots</a>
+  <nav aria-label="Main navigation">
+    <a href="./" aria-current="page">For producers</a>
+    <a href="developers.html">For developers</a>
+    <a class="button secondary" href="listening-test.html">Listening survey</a>
+  </nav>
+</header>
+<main id="main">
+  <section class="hero wrap">
+    <div>
+      <p class="eyebrow">Harmony to MIDI</p>
+      <h1>Draw the feel.<br><em>Find the chords.</em></h1>
+      <p class="lede">Give your loop a shape with Brightness, Tension, and Energy. ChordSlots searches for a progression, voices it, and gives you editable MIDI to play with your own instruments.</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/lagosproject/chordslots/releases/tag/v0.4.1">Get ChordSlots</a>
+        <a class="button secondary" href="#workflow">See the workflow</a>
+      </div>
+    </div>
+    <figure class="product">
+      <img src="chordslots-v0.4.1-harmony.png" alt="ChordSlots Harmony workspace with a chord timeline and the Brightness, Tension, and Energy lanes" fetchpriority="high">
+      <figcaption>Harmony workspace · ChordSlots 0.4.1</figcaption>
+    </figure>
+  </section>
+  <section class="band" aria-labelledby="curves">
+    <div class="wrap section">
+      <h2 id="curves">Three ways to shape a loop</h2>
+      <p class="intro">A slot is one stretch of the timeline where a chord plays. Give each slot a target, then listen to how those targets translate into harmony and performance.</p>
+      <div class="tiles">
+        <article class="tile bright"><h3>Brightness</h3><p>Move from darker chord colors and lower voicings toward brighter colors and higher notes. Try lifting the last two slots into a chorus.</p></article>
+        <article class="tile tension"><h3>Tension</h3><p>Raise it where you want the harmony to feel unsettled. Lower it where you want the loop to settle. The move from the last chord back to the first counts, too.</p></article>
+        <article class="tile energy"><h3>Energy</h3><p>Give the same chords a softer or stronger attack. Higher targets raise MIDI velocity and can add octave doublings when the voicing has room.</p></article>
+      </div>
+    </div>
+  </section>
+  <section class="wrap section" id="workflow">
+    <h2>From first roll to your DAW</h2>
+    <div class="workflow">
+      <ol class="steps">
+        <li><h3>Set the shape in Harmony</h3><p>Pick a key, scale, and mood to start. Move the chord cuts and edit the targets across up to 16 slots and 8 bars. Press Roll and audition the loop with the built-in preview.</p></li>
+        <li><h3>Keep the parts you like</h3><p>Lock a slot or layer before rolling again. Use Inspect to audition alternatives, invert the upper chord voices, or choose a separate bass note. Store different ideas in variations A–D.</p></li>
+        <li><h3>Give it a groove in Feel</h3><p>Try a comping or bass pattern, then adjust Strum, Accent, and Humanize. Watch the chord and bass notes in the piano roll as you edit.</p></li>
+        <li><h3>Arrange and take the MIDI</h3><p>Chain up to 16 sections in Song, choosing a variation and transposition for each. Drag out chord, bass, or song MIDI. If your host supports MIDI routing from the plugin, you can use it to drive another instrument live.</p></li>
+      </ol>
+      <figure class="product feel">
+        <img src="chordslots-v0.4.1-feel.png" alt="Feel workspace with a piano roll, accent lane, and timing and bass controls" loading="lazy">
+        <figcaption>Feel workspace · ChordSlots 0.4.1</figcaption>
+      </figure>
+    </div>
+    <div class="tiles extras">
+      <article class="tile"><h3>Start with a melody</h3><p>Import a MIDI melody and turn up Melody Fit. Long notes and notes on strong beats have more influence over which chords are chosen.</p></article>
+      <article class="tile"><h3>Read the Match score</h3><p>Match summarizes how close the measured Brightness and Tension are to your targets. Use it to see where the roll followed your sketch, then choose the version that sounds right in your track.</p></article>
+    </div>
+  </section>
+  <section class="wrap section" aria-labelledby="survey">
+    <div class="survey">
+      <div><h2 id="survey">Help tune the harmony engine</h2><p>Listen to paired examples and tell us what you hear. The listening survey takes about 45 minutes and helps evaluate proposed changes to the engine.</p></div>
+      <a class="button primary" href="listening-test.html">Take the listening survey</a>
+    </div>
+  </section>
+</main>
+<footer class="wrap footer"><span>ChordSlots · AGPL-3.0-or-later</span><a href="developers.html">Developer reference</a><a href="https://github.com/lagosproject/chordslots">GitHub</a></footer>
+</body>
+</html>
