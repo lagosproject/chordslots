@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Learn every ChordSlots workspace, from drawing harmony and editing chords to programming feel, arranging a song, and exporting MIDI.">
-  <title>ChordSlots · Producer manual</title>
+  <title>ChordSlots Producer Manual | MIDI, Harmony and Export</title>
+  <link rel="canonical" href="https://lagosproject.github.io/chordslots/manual.html">
   <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -20,10 +21,10 @@
 </header>
 <main id="main">
   <div class="wrap section doc-hero">
-    <p class="eyebrow">Producer manual · 0.4.1 interface</p>
+    <p class="eyebrow">Producer manual · 0.4.3 interface</p>
     <h1>Using ChordSlots</h1>
     <p class="lede">Build a chord loop in Harmony, give it a groove in Feel, and arrange variations in Song. Use this guide while you work to find what each control does and when your changes take effect.</p>
-    <p class="intro">Screenshots show 0.4.1. The packaged Windows 0.4.0 test release has many of the same controls in a different layout. <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/README.md#build">Build instructions for 0.4.1</a></p>
+    <p class="intro">This guide covers ChordSlots 0.4.3. <a href="https://github.com/lagosproject/chordslots/releases/tag/v0.4.3">Download the Windows x64 VST3 and standalone app</a>.</p>
   </div>
   <div class="wrap doc-layout">
     <nav class="toc" aria-label="Manual contents">
@@ -34,7 +35,7 @@
       <a href="#inspect">Chord Inspector</a>
       <a href="#import">MIDI import</a>
       <a href="#feel">Feel</a>
-      <a href="#variations">Variations A–D</a>
+      <a href="#variations">Variations</a>
       <a href="#song">Song</a>
       <a href="#play">Playback and MIDI In</a>
       <a href="#export">MIDI export and routing</a>
@@ -45,7 +46,7 @@
         <h2>Get started</h2>
         <ol class="steps">
           <li>Open ChordSlots Standalone or insert ChordSlots as an instrument in your DAW. Keep the built-in preview instrument audible while you learn the controls.</li>
-          <li>In <strong>Harmony</strong>, open the loop summary and set four bars, four slots, and a key. Open <strong>Roll Settings</strong>, pick a mood or draw your own targets, then press <strong>Roll</strong>.</li>
+          <li>In <strong>Harmony</strong>, open the loop summary and set four bars, four slots, and a key. Open <strong>Roll Settings</strong>, pick a mood or draw your own targets, then press <strong>Roll Chords</strong>.</li>
           <li>Press <strong>Play</strong> if the preview is stopped. Lock a chord you like and draw a new Tension target in another slot. Listen to what changes when you release the edit.</li>
           <li>Open <strong>Feel</strong>, choose a comping pattern, and use <strong>Drag MIDI</strong> or <strong>Save MIDI</strong> to take the performance into your project.</li>
         </ol>
@@ -53,7 +54,7 @@
       <section id="harmony">
         <h2>Harmony</h2>
         <figure class="product">
-          <img src="chordslots-v0.4.1-harmony.png" alt="Harmony with the loop summary, chord cards, colored target lanes, and the Roll and MIDI controls" loading="lazy">
+          <img src="harmony.webp" alt="Harmony with the loop summary, chord cards, colored target lanes, and the Roll and MIDI controls" loading="lazy">
           <figcaption>Use the loop summary to set up the timeline, the chord cards to edit individual slots, and the lanes to shape the loop.</figcaption>
         </figure>
         <h3>Open the loop summary</h3>
@@ -102,7 +103,7 @@
         <h2>Chord Inspector</h2>
         <p>Click a chord in Harmony to open the selected-slot panel. Use <strong>Substitutions</strong> to compare options or <strong>Inspector</strong> to edit the chord directly.</p>
         <figure class="product">
-          <img src="guide-inspect.webp" alt="Chord alternatives below the Harmony timeline, with Tension, Brightness, Match, Audition, and Replace columns" loading="lazy">
+          <img src="inspect.webp" alt="Chord alternatives below the Harmony timeline, with Tension, Brightness, Match, Audition, and Replace columns" loading="lazy">
           <figcaption>The selected slot stays visible above its alternatives.</figcaption>
         </figure>
         <dl class="controls">
@@ -116,6 +117,8 @@
       <section id="import">
         <h2>Bring in a MIDI idea</h2>
         <dl class="controls">
+          <dt>Progression Library</dt><dd>Search factory and saved progressions, audition a preset, and load the one you want. Save a progression to recall it later.</dd>
+          <dt>Import Chords</dt><dd>Choose Import Chords from the MIDI menu or drop a block-chord clip and select Import Chords. Review the suggested chord names and slot starts before applying. Undo restores the previous variation.</dd>
           <dt>Analyze MIDI</dt><dd>Choose a <code>.mid</code> or <code>.midi</code> file to extract target curves from the file and roll a progression to fit them. You can also drop the file directly onto the target lanes.</dd>
           <dt>Harmonize Melody</dt><dd>Choose a MIDI file with pitched notes. ChordSlots picks a track and rolls against the melody. Export the melody by itself when you want to control which part is used. The search favors chords that fit long notes and notes beginning on strong beats.</dd>
           <dt>Melody Fit</dt><dd>Adjust how strongly the imported notes influence Roll. At 0% the melody stays loaded and the search ignores it. Use <strong>Clear Melody</strong> in the import menu to remove it.</dd>
@@ -125,11 +128,12 @@
         <h2>Feel</h2>
         <p>Use Feel after you have a progression. The piano roll and accent lane show the note pattern, timing, and dynamics as you adjust the performance panel. Click a slot in the piano roll to audition it.</p>
         <figure class="product">
-          <img src="chordslots-v0.4.1-feel.png" alt="Feel screen with the piano roll and accent lane beside the comping, bass pattern, and dynamics controls" loading="lazy">
+          <img src="feel.webp" alt="Feel screen with the piano roll and accent lane beside the comping, bass pattern, and dynamics controls" loading="lazy">
           <figcaption>Feel shapes how the chords and bass play across the timeline.</figcaption>
         </figure>
         <dl class="controls">
-          <dt>Comping</dt><dd>Open the browser to choose how the upper chords are played. Try Sustain, quarter- or eighth-note pulses, Offbeat Reggae, Ballad Stabs, Trap Stabs, Triplet Swing, 3-2 Clave, Garage Shuffle, Cinematic Push, the SHLD Pop, Pop 2, Soul, and Hip Hop patterns, or Arp Up and Arp Down. Use the rhythm preview to audition a pattern while playback is stopped.</dd>
+          <dt>Comping</dt><dd>Open the browser to choose how the upper chords are played. Try Sustain, quarter- or eighth-note pulses, Offbeat Reggae, Ballad Stabs, Trap Stabs, Triplet Swing, 3-2 Clave, Garage Shuffle, Cinematic Push, the SHLD Pop, Pop 2, Soul, and Hip Hop patterns, or Arp Up and Arp Down. Use the rhythm preview to audition a pattern while playback is stopped. The browser also includes Backbeat Answer, Broken Sixteenths, and Long-Short.</dd>
+          <dt>Follow Melody Rhythm</dt><dd>Use the onsets from the imported melody as chord hits. The Melody MIDI timing option keeps the original timing or stretches it to fit the loop. Bass continues to use its own pattern.</dd>
           <dt>Bass Pattern</dt><dd><strong>Sustain</strong> holds the bass. <strong>Octave pump</strong> pulses between registers. <strong>Offbeat 8ths</strong> plays on offbeats. <strong>808 legato</strong> uses longer linked notes. <strong>Walking</strong> steps toward the next bass note. Choose the pattern name to apply it or audition it in the browser.</dd>
           <dt>Strum</dt><dd>Spread upper voices by up to about 80 ms. Positive plays low to high, negative plays high to low, and zero plays them together before other timing effects.</dd>
           <dt>Accent</dt><dd>Emphasize the highest chord note and soften the inner voices to pull the top line forward.</dd>
@@ -138,27 +142,27 @@
         </dl>
       </section>
       <section id="variations">
-        <h2>Variations A–D</h2>
-        <p>Use the four buttons in the header to keep independent versions of your progression. Use <strong>Copy…</strong> to duplicate the current variation into another slot, then edit the copy. For example, start with a verse in A and copy it to B before raising the chorus Energy.</p>
+        <h2>Variations</h2>
+        <p>Start with A–D in the header. Use the plus button to copy the current variation into a new one, up to eight total. Use <strong>Copy…</strong> to duplicate the current variation into another slot, then edit the copy. For example, start with a verse in A and copy it to B before raising the chorus Energy.</p>
         <p>With <strong>Follow</strong> on, the editor tracks the playing variation and clicking a letter also requests a playback switch. Turn Follow off to edit another variation while the current one plays. Playback switches use the <strong>Switch Quantize</strong> plugin parameter, which your host may expose. Choose Next Bar, Next Slot, or Immediate. Each variation has its own Undo and Redo history of up to 64 steps.</p>
       </section>
       <section id="song">
         <h2>Song</h2>
         <p>Open <strong>Song</strong> to assemble up to 16 sections from your variations. Each section plays one pass of its chosen variation, so a four-bar variation contributes four bars to the chain.</p>
         <figure class="product">
-          <img src="guide-song.webp" alt="Song workspace with four section cards and a panel prompting you to select a section" loading="lazy">
+          <img src="song.webp" alt="Song workspace with a populated chain of variation cards and section controls" loading="lazy">
           <figcaption>Select a section card to edit its variation and transposition.</figcaption>
         </figure>
         <dl class="controls">
           <dt>Add section</dt><dd>Append a section, select its card, and choose a variation. Reuse a variation in multiple sections to build repeats.</dd>
           <dt>Transpose</dt><dd>Shift the selected section by up to 48 semitones in either direction, subject to the available MIDI pitch range. The shift applies to that section of the arrangement.</dd>
-          <dt>Remove section / Clear chain</dt><dd>Remove the selected section or clear the arrangement. The A–D source variations remain available.</dd>
+          <dt>Remove section / Clear chain</dt><dd>Remove the selected section or clear the arrangement. The source variations remain available.</dd>
           <dt>Song playback</dt><dd>Enable the chain for DAW playback. <strong>Play song</strong> previews the arrangement. Use <strong>Save song MIDI</strong> or <strong>Drag Song</strong> to export it.</dd>
         </dl>
       </section>
       <section id="play">
         <h2>Playback and MIDI In</h2>
-        <p><strong>Play</strong> and <strong>Stop</strong> control the local preview. The sound menu offers <strong>Clean Saw</strong>, <strong>Rhodes EP</strong>, <strong>Felt Piano</strong>, and <strong>Acoustic Piano</strong>. <strong>Vol</strong> sets preview volume. In a DAW, ChordSlots uses the host’s tempo and timeline position. <strong>Options</strong> lets you toggle hover tooltips. In Standalone, it also gives access to audio/MIDI device settings and save, load, or reset for the app state.</p>
+        <p><strong>Play</strong> and <strong>Stop</strong> control the local preview. The sound menu offers <strong>Clean Saw</strong>, <strong>Rhodes EP</strong>, <strong>Felt Piano</strong>, and <strong>Acoustic Piano</strong>. <strong>Vol</strong> sets preview volume. In a DAW, ChordSlots uses the host’s tempo and timeline position. <strong>Options</strong> lets you toggle hover tooltips and select English, Spanish, or French. In Standalone, it also gives access to audio/MIDI device settings and save, load, or reset for the app state.</p>
         <h3>Play slots from a keyboard or pads</h3>
         <dl class="controls">
           <dt>Auto</dt><dd>Plays the loop and gives mapped keys priority while they are held.</dd>
@@ -172,7 +176,8 @@
         <dl class="controls">
           <dt>Save MIDI / Drag MIDI</dt><dd>Write a standard MIDI file or drag the current variation into a MIDI or instrument track. The clip carries generated notes, performance timing, velocity, and chord markers. Choose the sound for those notes in your DAW.</dd>
           <dt>Split Ch 1/2</dt><dd>Send upper chords on MIDI channel 1 and monophonic bass on channel 2. Use the separate chord and bass drag tiles to place the parts on different tracks.</dd>
-          <dt>Save song MIDI / Drag Song</dt><dd>Export the full chain with its transpositions and section markers. Song files use separate chord and bass tracks with either Split setting.</dd>
+          <dt>Save song MIDI / Drag Song</dt><dd>Export the full chain with its transpositions and section markers. Song files use separate chord and bass tracks with either Split setting. Enable <strong>Include melody in MIDI export</strong> to add the leads loaded in the Song sections.</dd>
+          <dt>Arp MIDI</dt><dd>Choose an arpeggio pattern in Feel and use the Arp MIDI control to export that part.</dd>
           <dt>Live routing</dt><dd>In a DAW that exposes the plugin’s MIDI output, set a receiving instrument track to take MIDI from ChordSlots. For Logic, the project also provides a separate AU MIDI FX build that sits before the instrument on the same track. If your host does not expose the output, import the saved MIDI file or drag the clip into the arrangement.</dd>
         </dl>
       </section>

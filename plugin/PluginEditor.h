@@ -4,6 +4,7 @@
 
 #include "PluginProcessor.h"
 #include "ui/LookAndFeel.h"
+#include "ui/Localization.h"
 #include "ui/TimelineView.h"
 #include "ui/LanesView.h"
 #include "ui/MidiDragTile.h"
@@ -41,55 +42,64 @@ private:
     void setupKnob (juce::Slider&, juce::Label&, const juce::String& caption, const juce::String& tooltip);
     void showInputMenu();
     void showOptionsMenu();
+    void selectVariation (int index);
+    void updateVariationControls();
+    void showProgressionLibrary();
     void updateTooltips();
     void showSongView();
     void showKeyActions();
     void saveMidi (ChordSlotsProcessor::MidiExportMode mode);
     void showMidiImportMenu();
-    void importMidi (bool harmonize);
-    void importMidiFile (const juce::File&, bool harmonize);
+    enum class MidiImport { Curves, Melody, Chords };
+    void importMidi (MidiImport);
+    void importMidiFile (const juce::File&, MidiImport);
+    void showChordImport (const juce::File&);
     void updateMidiImportLabel (const cs::Progression&);
     void applyShapeStamp (int stampId);
     bool keyPressed (const juce::KeyPress& key) override;
 
     ChordSlotsProcessor& processor;
+    ui::EditorLocale locale;
     ChordSlotsLookAndFeel lnf;
 
     // Header controls
     juce::ComboBox keyBox, scaleBox, barsBox, meterBox, slotsBox, snapBox;
     juce::Label keyLabel, barsLabel, meterLabel, slotsLabel, snapLabel;
-    juce::TextButton keyActionsButton { "Key Actions" };
-    juce::TextButton inputButton { "MIDI In ▾" };
-    juce::TextButton optionsButton { "Options" };
+    juce::TextButton keyActionsButton { ui::tr ("Key Actions") };
+    juce::TextButton inputButton { ui::tr (u8"MIDI In \u25be") };
+    juce::TextButton optionsButton { ui::tr ("Options") };
     juce::Label fitLabel;
-    juce::TextButton loopSummary, moreOptions { "More options" }, playAfterRoll { "Play after Roll" }, gestures { "Gestures" };
+    juce::TextButton loopSummary, moreOptions { ui::tr ("More options") }, playAfterRoll { ui::tr ("Play after Roll") }, gestures { ui::tr ("Gestures") };
     juce::Label gestureHelp;
     int inspectedSlot = -1;
 
     // Variations
     juce::TextButton varButtons[cs::kNumVariations];
-    juce::TextButton followButton { "Follow" };
-    juce::TextButton copyVarButton { "Copy..." };
+    juce::ComboBox variationBox;
+    juce::TextButton addVariationButton { "+" }, progressionLibraryButton { ui::tr ("Progressions") };
+    juce::Component::SafePointer<juce::DialogWindow> progressionLibraryWindow;
+    juce::TextButton followButton { ui::tr ("Follow") };
+    juce::TextButton copyVarButton { ui::tr ("Copy...") };
 
     // Views
-    juce::TextButton harmonyViewButton { "Harmony" }, grooveViewButton { "Feel" };
+    juce::TextButton harmonyViewButton { ui::tr ("Harmony") }, grooveViewButton { ui::tr ("Feel") };
     bool grooveView = false;
     TimelineView timeline;
-    juce::TextButton midiViewBtn { "Notes" };
+    juce::TextButton midiViewBtn { ui::tr ("Notes") };
     std::unique_ptr<juce::TooltipWindow> tooltips;
     ChordPickerOverlay pickerOverlay;
 
     // Lane Toolbar controls
     juce::ComboBox moodBox, styleBox, voicingBox;
-    juce::TextButton shapeBox { juce::String::fromUTF8 ("Shape Stamps ▾") };
+    juce::TextButton shapeBox { ui::tr (u8"Shape Stamps \u25be") };
     juce::TextButton bassPatternBox;
     juce::Label moodLabel, styleLabel, voicingLabel, bassPatternLabel;
-    juce::TextButton resetCurvesBtn { "Reset" };
+    juce::TextButton resetCurvesBtn { ui::tr ("Reset") };
     juce::TextButton startMelodyButton;
-    juce::TextButton analyzeMidiBtn { "MIDI options" };
-    juce::TextButton melodyAuditionButton { "Hear melody" };
-    juce::TextButton melodyTimingButton { "Original timing" }, midiDetailsButton { "Details" };
-    juce::TextButton autoMelodyKeyButton { "Auto Key & Scale" };
+    juce::TextButton analyzeMidiBtn { ui::tr ("MIDI options") };
+    juce::TextButton melodyAuditionButton { ui::tr ("Hear melody") };
+    juce::TextButton melodyTimingButton { ui::tr ("Original timing") }, midiDetailsButton { ui::tr ("Details") };
+    juce::TextButton autoMelodyKeyButton { ui::tr ("Auto Key & Scale") };
     juce::Label midiFilename, midiKeyDetails, midiTempoDetails;
     bool midiDragOver = false;
     juce::Slider melodyFit;
@@ -98,14 +108,14 @@ private:
     LanesView lanes;
 
     // Footer Panel 1: Harmony Generator
-    juce::TextButton lockRhythm { "Rhythm" }, lockRoots { "Roots" }, lockColors { "Colors" }, lockVoicing { "Voicing" };
+    juce::TextButton lockRhythm { ui::tr ("Rhythm") }, lockRoots { ui::tr ("Roots") }, lockColors { ui::tr ("Colors") }, lockVoicing { ui::tr ("Voicing") };
     juce::Label lockCaption;
     juce::Slider adventure, variety, syncopation, bassMotion;
     juce::ComboBox endingBox;
     juce::Label endingLabel;
     juce::Label adventureLabel, varietyLabel, syncopationLabel, bassMotionLabel;
-    juce::TextButton undoButton { "Undo" }, redoButton { "Redo" }, rollButton { "Roll Chords" };
-    juce::TextButton rollSettingsButton { "Roll settings" };
+    juce::TextButton undoButton { ui::tr ("Undo") }, redoButton { ui::tr ("Redo") }, rollButton { ui::tr ("Roll Chords") };
+    juce::TextButton rollSettingsButton { ui::tr ("Roll settings") };
     struct RollSettingsPanel final : juce::Component
     {
         void paint (juce::Graphics&) override;
@@ -117,24 +127,25 @@ private:
     juce::ComboBox arpDirectionBox, arpRateBox, arpOctavesBox, pulseRateBox;
     juce::Label arpDirectionLabel, arpRateLabel, arpLengthLabel, arpOctavesLabel, pulseRateLabel, compPatternAccentLabel;
     juce::Slider arpLength, compPatternAccent;
-    juce::TextButton arpAuditionButton { "Hear arp" }, arpSaveButton { "Save arp" };
+    juce::TextButton arpAuditionButton { ui::tr ("Hear arp") }, arpSaveButton { ui::tr ("Save arp") };
     void showPerformanceBrowser();
     void showBassPatternBrowser();
     void refreshCompingSelection();
+    void applyCompStyle (cs::CompStyle);
     juce::Slider strum, accent, humanize;
     juce::Label strumLabel, accentLabel, humanizeLabel;
-    juce::TextButton refeelButton { "Roll feel" };
+    juce::TextButton refeelButton { ui::tr ("Roll feel") };
 
     // Footer Panel 3: Output & Export
     juce::ComboBox synthModelBox;
     juce::Label synthModelLabel;
     juce::Slider gate, volume;
     juce::Slider standaloneTempo;
-    juce::TextButton autoMidiTempoButton { "Auto" };
+    juce::TextButton autoMidiTempoButton { ui::tr ("Auto") };
     juce::Label gateLabel, volumeLabel;
-    juce::TextButton playButton { "Play" }, saveButton { "Save MIDI" };
-    juce::TextButton splitMidiButton { "Split Ch 1/2" };
-    juce::TextButton songButton { "Song" };
+    juce::TextButton playButton { ui::tr ("Play") }, saveButton { ui::tr ("Save MIDI") };
+    juce::TextButton splitMidiButton { ui::tr ("Split Ch 1/2") };
+    juce::TextButton songButton { ui::tr ("Song") };
     MidiDragTile dragTile;
     MidiDragTile dragChordsTile;
     MidiDragTile dragBassTile;
@@ -150,6 +161,7 @@ private:
         strumAttachment, accentAttachment, humanizeAttachment;
     juce::AudioProcessorValueTreeState::ButtonAttachment splitMidiAttachment;
     std::unique_ptr<juce::ParameterAttachment> compAttachment, chordRhythmAttachment, pulseRateAttachment, arpDirectionAttachment;
+    std::unique_ptr<juce::ParameterAttachment> followMelodyRhythmAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> arpRateAttachment, arpOctavesAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> arpLengthAttachment, compPatternAccentAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> synthModelAttachment;
@@ -157,7 +169,7 @@ private:
     int keyNamesScale = -1;
     bool refreshing = false;
 
-    juce::Rectangle<int> workspaceTabBounds;
+    juce::Rectangle<int> workspaceTabBounds, stageTitleBounds;
     juce::Rectangle<int> targetCurvesBounds, railBounds, footerBounds, footerSeparator, midiPanelBounds;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordSlotsEditor)

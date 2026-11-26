@@ -1,26 +1,33 @@
 # ChordSlots
 
-**Target driven harmony for producers.** Draw brightness, tension, and energy across a loop. ChordSlots searches for chords and voicings that follow those curves, then sends or exports the result as MIDI.
+**ChordSlots is a free, open-source MIDI chord progression generator and VST3 plugin.** Draw Brightness, Tension, and Energy across a loop, lock the chords you want to keep, and roll another take around them. Export editable MIDI to play with your own instruments.
 
-[Download ChordSlots v0.4.2 for testing](https://github.com/lagosproject/chordslots/releases/tag/v0.4.2) · [Release notes](CHANGELOG.md#042-test-release) · **[Help decide how the chords sound: 45 minute listening survey](https://lagosproject.github.io/chordslots/listening-test.html)**
+[Download v0.4.3 for Windows x64](https://github.com/lagosproject/chordslots/releases/tag/v0.4.3) · [Watch the demo](https://lagosproject.github.io/chordslots/#demo) · [Producer manual](https://lagosproject.github.io/chordslots/manual.html) · [Release notes](CHANGELOG.md#043-test-release)
 
-![ChordSlots Harmony tab with the chord timeline and target curves](docs/chordslots-v0.4.1-harmony.png)
+![ChordSlots Harmony tab with the chord timeline and target curves](docs/harmony.webp)
 
-ChordSlots is a JUCE instrument plugin with an optional CLAP build. Its preview synth can play the result, and its MIDI output can drive another instrument or become a dragged MIDI clip.
+The Windows x64 test release includes a VST3 and a standalone app. In standalone, open ChordSlots and press **Roll**, then **Play**. For the plugin, copy the complete VST3 bundle into your VST3 folder and rescan in your DAW. Drag MIDI into the DAW for editing, or route MIDI live where your host supports it. Other formats are listed under [Build](#build).
+
+## What makes ChordSlots different
+
+A loop can start grounded, build tension, and settle again. Draw that movement across individual chord slots. Lock an opening chord or a layer, then roll the remaining material and keep alternatives in the variation bank. Brightness and Tension guide the harmony, while Energy can change the attack and density without replacing the chord. If you start from a lead, Melody Fit helps pick the chords and Follow Melody Rhythm places the accompaniment hits.
 
 ## What it does
 
 - **Draw a progression by feel.** Edit up to 16 slots over as many as 8 bars. Move or add cuts and set each slot's Brightness, Tension, and Energy targets. Match averages the per-slot scores based on the differences between measured and target Brightness and Tension.
 - **Shape harmony.** Choose key, scale, mood, Chord Transitions, and voicing. Each mood supplies initial target curves. Rolls select chords to match those curves. Adventure controls how far the candidate pool reaches beyond diatonic chords. The sampler accounts for transitions around the loop, while Variety sets its sampling temperature.
-- **Edit and keep good ideas.** Lock a slot or layer before rolling again. Choose chord alternatives, undo and redo edits (up to 64 steps per variation; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y), and keep four independent variations (A–D). Switch immediately, on the next slot, or on the next bar.
-- **Harmonize a melody.** Import a MIDI melody and set Melody Fit to make sustained notes and stronger beats influence chord selection. Set Melody Fit to zero to ignore the imported melody.
+- **Edit and keep good ideas.** Lock a slot or layer before rolling again. Choose chord alternatives, undo and redo edits (up to 64 steps per variation; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y), and keep up to eight independent variations. Switch immediately, on the next slot, or on the next bar.
+- **Harmonize a melody.** Import a MIDI melody and set Melody Fit to make sustained notes and stronger beats influence chord selection. Use **Follow Melody Rhythm** to place chord hits at the imported melody’s onsets. Choose Original timing or Fit to Loop in Melody MIDI. Bass keeps its own pattern.
 - **Give the bass its own part.** In Inspect, use **Invert Up** to raise the lowest chord voice by one octave or **Invert Down** to lower the highest. Use **Change Bass** to set the separate bass note. Set Bass Motion and select Sustain, octave pump, offbeat eighths, 808 legato, or walking patterns. Split output sends the chord on MIDI channel 1 and bass on channel 2.
-- **Arrange a song.** Build a chain of up to 16 entries. Each entry selects a variation and signed semitone transposition. Song playback follows the chain. Drag Song exports it as a MIDI clip with chord and section markers, with chords and bass always on two separate tracks, whatever the Split setting. Drag Chords and Drag Bass export individual parts.
-- **Perform and export.** Use Strum, Accent, Humanize, and Re-Feel to shape timing and velocity. Host playback follows tempo and position. Incoming MIDI can trigger slots with selectable mapping and held-note priority. MIDI export includes the current performance timing.
+- **Arrange a song.** Build a chain of up to 16 entries. Each entry selects a variation and signed semitone transposition. Song playback follows the chain. Drag Song exports it as a MIDI clip with chord and section markers, with chords and bass always on two separate tracks, whatever the Split setting. Enable **Include melody in MIDI export** to add the imported lead. Drag Chords, Drag Bass, and the arpeggio MIDI control export individual parts.
+- **Start from a progression.** Search, preview, and load a factory or saved preset in Progression Library. To bring in your own harmony, drop a block-chord MIDI clip and select **Import Chords**, or open it from the MIDI menu. The preview offers alternate names for ambiguous chords and lets you adjust slot starts before replacing the active variation. Undo restores the previous variation.
+- **Perform and export.** Use Strum, Accent, and Humanize to shape timing and velocity. Roll feel selects a different chord rhythm and previews it when playback is stopped. Host playback follows tempo and position. Incoming MIDI can trigger slots with selectable mapping and held-note priority. MIDI export includes the current performance timing.
 
 Use **Harmony** to shape a progression, then open **Feel** to adjust bass patterns, comping, timing, and dynamics with the MIDI preview in view. Both tabs share variation selection, Undo, synth preview, and MIDI export.
 
-![ChordSlots Feel tab with the MIDI preview and performance controls](docs/chordslots-v0.4.1-feel.png)
+![ChordSlots Feel tab with the MIDI preview and performance controls](docs/feel.webp)
+
+![ChordSlots Song workspace with a chain of transposed variations](docs/song.webp)
 
 ## How the musical model works
 
@@ -100,6 +107,8 @@ For the Logic smoke check, rescan Audio Units, create a software-instrument trac
 
 CTest runs `core`, `performance`, `trigger`, `plugin`, and `eval`. macOS builds also run `midi_fx`, which checks the AU MIDI processor's identity, bus layout, and MIDI output. The plugin suite runs the real processor with simulated host transport and checks MIDI/audio behavior, save/restore, and export. `eval` compares musical metrics with a committed Linux baseline. CI skips that comparison on macOS and Windows.
 
+See the [roadmap pilot](docs/ROADMAP-PILOT.md) for the two-path demo, host checks, and listening tasks for the factory content.
+
 Render a screenshot without opening a DAW.
 
 ```sh
@@ -121,7 +130,7 @@ Debian and Ubuntu builds need the usual compiler, CMake, ALSA, X11, Freetype, an
 ## Verification and limitations
 
 - The final **ChordSlots MIDI FX in Logic** check requires a Mac with Logic. Confirm that an instrument on the same track plays MIDI generated by the MIDI FX.
-- The GitHub Actions CI workflow builds and validates Linux, macOS, and Windows targets. See the release assets for packaged downloads.
+- The GitHub Actions CI configuration covers Linux, macOS, and Windows targets. The v0.4.3 downloadable test package is for Windows x64.
 - CLAP validator and direct MIDI-path checks pass. A DAW smoke test remains to confirm host-level MIDI routing.
 - Use evaluation as a regression guard. Musical preference still needs listening across hosts and projects.
 

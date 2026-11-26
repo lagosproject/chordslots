@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="ChordSlots developer reference for harmonic search, Brightness, Tension, Energy, voicing, and MIDI rendering.">
-  <title>ChordSlots · Developer reference</title>
+  <title>ChordSlots Developer Reference | Harmony Engine and MIDI</title>
+  <link rel="canonical" href="https://lagosproject.github.io/chordslots/developers.html">
   <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -20,7 +21,7 @@
 </header>
 <main id="main">
   <div class="wrap section doc-hero">
-    <p class="eyebrow">Developer reference · 0.4.1</p>
+    <p class="eyebrow">Developer reference · 0.4.3</p>
     <h1>How the engine works</h1>
     <p class="lede">ChordSlots uses a C++17 musical core to search for a loop, assign voices, and render timed MIDI events. JUCE provides the editor, plugin hosting interfaces, and preview playback.</p>
   </div>
@@ -52,7 +53,7 @@
            + 0.3 × (1 − A) × chordDistance)
 sampling weight ∝ exp(−cost / temperature)</code></pre>
         <p>Identical chords have a repeat penalty of 3. Same-root changes cost 0.6, or 0.2 for changes in the bass state. Free uses a constant corpus cost. The search also accounts for bass movement, ending rules, and the change in squared Tension error after adding context. The edge from the final slot to the first closes the loop. Compatible slots in a repeated phrase can share a chord variable. Variable elimination and conditional sampling draw one assignment from the resulting graph, followed by an oscillation correction pass. Variety maps the sampling temperature logarithmically from 0.004 through 0.012 at the midpoint to 0.030.</p>
-        <p><a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Generator.h">Generator.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/RingInference.h">RingInference.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/tools/build_corpus.py">Corpus preparation</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/DATA_LICENSES.md">Data sources and licences</a></p>
+        <p><a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/core/include/chordslots/Generator.h">Generator.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/core/include/chordslots/RingInference.h">RingInference.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/tools/build_corpus.py">Corpus preparation</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/DATA_LICENSES.md">Data sources and licences</a></p>
       </section>
       <section id="brightness">
         <h2>Brightness</h2>
@@ -64,7 +65,7 @@ modal   = norm(meanTonicRelativeFifths, −5, 6)
 register = norm(meanUpperMidiPitch, 48, 84)
 B = norm(0.55 × quality + 0.25 × modal + 0.20 × register,
          0.24, 0.74)</code></pre>
-        <p>The calibration comes from inspecting the engine’s chord tables across scales. The soft-clipping and minor-key quality adjustments are experimental switches with a default weight of zero. <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Metrics.h">Metrics.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Theory.h">Theory.h</a></p>
+        <p>The calibration comes from inspecting the engine’s chord tables across scales. The soft-clipping and minor-key quality adjustments are experimental switches with a default weight of zero. <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/core/include/chordslots/Metrics.h">Metrics.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/core/include/chordslots/Theory.h">Theory.h</a></p>
       </section>
       <section id="tension">
         <h2>Tension</h2>
@@ -82,7 +83,7 @@ staticT = clamp(0.45 × dissonance
         <pre><code>T = clamp(0.86 × staticT
         + 0.09 × clamp(strain / 0.33)
         + 0.05 × clamp(momentum / 0.36))</code></pre>
-        <p>These are symbolic MIDI estimates. The instrument, its spectrum, and the surrounding arrangement can change the tension a listener hears. <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/SpiralTension.h">SpiralTension.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/docs/RESEARCH-BASE.md">Research and audit sources</a></p>
+        <p>These are symbolic MIDI estimates. The instrument, its spectrum, and the surrounding arrangement can change the tension a listener hears. <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/core/include/chordslots/SpiralTension.h">SpiralTension.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/docs/RESEARCH-BASE.md">Research and audit sources</a></p>
       </section>
       <section id="energy">
         <h2>Energy and Match</h2>
@@ -92,19 +93,19 @@ density = norm(noteCount, styleMin, styleMax)
 E = clamp(0.60 × norm(velocity, 45, 120) + 0.40 × density)
 slotMatch = clamp(1 − 2 × sqrt(((B − targetB)² + (T − targetT)²) / 2))
 Match = mean(slotMatch)</code></pre>
-        <p>Match weights every slot equally and uses Brightness and Tension. Energy describes the base voicing, with later timing and velocity changes applied by the performance renderer. <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Generator.h">Generator.h</a></p>
+        <p>Match weights every slot equally and uses Brightness and Tension. Energy describes the base voicing, with later timing and velocity changes applied by the performance renderer. <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/core/include/chordslots/Generator.h">Generator.h</a></p>
       </section>
       <section id="voicing">
         <h2>Voicing and bass</h2>
         <p>Voicing turns a chord symbol into pitches. The Brightness target sets a preferred MIDI center of <code>57 + 14 × targetB</code>. Candidate layouts follow their selected voicing style and enforce constraints on spacing, omitted tones, and close intervals in the low register. With voice leading enabled, the loop optimizer uses dynamic programming over candidate upper voicings to balance local fit against movement between neighbors.</p>
         <p>Bass intervals can be part of the sampled chord state. Bass Motion weighs movement between bass pitches, with additional costs for inversions. The voicer places the selected bass pitch class below the upper voices and can add a sub-octave above 0.85 target Energy if there is room. The chosen bass pattern turns the bass pitch into timed hits, including octave, offbeat, legato, and walking patterns.</p>
-        <p><a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Voicing.h">Voicing.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/BassPatterns.h">BassPatterns.h</a></p>
+        <p><a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/core/include/chordslots/Voicing.h">Voicing.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/core/include/chordslots/BassPatterns.h">BassPatterns.h</a></p>
       </section>
       <section id="playback">
         <h2>Performance and MIDI</h2>
-        <p><code>toPlayData</code> flattens the progression into a playback snapshot. Comping patterns provide grid hits, while Strum offsets individual voices, Accent shapes velocity, and Humanize adds seeded timing and velocity variation. The plugin schedules events against host tempo and position or triggers chords from incoming MIDI. Variation switches can be immediate or quantized to a slot or bar.</p>
-        <p>Split routes chords on MIDI channel 1 and bass on channel 2. Song playback selects and transposes variations per entry, and its MIDI export writes separate chord and bass tracks with chord and section markers. The built-in preview synth can audition the result, and the separate Logic AU MIDI FX emits MIDI for a downstream instrument.</p>
-        <p><a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Performance.h">Performance.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/core/include/chordslots/Trigger.h">Trigger.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.1/plugin/PluginProcessor.cpp">PluginProcessor.cpp</a></p>
+        <p><code>toPlayData</code> flattens the progression into a playback snapshot. Comping patterns provide grid hits or use imported melody onsets when Follow Melody Rhythm is enabled, while Strum offsets individual voices, Accent shapes velocity, and Humanize adds seeded timing and velocity variation. The plugin schedules events against host tempo and position or triggers chords from incoming MIDI. Variation switches can be immediate or quantized to a slot or bar.</p>
+        <p>Split routes chords on MIDI channel 1 and bass on channel 2. Song playback selects and transposes variations per entry, and its MIDI export writes separate chord and bass tracks with chord and section markers, plus an optional source-melody track. The arpeggiator has its own MIDI export path. The built-in preview synth can audition the result, and the separate Logic AU MIDI FX emits MIDI for a downstream instrument.</p>
+        <p><a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/core/include/chordslots/Performance.h">Performance.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/core/include/chordslots/Trigger.h">Trigger.h</a> · <a href="https://github.com/lagosproject/chordslots/blob/v0.4.3/plugin/PluginProcessor.cpp">PluginProcessor.cpp</a></p>
       </section>
       <section id="build">
         <h2>Build and validate</h2>
@@ -113,7 +114,7 @@ Match = mean(slotMatch)</code></pre>
 cmake --build build --config Release --parallel
 ctest --test-dir build -C Release --output-on-failure</code></pre>
         <p>Use <code>-DCHORDSLOTS_BUILD_PLUGIN=OFF</code> for the core and CLI, or enable CLAP with <code>-DCHORDSLOTS_BUILD_CLAP=ON</code>. The CLI can print metric tables and generated loops. CTest covers the core, performance, triggers, and processor paths. The project’s audits and listening survey evaluate how the engineered metrics relate to listener judgments.</p>
-        <p><a href="https://github.com/lagosproject/chordslots/tree/v0.4.1#build">Build instructions</a> · <a href="https://github.com/lagosproject/chordslots/tree/v0.4.1/docs/audits">Audit reports</a></p>
+        <p><a href="https://github.com/lagosproject/chordslots/tree/v0.4.3#build">Build instructions</a> · <a href="https://github.com/lagosproject/chordslots/tree/v0.4.3/docs/audits">Audit reports</a></p>
       </section>
       <div class="survey"><div><h2>Compare the engine by ear</h2><p>Hear the paired examples used to evaluate proposed changes.</p></div><a class="button primary" href="listening-test.html">Take the listening survey</a></div>
     </article>

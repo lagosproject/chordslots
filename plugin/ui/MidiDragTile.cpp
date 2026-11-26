@@ -12,35 +12,38 @@ MidiDragTile::MidiDragTile (ChordSlotsProcessor& p,
 void MidiDragTile::paint (juce::Graphics& g)
 {
     const auto r = getLocalBounds().toFloat().reduced (0.75f);
-    g.setColour (isMouseOver() ? ui::panelHi.brighter (0.1f) : ui::panelHi);
+    const auto accent = findColour (ui::workspaceAccentColourId);
+    g.setColour (isMouseOver() ? ui::panelHi.interpolatedWith (accent, 0.13f) : ui::panelHi);
     g.fillRoundedRectangle (r, 5.0f);
     g.setColour (ui::outline);
     const float dashes[] = { 4.0f, 3.0f };
     juce::Path outlinePath, dashed;
     outlinePath.addRoundedRectangle (r, 5.0f);
     juce::PathStrokeType (1.2f).createDashedStroke (dashed, outlinePath, dashes, 2);
-    g.setColour (ui::textDim);
+    g.setColour (isMouseOver() ? accent : ui::textDim);
     g.fillPath (dashed);
 
     if (r.getHeight() >= 36.0f)
     {
         // Tiny piano-roll glyph
         const auto icon = r.withSizeKeepingCentre (26.0f, 16.0f).translated (0.0f, -8.0f);
-        g.setColour (ui::accent.brighter (0.2f));
+        g.setColour (accent.brighter (0.2f));
         g.fillRoundedRectangle (icon.getX(), icon.getY(), 12.0f, 3.5f, 1.5f);
         g.fillRoundedRectangle (icon.getX() + 7.0f, icon.getY() + 6.0f, 14.0f, 3.5f, 1.5f);
         g.fillRoundedRectangle (icon.getX() + 14.0f, icon.getY() + 12.0f, 12.0f, 3.5f, 1.5f);
 
         g.setColour (ui::text);
         g.setFont (ui::font (12.0f, true));
-        g.drawText (tileLabel, r.withTrimmedTop (r.getHeight() * 0.52f).toNearestInt(), juce::Justification::centred, false);
+        g.drawFittedText (tileLabel, r.withTrimmedTop (r.getHeight() * 0.52f).toNearestInt(), juce::Justification::centred, 1, 0.75f);
     }
     else
     {
         // Compact height for dual stacked tiles (Chords / Bass)
-        g.setColour (exportMode == ChordSlotsProcessor::MidiExportMode::BassOnly ? ui::accent.brighter (0.35f) : ui::accent);
-        const float tagY = r.getCentreY() - 3.5f;
-        g.fillRoundedRectangle (r.getX() + 6.0f, tagY, 7.0f, 7.0f, 1.5f);
+        g.setColour (exportMode == ChordSlotsProcessor::MidiExportMode::BassOnly ? accent.brighter (0.35f) : accent);
+        const float tagY = r.getCentreY() - 4.5f;
+        for (int step = 0; step < 3; ++step)
+            g.fillRoundedRectangle (r.getX() + 4.0f + 2.0f * (float) step,
+                                    tagY + 3.0f * (float) step, 6.0f, 2.0f, 1.0f);
 
         g.setColour (ui::text);
         g.setFont (ui::font (11.0f, true));
@@ -53,7 +56,7 @@ void MidiDragTile::mouseDrag (const juce::MouseEvent& e)
 {
     if (dragging || e.getDistanceFromDragStart() < 6)
         return;
-    const juce::File file = processor.writeTempMidiFile (exportMode);
+    const juce::File file = processor.writeTempMidiFile (exportMode, includeSongMelody);
     if (! file.existsAsFile())
         return;
     dragging = true;

@@ -34,6 +34,7 @@ void drawPadlock (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c, b
 //==============================================================================
 ChordSlotsLookAndFeel::ChordSlotsLookAndFeel()
 {
+    setWorkspaceAccent (ui::harmonyAccent);
     setColour (juce::ResizableWindow::backgroundColourId, ui::background);
     setColour (juce::ComboBox::backgroundColourId, ui::panel);
     setColour (juce::ComboBox::outlineColourId, ui::outline);
@@ -42,18 +43,23 @@ ChordSlotsLookAndFeel::ChordSlotsLookAndFeel()
     setColour (juce::PopupMenu::backgroundColourId, ui::panel);
     setColour (juce::PopupMenu::textColourId, ui::text);
     setColour (juce::PopupMenu::headerTextColourId, ui::textDim);
-    setColour (juce::PopupMenu::highlightedBackgroundColourId, ui::accent.withAlpha (0.35f));
     setColour (juce::PopupMenu::highlightedTextColourId, ui::text);
     setColour (juce::Label::textColourId, ui::text);
     setColour (juce::TextButton::textColourOffId, ui::text);
     setColour (juce::TextButton::textColourOnId, juce::Colours::white);
     setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxTextColourId, ui::text);
-    setColour (juce::Slider::textBoxHighlightColourId, ui::accent.withAlpha (0.3f));
     setColour (juce::TextEditor::backgroundColourId, ui::panelHi);
     setColour (juce::TextEditor::textColourId, ui::text);
-    setColour (juce::TextEditor::outlineColourId, ui::accent);
-    setColour (juce::TextEditor::focusedOutlineColourId, ui::accent.brighter (0.2f));
+}
+
+void ChordSlotsLookAndFeel::setWorkspaceAccent (juce::Colour colour)
+{
+    setColour (ui::workspaceAccentColourId, colour);
+    setColour (juce::PopupMenu::highlightedBackgroundColourId, ui::panel.interpolatedWith (colour, 0.35f));
+    setColour (juce::Slider::textBoxHighlightColourId, colour.withAlpha (0.3f));
+    setColour (juce::TextEditor::outlineColourId, ui::outline);
+    setColour (juce::TextEditor::focusedOutlineColourId, colour);
 }
 
 void ChordSlotsLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)
@@ -89,23 +95,29 @@ void ChordSlotsLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Butto
     }
 
     const auto r = b.getLocalBounds().toFloat().reduced (0.75f);
+    const auto accent = b.findColour (ui::workspaceAccentColourId);
     const bool primary = b.getProperties().getWithDefault ("primary", false);
-    juce::Colour fill = primary ? ui::accent
-                                : ui::panelHi.interpolatedWith (ui::accent, b.getToggleState() ? 0.34f : 0.0f);
+    const bool quiet = b.getProperties().getWithDefault ("quiet", false);
+    const bool selected = b.getToggleState();
+    auto fill = primary ? accent : selected ? ui::panel.interpolatedWith (accent, 0.17f) : ui::panelHi;
     if (down)
-        fill = fill.darker (0.25f);
+        fill = fill.darker (0.17f);
     else if (over)
-        fill = fill.brighter (0.12f);
-    else if (! primary && ! b.getToggleState() && ! b.hasKeyboardFocus (false)
-             && (bool) b.getProperties().getWithDefault ("safeNote", false))
+        fill = fill.brighter (0.09f);
+    else if (! primary && ! selected && (bool) b.getProperties().getWithDefault ("safeNote", false))
         fill = fill.interpolatedWith (ui::energy, 0.16f);
-    if (! b.isEnabled())
-        fill = fill.withAlpha (0.35f);
 
-    g.setColour (fill);
-    g.fillRoundedRectangle (r, 5.0f);
-    g.setColour (b.getToggleState() || primary ? ui::accent : ui::outline.withAlpha (0.6f));
-    g.drawRoundedRectangle (r, 5.0f, 1.0f);
+    const float alpha = b.isEnabled() ? 1.0f : 0.38f;
+    if (! quiet || selected || over || down)
+    {
+        g.setColour (fill.withAlpha (alpha));
+        g.fillRoundedRectangle (r, 6.0f);
+        if (! primary)
+        {
+            g.setColour ((selected || over ? accent : ui::outline).withAlpha (alpha));
+            g.drawRoundedRectangle (r, 6.0f, 1.0f);
+        }
+    }
     if (b.hasKeyboardFocus (false))
     {
         g.setColour (ui::text);
@@ -126,38 +138,46 @@ void ChordSlotsLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton&
         return;
     }
 
+    const bool primary = button.getProperties().getWithDefault ("primary", false);
+    const auto ink = (primary ? ui::background : button.findColour (button.getToggleState()
+                                      ? juce::TextButton::textColourOnId : juce::TextButton::textColourOffId))
+                         .withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f);
     const auto icon = static_cast<ui::ButtonIcon> ((int) button.getProperties().getWithDefault ("icon", 0));
+    const auto font = getTextButtonFont (button, button.getHeight());
     if (icon == ui::ButtonIcon::None)
     {
-        juce::LookAndFeel_V4::drawButtonText (g, button, over, down);
+        if (! primary)
+        {
+            juce::LookAndFeel_V4::drawButtonText (g, button, over, down);
+            return;
+        }
+        g.setColour (ink);
+        g.setFont (font);
+        g.drawFittedText (button.getButtonText(), button.getLocalBounds().reduced (4, 0),
+                          juce::Justification::centred, 1, 0.7f);
         return;
     }
 
-    const auto font = getTextButtonFont (button, button.getHeight());
-    const int textWidth = juce::GlyphArrangement::getStringWidthInt (font, button.getButtonText());
     constexpr int iconWidth = 12;
     constexpr int gap = 5;
-    const bool iconOnly = icon == ui::ButtonIcon::Undo || icon == ui::ButtonIcon::Redo || icon == ui::ButtonIcon::Settings;
-    const int contentWidth = iconOnly ? iconWidth : iconWidth + gap + textWidth;
-
-    if (contentWidth + 8 > button.getWidth())
-    {
-        juce::LookAndFeel_V4::drawButtonText (g, button, over, down);
-        return;
-    }
+    const bool iconOnly = icon == ui::ButtonIcon::Undo || icon == ui::ButtonIcon::Redo
+                       || icon == ui::ButtonIcon::Settings || icon == ui::ButtonIcon::Close
+                       || icon == ui::ButtonIcon::Audition;
+    const int textWidth = juce::GlyphArrangement::getStringWidthInt (font, button.getButtonText());
+    const int contentWidth = iconOnly ? iconWidth : juce::jmin (button.getWidth() - 6, iconWidth + gap + textWidth);
 
     auto content = button.getLocalBounds().withSizeKeepingCentre (contentWidth, button.getHeight());
     const auto box = content.removeFromLeft (iconWidth).withSizeKeepingCentre (iconWidth, iconWidth);
     const auto position = juce::AffineTransform::translation ((float) box.getX(), (float) box.getY());
-    g.setColour (button.findColour (button.getToggleState() ? juce::TextButton::textColourOnId
-                                                           : juce::TextButton::textColourOffId)
-                     .withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f));
+    g.setColour (ink);
 
     juce::Path shape;
     switch (icon)
     {
+        case ui::ButtonIcon::Audition:
         case ui::ButtonIcon::Transport:
-            if (button.getToggleState())
+            if (icon == ui::ButtonIcon::Transport
+                && (button.getToggleState() || (bool) button.getProperties().getWithDefault ("auditionPlaying", false)))
                 shape.addRoundedRectangle (2.0f, 2.0f, 8.0f, 8.0f, 1.0f);
             else
                 shape.addTriangle (2.5f, 1.0f, 10.5f, 6.0f, 2.5f, 11.0f);
@@ -200,11 +220,36 @@ void ChordSlotsLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton&
                 shape.lineTo (x, y + 1.6f);
             }
             break;
+        case ui::ButtonIcon::Close:
+            shape.startNewSubPath (2.5f, 2.5f);
+            shape.lineTo (9.5f, 9.5f);
+            shape.startNewSubPath (9.5f, 2.5f);
+            shape.lineTo (2.5f, 9.5f);
+            break;
+        case ui::ButtonIcon::Import:
+            shape.startNewSubPath (1.0f, 8.0f);
+            shape.lineTo (1.0f, 11.0f);
+            shape.lineTo (11.0f, 11.0f);
+            shape.lineTo (11.0f, 8.0f);
+            shape.startNewSubPath (6.0f, 8.0f);
+            shape.lineTo (6.0f, 1.0f);
+            shape.startNewSubPath (3.5f, 3.5f);
+            shape.lineTo (6.0f, 1.0f);
+            shape.lineTo (8.5f, 3.5f);
+            break;
+        case ui::ButtonIcon::Lock:
+            ui::drawPadlock (g, box.toFloat().reduced (1.0f, 0.0f), ink, button.getToggleState());
+            break;
+        case ui::ButtonIcon::Dice:
+            shape.addRoundedRectangle (0.85f, 0.85f, 10.3f, 10.3f, 2.3f);
+            for (float pip : { 3.6f, 6.0f, 8.4f })
+                g.fillEllipse ((float) box.getX() + pip - 0.8f, (float) box.getY() + pip - 0.8f, 1.6f, 1.6f);
+            break;
         case ui::ButtonIcon::None:
             break;
     }
 
-    if (icon == ui::ButtonIcon::Transport)
+    if (icon == ui::ButtonIcon::Transport || icon == ui::ButtonIcon::Audition)
         g.fillPath (shape, position);
     else
         g.strokePath (shape, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
@@ -213,14 +258,14 @@ void ChordSlotsLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton&
     if (! iconOnly)
     {
         g.setFont (font);
-        g.drawText (button.getButtonText(), content.withTrimmedLeft (gap), juce::Justification::centred, false);
+        g.drawFittedText (button.getButtonText(), content.withTrimmedLeft (gap), juce::Justification::centred, 1, 0.68f);
     }
 }
 
 juce::Font ChordSlotsLookAndFeel::getTextButtonFont (juce::TextButton& b, int h)
 {
     const bool primary = b.getProperties().getWithDefault ("primary", false);
-    return ui::font (primary ? juce::jmin (20.0f, (float) h * 0.45f) : 13.0f, primary);
+    return ui::font (primary ? juce::jmin (16.0f, (float) h * 0.45f) : 13.0f, primary);
 }
 
 void ChordSlotsLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos,
@@ -238,7 +283,9 @@ void ChordSlotsLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, i
 
     g.setColour (ui::outline.brighter (0.22f));
     g.strokePath (track, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    g.setColour (s.findColour (juce::Slider::rotarySliderFillColourId));
+    const auto accent = s.findColour (ui::workspaceAccentColourId);
+    g.setColour (s.isMouseOverOrDragging() || s.hasKeyboardFocus (true)
+                   ? accent : ui::outline.interpolatedWith (accent, 0.67f));
     g.strokePath (value, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     const float inner = radius - thickness - 3.0f;
@@ -269,10 +316,11 @@ void ChordSlotsLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, i
     const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
     const float origin = bipolar ? start + width * static_cast<float> (slider.valueToProportionOfLength (0.0)) : start;
     const bool enabled = slider.isEnabled();
+    const auto accent = slider.findColour (ui::workspaceAccentColourId);
 
     g.setColour (ui::outline.brighter (0.22f).withAlpha (enabled ? 1.0f : 0.5f));
     g.fillRoundedRectangle (start, centreY - 2.0f, width, 4.0f, 2.0f);
-    g.setColour (ui::accent.withAlpha (enabled ? 0.85f : 0.3f));
+    g.setColour (accent.withAlpha (enabled ? 0.85f : 0.3f));
     g.fillRoundedRectangle (juce::jmin (origin, pos), centreY - 2.0f, std::abs (pos - origin), 4.0f, 2.0f);
 
     if (bipolar)
@@ -282,7 +330,7 @@ void ChordSlotsLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, i
     }
 
     const juce::Rectangle<float> thumb (pos - 4.5f, centreY - 4.5f, 9.0f, 9.0f);
-    g.setColour (enabled ? ui::accent : ui::textMuted);
+    g.setColour (enabled ? accent : ui::textMuted);
     g.fillEllipse (thumb);
     if (enabled && (slider.isMouseOverOrDragging() || slider.hasKeyboardFocus (true)))
     {
@@ -294,9 +342,10 @@ void ChordSlotsLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, i
 void ChordSlotsLookAndFeel::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox& box)
 {
     const auto r = juce::Rectangle<int> (w, h).toFloat().reduced (0.75f);
-    g.setColour (ui::panel);
+    g.setColour (ui::background);
     g.fillRoundedRectangle (r, 5.0f);
-    g.setColour (box.hasKeyboardFocus (true) ? ui::accent : ui::outline);
+    g.setColour (box.hasKeyboardFocus (true) || box.isMouseOver (true)
+                   ? box.findColour (ui::workspaceAccentColourId) : ui::outline);
     g.drawRoundedRectangle (r, 5.0f, 1.0f);
 
     juce::Path arrow;

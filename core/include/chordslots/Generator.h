@@ -2039,6 +2039,7 @@ struct PlaySlot
     int numArpNotes = 0;
     ArpNote arpNotes[kPerfMaxNotes * kMaxArpOctaves] {};
     bool sustainBassUnderComping = false;
+    int melodyHitStart = -1;
     CompHit hits[kMaxCompHitsPerSlot] = {};
     int numBassHits = 0;
     BassHit bassHits[kMaxBassHitsPerSlot] = {};
@@ -2052,10 +2053,10 @@ struct PlaySlot
         return hits[index];
     }
 
-    ArpNote arpNoteFor (const CompHit& hit) const noexcept
+    ArpNote arpNoteFor (int ordinal) const noexcept
     {
-        return hit.arpVoice != 0 && numArpNotes > 0
-            ? arpNotes[arpSequenceIndex (hit.arpVoice, numArpNotes, arpBounce)] : ArpNote {};
+        return ordinal != 0 && numArpNotes > 0
+            ? arpNotes[arpSequenceIndex (ordinal, numArpNotes, arpBounce)] : ArpNote {};
     }
 };
 
@@ -2066,11 +2067,25 @@ static_assert (std::is_trivially_copyable<PlaySlot>::value, "PlaySlot must be tr
 
 struct PlayData
 {
+    struct MelodyHit { double start = 0, end = 0; };
+    struct TimedHit { double stepOffset, durationSteps; float velScale; int arpVoice; };
     int lengthSteps = 4 * kStepsPerBar;
     int stepsPerBar = kStepsPerBar;
     BassStyle bassStyle = BassStyle::Sustain;
     int numSlots = 0;
     PlaySlot slots[kMaxSlots];
+    std::array<MelodyHit, kMaxMelodyNotes> melodyHits {};
+
+    TimedHit hitAt (const PlaySlot& slot, int index) const noexcept
+    {
+        if (slot.melodyHitStart >= 0)
+        {
+            const auto& hit = melodyHits[(size_t) (slot.melodyHitStart + index)];
+            return { hit.start - slot.start, hit.end - hit.start, 1.0f, 0 };
+        }
+        const auto hit = slot.hitAt (index);
+        return { (double) hit.stepOffset, (double) hit.durationSteps, hit.velScale, hit.arpVoice };
+    }
 
     int slotAt (double step) const noexcept
     {
@@ -2092,6 +2107,32 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
     d.bassStyle = p.bassStyle;
     const double msPerBeat = 60000.0 / std::max (20.0, bpm);
     const double msPerStep = msPerBeat / (double) kStepsPerQuarter;
+    const bool followMelody = perf.compStyle == CompStyle::FollowMelody && ! p.melody.empty();
+    int melodyHitCount = 0;
+    if (followMelody)
+    {
+        const double length = p.melodyLengthSteps();
+        for (const auto& note : p.melody)
+        {
+            const double start = note.start * length;
+            const double end = std::min<double> (d.lengthSteps, note.end * length);
+            if (start >= 0.0 && start < end && melodyHitCount < (int) d.melodyHits.size())
+                d.melodyHits[(size_t) melodyHitCount++] = { start, end };
+        }
+        auto begin = d.melodyHits.begin();
+        std::sort (begin, begin + melodyHitCount, [] (const auto& a, const auto& b) { return a.start < b.start; });
+        int distinct = 0;
+        for (int i = 0; i < melodyHitCount; ++i)
+        {
+            const auto hit = d.melodyHits[(size_t) i];
+            if (distinct > 0 && d.melodyHits[(size_t) (distinct - 1)].start == hit.start)
+                d.melodyHits[(size_t) (distinct - 1)].end = std::max (d.melodyHits[(size_t) (distinct - 1)].end, hit.end);
+            else
+                d.melodyHits[(size_t) distinct++] = hit;
+        }
+        melodyHitCount = distinct;
+    }
+    int nextMelodyHit = 0;
 
     for (int i = 0; i < p.numSlots; ++i)
     {
@@ -2113,7 +2154,19 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
             o.numBassHits = getBassHits (p.bassStyle, pb, nextBass, o.end - o.start, o.bassHits, kMaxBassHitsPerSlot);
         }
 
-        if (isArpeggio (perf.compStyle))
+        if (followMelody)
+        {
+            o.melodyHitStart = nextMelodyHit;
+            while (nextMelodyHit < melodyHitCount && d.melodyHits[(size_t) nextMelodyHit].start < o.end)
+            {
+                auto& hit = d.melodyHits[(size_t) nextMelodyHit++];
+                hit.end = std::min<double> (hit.end, o.end);
+                if (nextMelodyHit < melodyHitCount)
+                    hit.end = std::min (hit.end, d.melodyHits[(size_t) nextMelodyHit].start);
+            }
+            o.numHits = nextMelodyHit - o.melodyHitStart;
+        }
+        else if (isArpeggio (perf.compStyle))
         {
             o.arpRate = std::max (1, perf.arpRateSteps);
             o.arpDuration = arpDurationSteps (o.arpRate, perf.arpLength);
@@ -2130,11 +2183,14 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
         }
         else
         {
-            o.numHits = getCompHits (perf.compStyle, o.end - o.start, o.hits, kMaxCompHitsPerSlot,
+            const auto style = perf.compStyle == CompStyle::FollowMelody ? CompStyle::Sustain : perf.compStyle;
+            o.numHits = getCompHits (style, o.end - o.start, o.hits, kMaxCompHitsPerSlot,
                                      p.timeSigNum, p.timeSigDen, o.start);
-            shapeCompHits (o.hits, o.numHits, perf);
+            if (style != CompStyle::Sustain)
+                shapeCompHits (o.hits, o.numHits, perf);
         }
-        o.sustainBassUnderComping = isArpeggio (perf.compStyle) || (o.numHits > 1 && ! isShldRhythm (perf.compStyle));
+        o.sustainBassUnderComping = followMelody || isArpeggio (perf.compStyle)
+            || (o.numHits > 1 && ! isShldRhythm (perf.compStyle));
 
         PerfInput in;
         in.n = std::min (s.voicing.n, kPerfMaxNotes);

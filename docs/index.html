@@ -3,8 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Draw brightness, tension, and energy across a loop, then turn it into editable MIDI with ChordSlots.">
-  <title>ChordSlots · Harmony for music producers</title>
+  <meta name="description" content="ChordSlots is a free MIDI chord progression generator and Windows VST3 plugin. Draw harmony curves, lock chords, harmonize melodies, and export editable MIDI.">
+  <title>ChordSlots | Free MIDI Chord Progression Generator &amp; VST3</title>
+  <link rel="canonical" href="https://lagosproject.github.io/chordslots/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="ChordSlots">
+  <meta property="og:title" content="ChordSlots | Free MIDI Chord Progression Generator &amp; VST3">
+  <meta property="og:description" content="Draw harmony curves, lock the chords you like, and export editable MIDI.">
+  <meta property="og:url" content="https://lagosproject.github.io/chordslots/">
+  <meta property="og:image" content="https://lagosproject.github.io/chordslots/harmony.webp">
+  <meta property="og:image:alt" content="ChordSlots Harmony timeline with chord slots and three target curves">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"SoftwareApplication","name":"ChordSlots","url":"https://lagosproject.github.io/chordslots/","applicationCategory":"MultimediaApplication","operatingSystem":"Windows x64","softwareVersion":"0.4.3","description":"Open-source MIDI chord progression generator with VST3 and standalone downloads.","downloadUrl":"https://github.com/lagosproject/chordslots/releases/tag/v0.4.3","offers":{"@type":"Offer","price":0,"priceCurrency":"USD"}}
+  </script>
   <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -21,36 +33,45 @@
 <main id="main">
   <section class="hero wrap">
     <div>
-      <p class="eyebrow">Harmony to MIDI</p>
-      <h1>Draw the feel.<br><em>Find the chords.</em></h1>
-      <p class="lede">Give your loop a shape with Brightness, Tension, and Energy. ChordSlots searches for a progression, voices it, and gives you editable MIDI to play with your own instruments.</p>
+      <p class="eyebrow">Free and open source</p>
+      <h1>Draw your <em>chord progression.</em></h1>
+      <p class="lede">ChordSlots is a MIDI chord progression generator for Windows VST3 and standalone. Draw how the harmony should change, lock what works, and roll another take around it.</p>
       <div class="actions">
-        <a class="button primary" href="https://github.com/lagosproject/chordslots/releases/tag/v0.4.2">Get ChordSlots</a>
-        <a class="button secondary" href="manual.html">Read the producer manual</a>
+        <a class="button primary" href="https://github.com/lagosproject/chordslots/releases/tag/v0.4.3">Download v0.4.3 for Windows</a>
+        <a class="button secondary" href="#demo">Watch the demo</a>
       </div>
     </div>
     <figure class="product">
-      <img src="chordslots-v0.4.1-harmony.png" alt="ChordSlots Harmony workspace with a chord timeline and the Brightness, Tension, and Energy lanes" fetchpriority="high">
-      <figcaption>Harmony workspace · ChordSlots 0.4.1</figcaption>
+      <img src="harmony.webp" width="1440" height="900" alt="ChordSlots Harmony workspace with a chord timeline and the Brightness, Tension, and Energy lanes" fetchpriority="high">
+      <figcaption>Harmony with a populated progression and editable curves</figcaption>
     </figure>
+  </section>
+  <section class="wrap section" aria-labelledby="different">
+    <h2 id="different">What makes ChordSlots different?</h2>
+    <div class="tiles">
+      <article class="tile bright"><h3>Shape the whole loop</h3><p>Build tension into the last two bars, brighten a chorus, or soften one chord’s attack. Each slot has its own targets, so the changes happen where you draw them.</p></article>
+      <article class="tile tension"><h3>Keep the chords you like</h3><p>Lock the opening chord or a layer, then roll alternatives around it. Keep up to eight variations so you can return to a take you liked.</p></article>
+      <article class="tile energy"><h3>Give a lead harmony and rhythm</h3><p>Melody Fit uses important notes to guide chord choice. Follow Melody Rhythm uses the lead’s onsets for chord hits while the bass keeps its own pattern.</p></article>
+    </div>
   </section>
   <section class="band" aria-labelledby="demo">
     <div class="wrap section demo">
       <div>
-        <h2 id="demo">Hear what a new roll changes</h2>
-        <p>Listen to a four-bar loop before and after raising Tension in the last two bars. The first two chords stay locked. <strong>29 seconds with sound.</strong></p>
+        <h2 id="demo">Hear two ways to build a progression</h2>
+        <p>Hear a locked opening with two different endings, then compare sustained and melody-following accompaniment. The screenshots show where to shape each take and export it. <strong>37 seconds with sound.</strong></p>
         <details>
-          <summary>Video transcript</summary>
+          <summary>Demo transcript and audio description</summary>
           <ol>
-            <li>Play the first roll on acoustic piano. The chords are C5, G5, F5, and Dsus4.</li>
-            <li>Lock C5 and G5, then raise the pink Tension targets in bars 3 and 4.</li>
-            <li>Roll again and listen. The ending changes from F5 and Dsus4 to Gsus2 and Bm.</li>
-            <li>Use Save MIDI to export a file, or drag the MIDI clip into your DAW.</li>
+            <li>Hear a four-bar loop with a flat Tension target. The first two chords are locked in both takes.</li>
+            <li>Raise the last two Tension targets and roll again. Listen to the changed ending.</li>
+            <li>Import a syncopated lead and use Melody Fit to guide the harmony. First hear the chords held across each slot.</li>
+            <li>Enable Follow Melody Rhythm. The same harmony now strikes with the lead’s onsets.</li>
+            <li>Arrange variations in Song, transpose sections, and export the arrangement as MIDI.</li>
           </ol>
         </details>
       </div>
-      <video controls playsinline preload="none" width="1280" height="936"
-        poster="chordslots-demo-poster.webp" aria-label="ChordSlots before-and-after harmony demo">
+      <video controls playsinline preload="none" width="1200" height="810"
+        poster="chordslots-demo-poster.webp" aria-label="ChordSlots tension and melody rhythm audio comparisons">
         <source src="chordslots-demo.mp4" type="video/mp4">
         <a href="chordslots-demo.mp4">Download the demo video</a>
       </video>
@@ -71,19 +92,34 @@
     <h2>From first roll to your DAW</h2>
     <div class="workflow">
       <ol class="steps">
-        <li><h3>Set the shape in Harmony</h3><p>Pick a key, scale, and mood to start. Move the chord cuts and edit the targets across up to 16 slots and 8 bars. Press Roll and audition the loop with the built-in preview.</p></li>
-        <li><h3>Keep the parts you like</h3><p>Lock a slot or layer before rolling again. Use Inspect to audition alternatives, invert the upper chord voices, or choose a separate bass note. Store different ideas in variations A–D.</p></li>
-        <li><h3>Give it a groove in Feel</h3><p>Try a comping or bass pattern, then adjust Strum, Accent, and Humanize. Watch the chord and bass notes in the piano roll as you edit.</p></li>
-        <li><h3>Arrange and take the MIDI</h3><p>Chain up to 16 sections in Song, choosing a variation and transposition for each. Drag out chord, bass, or song MIDI. If your host supports MIDI routing from the plugin, you can use it to drive another instrument live.</p></li>
+        <li><h3>Set the shape in Harmony</h3><p>Pick a key, scale, and mood, audition a Progression Library preset, or import your own block-chord MIDI and review the proposed slot boundaries. Move the chord cuts and edit the targets across up to 16 slots and 8 bars. Press Roll and audition the loop with the built-in preview.</p></li>
+        <li><h3>Keep the parts you like</h3><p>Lock a slot or layer before rolling again. Use Inspect to audition alternatives, invert the upper chord voices, or choose a separate bass note. Store different ideas in the variation bank.</p></li>
+        <li><h3>Give it a groove in Feel</h3><p>Try a comping, bass, or arpeggio pattern, then adjust Strum, Accent, and Humanize. Watch the chord and bass notes in the piano roll as you edit.</p></li>
+        <li><h3>Arrange and take the MIDI</h3><p>Chain up to 16 sections in Song, choosing a variation and transposition for each. Drag out chord, bass, arpeggio, or Song MIDI. Song exports separate chord and bass tracks and can include the imported lead. If your host supports MIDI routing from the plugin, you can use it to drive another instrument live.</p></li>
       </ol>
       <figure class="product feel">
-        <img src="chordslots-v0.4.1-feel.png" alt="Feel workspace with a piano roll, accent lane, and timing and bass controls" loading="lazy">
-        <figcaption>Feel workspace · ChordSlots 0.4.1</figcaption>
+        <img src="feel.webp" width="1440" height="900" alt="Feel workspace with a piano roll, accent lane, and timing and bass controls" loading="lazy">
+        <figcaption>Feel with the piano roll and performance controls</figcaption>
       </figure>
+    </div>
+    <div class="gallery">
+      <figure class="product"><a href="inspect.webp"><img src="inspect.webp" width="1042" height="679" alt="Chord inspector with playable chord alternatives and voicing controls" loading="lazy"></a><figcaption>Inspect and audition an alternative before swapping a chord</figcaption></figure>
+      <figure class="product"><a href="song.webp"><img src="song.webp" width="1040" height="650" alt="Song workspace with a chain of variations and per-section transposition" loading="lazy"></a><figcaption>Arrange variations and export the Song as MIDI</figcaption></figure>
     </div>
     <div class="tiles extras">
       <article class="tile"><h3>Start with a melody</h3><p>Import a MIDI melody and turn up Melody Fit. Long notes and notes on strong beats have more influence over which chords are chosen.</p></article>
       <article class="tile"><h3>Read the Match score</h3><p>Match summarizes how close the measured Brightness and Tension are to your targets. Use it to see where the roll followed your sketch, then choose the version that sounds right in your track.</p></article>
+    </div>
+  </section>
+  <section class="band" aria-labelledby="download">
+    <div class="wrap section">
+      <h2 id="download">Download ChordSlots</h2>
+      <p class="intro">The v0.4.3 Windows x64 test package includes a VST3 bundle and a standalone app. The standalone app can preview and export MIDI without a DAW.</p>
+      <p>For other platforms and formats, see the source build instructions. Live MIDI routing depends on the host.</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/lagosproject/chordslots/releases/tag/v0.4.3">Get the Windows test release</a>
+        <a class="button secondary" href="https://github.com/lagosproject/chordslots#build">Build from source</a>
+      </div>
     </div>
   </section>
   <section class="wrap section" aria-labelledby="survey">

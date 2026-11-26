@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+#include "Localization.h"
 #include "PluginProcessor.h"
 #include "LookAndFeel.h"
 
@@ -50,10 +51,11 @@ private:
         void mouseDrag (const juce::MouseEvent&) override;
         juce::String getTooltip() override;
         void cancelGesture();
+        void setMatchReasons (bool curve, bool melody);
         std::function<void(bool)> onAudition;
         std::function<void()> onRelease;
-        juce::TextButton replace { "Replace" };
-        juce::TextButton audition { "Audition" };
+        juce::TextButton replace { ui::tr ("Replace") };
+        juce::TextButton audition { ui::tr ("Audition") };
 
     private:
         void paintButton (juce::Graphics&, bool, bool) override;
@@ -66,14 +68,15 @@ private:
         int melodyPercent;
         juce::String clashes;
         bool showMelody;
+        bool bestCurve = false, bestMelody = false;
         bool pressed = false;
         bool fired = false;
         bool cancelled = false;
     };
 
-    juce::TextButton closeBtn { "Close" }, substitutionsTab { "Substitutions" }, inspectorTab { "Inspector" };
-    juce::TextButton chordLock { "Chord lock" };
-    juce::TextButton rollRoot { "Roll Root" }, rollColor { "Roll Color" }, changeBass { "Change Bass" };
+    juce::TextButton closeBtn { ui::tr ("Close") }, substitutionsTab { ui::tr ("Substitutions") }, inspectorTab { ui::tr ("Inspector") };
+    juce::TextButton chordLock { ui::tr ("Chord lock") };
+    juce::TextButton rollRoot { ui::tr ("Roll Root") }, rollColor { ui::tr ("Roll Color") }, changeBass { ui::tr ("Change Bass") };
     juce::Label lockScope;
     juce::ComboBox qualityBox;
     int contextVariation = -1;
@@ -88,7 +91,7 @@ private:
     // 12 Chromatic Roots
     std::array<std::unique_ptr<juce::TextButton>, 12> rootButtons;
 
-    juce::TextButton invertUpBtn { "Invert Up" }, invertDownBtn { "Invert Down" };
+    juce::TextButton invertUpBtn { ui::tr ("Invert Up") }, invertDownBtn { ui::tr ("Invert Down") };
     std::vector<std::unique_ptr<juce::TextButton>> bassButtons;
 
     // Smart candidate substitutions

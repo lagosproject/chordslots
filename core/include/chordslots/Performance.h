@@ -43,7 +43,11 @@ enum class CompStyle : int
     ShldHipHop2,
     ArpUp,
     ArpDown,
-    ArpUpDown
+    ArpUpDown,
+    BackbeatAnswer,
+    LongShort,
+    BrokenSixteenths,
+    FollowMelody
 };
 
 inline constexpr const char* kCompStyleNames[] {
@@ -52,7 +56,8 @@ inline constexpr const char* kCompStyleNames[] {
 };
 inline constexpr int kNumCompStyles = sizeof (kCompStyleNames) / sizeof (kCompStyleNames[0]);
 inline constexpr const char* kExtraCompStyleNames[] {
-    "SHLD Pop", "SHLD Pop 2", "SHLD Soul", "SHLD Hip Hop", "Arp Up", "Arp Down", "Arp Up & Down"
+    "SHLD Pop", "SHLD Pop 2", "SHLD Soul", "SHLD Hip Hop", "Arp Up", "Arp Down", "Arp Up & Down",
+    "Backbeat Answer", "Long-Short", "Broken Sixteenths"
 };
 inline constexpr int kNumExtraCompStyles = sizeof (kExtraCompStyleNames) / sizeof (kExtraCompStyleNames[0]);
 
@@ -79,11 +84,13 @@ inline constexpr bool hasCompHitLength (CompStyle style) noexcept
 inline constexpr bool hasCompPatternAccents (CompStyle style) noexcept
 {
     return hasCompHitLength (style) && ! isShldRhythm (style)
-        && style != CompStyle::PulseQuarter && style != CompStyle::OffbeatReggae;
+        && style != CompStyle::PulseQuarter && style != CompStyle::OffbeatReggae && style != CompStyle::FollowMelody;
 }
 
 inline constexpr const char* compStyleName (int index) noexcept
 {
+    if (index == static_cast<int> (CompStyle::FollowMelody))
+        return "Follow Melody Rhythm";
     return index < kNumCompStyles ? kCompStyleNames[index] : kExtraCompStyleNames[index - kNumCompStyles];
 }
 
@@ -242,6 +249,11 @@ inline int getCompHits (CompStyle style, int slotSteps, CompHit* outHits, int ma
         constexpr CompHit shuffle[] { { 0, 10, 1.0f }, { 16, 5, 0.72f }, { 40, 6, 0.89f } };
         constexpr CompHit push[] { { 0, 30, 1.0f }, { 36, 17, 0.83f }, { 66, 24, 0.95f },
                                    { 90, 6, 0.73f } };
+        constexpr CompHit backbeat[] { { 0, 8, 0.75f }, { 24, 10, 1.0f }, { 60, 5, 0.66f },
+                                       { 72, 12, 0.96f } };
+        constexpr CompHit longShort[] { { 0, 40, 1.0f }, { 48, 9, 0.80f }, { 84, 8, 0.68f } };
+        constexpr CompHit broken[] { { 0, 4, 1.0f }, { 6, 4, 0.65f }, { 30, 5, 0.89f },
+                                     { 54, 4, 0.75f }, { 66, 4, 0.95f }, { 90, 4, 0.72f } };
 
         const auto repeat = [&] (const auto& pattern, int cycleSteps)
         {
@@ -254,6 +266,9 @@ inline int getCompHits (CompStyle style, int slotSteps, CompHit* outHits, int ma
         if (style == CompStyle::Clave32) repeat (clave, 192);
         if (style == CompStyle::GarageShuffle) repeat (shuffle, 48);
         if (style == CompStyle::CinematicPush) repeat (push, 96);
+        if (style == CompStyle::BackbeatAnswer) repeat (backbeat, 96);
+        if (style == CompStyle::LongShort) repeat (longShort, 96);
+        if (style == CompStyle::BrokenSixteenths) repeat (broken, 96);
     }
 
     if (count == 0)

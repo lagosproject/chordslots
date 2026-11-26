@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3 Test Release
+
+- Browse, audition, load, and save progressions in the Progression Library. Import block-chord MIDI with editable slot boundaries and chord candidates.
+- Harmonize an imported lead and optionally use its onsets to drive chord comping. Export arpeggio MIDI separately and optionally include imported melodies in Song MIDI exports.
+- Added factory progression and Feel choices, expanded the variation bank to eight, revised Harmony and Song editing, and added English, Spanish, and French interface options.
+- Refreshed the producer site, manual, screenshots, and demo. The Windows x64 package includes VST3 and Standalone.
+
 ## 0.4.2 Test Release
 
 - Refined the Harmony, Feel, and Song workspaces and the chord editing workflow.

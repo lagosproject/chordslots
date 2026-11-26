@@ -11,13 +11,14 @@
 namespace cs
 {
 
+constexpr int kMaxVariations = 8;
 constexpr int kMaxSongEntries = 16;
 constexpr int kMinSongTranspose = -48;
 constexpr int kMaxSongTranspose = 48;
 
 struct SongEntry
 {
-    int variation = 0; // A-D, zero based
+    int variation = 0; // Zero-based variation index
     int transpose = 0; // semitones
 };
 
@@ -29,19 +30,19 @@ struct Song
 
 static_assert (std::is_trivially_copyable<Song>::value, "Song must be safe to copy as a bounded value");
 
-inline SongEntry sanitizeSongEntry (SongEntry entry) noexcept
+inline SongEntry sanitizeSongEntry (SongEntry entry, int variationCount = 4) noexcept
 {
-    entry.variation = std::clamp (entry.variation, 0, 3);
+    entry.variation = std::clamp (entry.variation, 0, std::clamp (variationCount, 1, kMaxVariations) - 1);
     entry.transpose = std::clamp (entry.transpose, kMinSongTranspose, kMaxSongTranspose);
     return entry;
 }
 
-inline Song sanitizeSong (const Song& source) noexcept
+inline Song sanitizeSong (const Song& source, int variationCount = 4) noexcept
 {
     Song result;
     result.numEntries = std::clamp (source.numEntries, 0, kMaxSongEntries);
     for (int i = 0; i < result.numEntries; ++i)
-        result.entries[i] = sanitizeSongEntry (source.entries[i]);
+        result.entries[i] = sanitizeSongEntry (source.entries[i], variationCount);
     return result;
 }
 
@@ -49,7 +50,7 @@ inline int songLengthSteps (const Song& source, const PlayData* variations, int 
 {
     if (variations == nullptr || variationCount <= 0)
         return 0;
-    const Song song = sanitizeSong (source);
+    const Song song = sanitizeSong (source, variationCount);
     int length = 0;
     for (int i = 0; i < song.numEntries; ++i)
     {
@@ -78,7 +79,7 @@ inline SongPosition songPositionAt (const Song& source, const PlayData* variatio
     SongPosition pos;
     if (variations == nullptr || variationCount <= 0 || absoluteStep < 0)
         return pos;
-    const Song song = sanitizeSong (source);
+    const Song song = sanitizeSong (source, variationCount);
     long long base = 0;
     for (int i = 0; i < song.numEntries; ++i)
     {

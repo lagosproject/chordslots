@@ -19,8 +19,9 @@ enum class SwitchQuantize : int
 
 struct PlayBank
 {
-    PlayData variations[kNumVariations];
+    PlayData variations[kMaxVariations];
     Song song;
+    int variationCount = kNumVariations;
 };
 
 } // namespace cs

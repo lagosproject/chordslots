@@ -154,6 +154,17 @@ static void handlesDegenerateInput()
     CHECK (applyPerformance (over, p, 1000.0, 0, 0).n == kPerfMaxNotes);
 }
 
+static void originalFeelPatterns()
+{
+    const auto backbeat = getCompHits (CompStyle::BackbeatAnswer, 96);
+    const auto longShort = getCompHits (CompStyle::LongShort, 96);
+    const auto broken = getCompHits (CompStyle::BrokenSixteenths, 100);
+    CHECK (backbeat.size() == 4 && backbeat[1].stepOffset == 24 && backbeat[1].velScale == 1.0f);
+    CHECK (longShort.size() == 3 && longShort[0].durationSteps == 40 && longShort[2].stepOffset == 84);
+    CHECK (broken.size() == 7 && broken[1].stepOffset == 6 && broken[6].stepOffset == 96);
+    CHECK (broken.back().durationSteps == 4 && broken[1].velScale < broken[0].velScale);
+}
+
 int main()
 {
     zeroParamsIsIdentity();
@@ -167,6 +178,7 @@ int main()
     velocitiesStayInRange();
     accentLeavesBassAlone();
     handlesDegenerateInput();
+    originalFeelPatterns();
     std::puts ("performance tests passed");
     return 0;
 }

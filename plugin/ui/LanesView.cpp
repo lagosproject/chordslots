@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "Localization.h"
 #include "LanesView.h"
 
 namespace
@@ -79,7 +80,7 @@ void LanesView::paint (juce::Graphics& g)
         const bool showingReadout = (readoutLane == lane && readoutSlot >= 0 && readoutSlot < prog.numSlots)
             || (readoutLane < 0 && selectedSlot >= 0 && selectedSlot < prog.numSlots);
         if (! showingReadout)
-            g.drawText (laneNames[lane], lb.reduced (8.0f, 4.0f).toNearestInt(), juce::Justification::topLeft, false);
+            g.drawFittedText (ui::tr (laneNames[lane]), lb.reduced (8.0f, 4.0f).toNearestInt(), juce::Justification::topLeft, 1, 0.65f);
     }
 
     // Value readout for the slot under the pointer: target and measured chord value, in percent.

@@ -6,12 +6,12 @@
 
 namespace ui
 {
-const juce::Colour background { 0xff15171b };
-const juce::Colour panel      { 0xff1d2026 };
-const juce::Colour panelHi    { 0xff2a2e37 };
-const juce::Colour outline    { 0xff343944 };
-const juce::Colour text       { 0xffe9ebf2 };
-const juce::Colour textDim    { 0xffa0a7bc }; // higher contrast textDim (was 0xff8d93a6)
+const juce::Colour background { 0xff12161f };
+const juce::Colour panel      { 0xff1c202a };
+const juce::Colour panelHi    { 0xff252a36 };
+const juce::Colour outline    { 0xff333949 };
+const juce::Colour text       { 0xfff1f2f8 };
+const juce::Colour textDim    { 0xffa8b1c5 }; // higher contrast textDim (was 0xff8d93a6)
 const juce::Colour textMuted  { 0xff70778c };
 const juce::Colour accent     { 0xff7aa2ff };
 const juce::Colour harmonyAccent { 0xff9bb5ff };
@@ -21,7 +21,9 @@ const juce::Colour brightness { 0xffe6b562 };
 const juce::Colour tension    { 0xffee9bb0 };
 const juce::Colour energy     { 0xff7fd3c4 };
 
-enum class ButtonIcon { None, Transport, Save, Undo, Redo, Settings };
+constexpr int workspaceAccentColourId = 0x2340000;
+
+enum class ButtonIcon { None, Transport, Save, Undo, Redo, Settings, Close, Audition, Import, Lock, Dice };
 
 juce::Font font (float height, bool bold = false);
 /** Slot colour: deep blue for dark chords, warm gold for bright ones. */
@@ -34,6 +36,7 @@ class ChordSlotsLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
     ChordSlotsLookAndFeel();
+    void setWorkspaceAccent (juce::Colour);
 
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool, bool) override;
     void drawButtonText (juce::Graphics&, juce::TextButton&, bool, bool) override;

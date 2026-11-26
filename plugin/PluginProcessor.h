@@ -45,6 +45,8 @@ public:
 
     cs::Progression getProgression() const;
     cs::Progression getProgression (int variationIndex) const;
+    static juce::ValueTree serializeProgression (const cs::Progression&);
+    static bool deserializeProgression (const juce::ValueTree&, cs::Progression&);
 
     int getEditVariation() const noexcept { return editVariation.load(); }
     void setEditVariation (int index);
@@ -56,6 +58,8 @@ public:
     void setFollowPlayback (bool follow) noexcept;
 
     void copyVariation (int src, int dst);
+    int getVariationCount() const noexcept { return variationCount.load(); }
+    int addVariation();
     void setMeter (int num, int den);
 
     int getHostTimeSigNum() const noexcept { return hostTimeSigNum.load(); }
@@ -118,15 +122,22 @@ public:
         ArpOnly = 4
     };
 
-    juce::MidiFile createMidiFile (MidiExportMode mode = MidiExportMode::Master) const;
-    juce::MidiFile createSongMidiFile() const;
+    juce::MidiFile createMidiFile (MidiExportMode mode = MidiExportMode::Master, bool includeSongMelody = false) const;
+    juce::MidiFile createSongMidiFile (bool includeMelody = false) const;
     /** Writes the progression to a temp .mid (for drag and drop). */
-    juce::File writeTempMidiFile (MidiExportMode mode = MidiExportMode::Master) const;
+    juce::File writeTempMidiFile (MidiExportMode mode = MidiExportMode::Master, bool includeSongMelody = false) const;
     juce::String describeProgression() const;
 
     /** Extracts Brightness, Tension, and Energy curves from a dropped MIDI file. */
     bool loadMidiToCurves (const juce::File& file);
     bool harmonizeMidi (const juce::File& file);
+    struct ChordImport
+    {
+        cs::Progression progression;
+        std::array<std::vector<cs::Chord>, cs::kMaxSlots> choices;
+        bool adjustsTiming = false;
+    };
+    static std::optional<ChordImport> analyzeChordMidi (const juce::File& file);
     void setAutoMelodyKey (bool enabled);
     void setSynthModel (PreviewSoundModel model);
     bool isSplitMidi() const noexcept;
@@ -190,22 +201,23 @@ private:
     //==============================================================================
     // Model (guarded by modelLock)
     juce::CriticalSection modelLock;
-    std::array<cs::Progression, cs::kNumVariations> variations;
+    std::array<cs::Progression, cs::kMaxVariations> variations;
     cs::Song song;
     std::atomic<bool> songEnabled { false };
     cs::Rng rng;
-    std::array<std::vector<cs::Progression>, cs::kNumVariations> histories;
-    std::array<std::vector<cs::Progression>, cs::kNumVariations> redoStacks;
+    std::array<std::vector<cs::Progression>, cs::kMaxVariations> histories;
+    std::array<std::vector<cs::Progression>, cs::kMaxVariations> redoStacks;
     std::atomic<int> editVariation { 0 };
     std::atomic<bool> followPlayback { false };
 
     // Hand-over to the audio thread
     mutable juce::SpinLock playLock;
-    cs::PlayBank pendingPlayBank;
+    std::unique_ptr<cs::PlayBank> pendingPlayBank = std::make_unique<cs::PlayBank>();
+    std::unique_ptr<cs::PlayBank> buildingPlayBank = std::make_unique<cs::PlayBank>();
     std::atomic<bool> playDirty { false };
 
     // Audio-thread state
-    cs::PlayBank playBank;
+    std::unique_ptr<cs::PlayBank> playBank = std::make_unique<cs::PlayBank>();
     int activePlayingVariation = 0;
     PreviewSynth synth;
     double sampleRate = 44100.0;
@@ -256,6 +268,8 @@ private:
     // Packed MIDI variation request: (previous APVTS selection << 2) | target.
     // The previous value lets message-thread service discard a keyswitch made
     // stale by newer host/user automation.
+    std::atomic<int> variationCount { cs::kNumVariations };
+    std::atomic<int> extraPlayingVariation { -1 };
     std::atomic<int> pendingMidiVariation { -1 };
     std::atomic<double> uiStep { -1.0 };
     std::atomic<double> lastBpm { 120.0 };
@@ -319,6 +333,7 @@ private:
     std::atomic<float>* quantizeSwitchParam = nullptr;
     std::atomic<float>* compStyleParam = nullptr;
     std::atomic<float>* chordRhythmParam = nullptr;
+    std::atomic<float>* followMelodyRhythmParam = nullptr;
     std::atomic<float>* arpRateParam = nullptr;
     std::atomic<float>* arpLengthParam = nullptr;
     std::atomic<float>* pulseRateParam = nullptr;

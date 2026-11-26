@@ -18,10 +18,12 @@ public:
     void mouseExit (const juce::MouseEvent&) override { repaint(); }
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override { dragging = false; }
+    void setIncludeSongMelody (bool include) noexcept { includeSongMelody = include; }
 
 private:
     ChordSlotsProcessor& processor;
     ChordSlotsProcessor::MidiExportMode exportMode;
     juce::String tileLabel;
     bool dragging = false;
+    bool includeSongMelody = false;
 };
