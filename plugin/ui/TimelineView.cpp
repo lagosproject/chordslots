@@ -122,6 +122,15 @@ void TimelineView::updateMidiNotes()
                 midiNotes.push_back ({ event->message.getTimeStamp() * scale,
                                        event->noteOffObject->message.getTimeStamp() * scale,
                                        event->message.getNoteNumber(), event->message.getVelocity(), track == 1 });
+
+    const auto melodyLength = prog.melodyLengthSteps();
+    for (const auto& note : prog.melody)
+    {
+        const double start = note.start * melodyLength;
+        const double end = std::min<double> (prog.lengthSteps(), note.end * melodyLength);
+        if (start < end)
+            midiNotes.push_back ({ start, end, note.pitch, note.velocity, false, true });
+    }
 }
 
 void TimelineView::paintMidi (juce::Graphics& g)
@@ -137,6 +146,8 @@ void TimelineView::paintMidi (juce::Graphics& g)
         g.drawText ("Accent", accents.withWidth ((float) timelineLeft()).toNearestInt(), juce::Justification::centred);
         for (const auto& note : midiNotes)
         {
+            if (note.melody)
+                continue;
             const float height = 38.0f * (float) note.velocity / 127.0f;
             g.setColour ((note.bass ? ui::energy : ui::accent).withAlpha (0.75f));
             g.fillRect (xForStep (note.start), accents.getBottom() - height - 3.0f, 2.0f, height);
@@ -222,7 +233,7 @@ void TimelineView::paintMidi (juce::Graphics& g)
     for (const auto& note : midiNotes)
     {
         const float x = xForStep (note.start);
-        const auto colour = (note.bass ? ui::energy : ui::brightness)
+        const auto colour = (note.melody ? ui::text : note.bass ? ui::energy : ui::brightness)
             .withAlpha (0.4f + 0.6f * note.velocity / 127.0f);
         const float height = rowH * 0.86f;
         const juce::Rectangle<float> block (x, yForNote (note.pitch) + (rowH - height) * 0.5f,

@@ -8,6 +8,7 @@ namespace
 
 constexpr int kMidiChannelChords = 1;
 constexpr int kMidiChannelBass   = 2;
+constexpr int kMidiChannelMelody = 3;
 constexpr int kTicksPerQuarter = 480;
 constexpr int kTicksPerStep = kTicksPerQuarter / cs::kStepsPerQuarter;
 
@@ -23,6 +24,73 @@ bool isMelodyNote (const juce::MidiMessageSequence::MidiEventHolder& event)
         && event.noteOffObject != nullptr
         && event.message.getTimeStamp() >= 0.0
         && event.noteOffObject->message.getTimeStamp() > event.message.getTimeStamp();
+}
+
+std::pair<int, int> detectMelodyKey (const juce::MidiFile& midi, const std::vector<cs::MelodyNote>& notes)
+{
+    juce::MidiMessageSequence signatures;
+    midi.findAllKeySigEvents (signatures);
+    for (const auto* event : signatures)
+    {
+        const auto& message = event->message;
+        if (message.getMetaEventLength() != 2 || message.getMetaEventData()[1] > 1)
+            continue;
+        const int accidentals = message.getKeySignatureNumberOfSharpsOrFlats();
+        if (accidentals >= -7 && accidentals <= 7)
+        {
+            const bool major = message.isKeySignatureMajorKey();
+            return { cs::mod12 (7 * accidentals + (major ? 0 : 9)), major ? 0 : 1 };
+        }
+    }
+
+    std::array<double, 12> durations {};
+    double total = 0.0;
+    const cs::MelodyNote* last = &notes.front();
+    for (const auto& note : notes)
+    {
+        const double duration = note.end - note.start;
+        durations[(size_t) cs::mod12 (note.pitch)] += duration;
+        total += duration;
+        if (note.start > last->start)
+            last = &note;
+    }
+    if (std::count_if (durations.begin(), durations.end(), [] (double d) { return d > 0.0; }) < 3)
+        return { -1, -1 };
+
+    std::pair<int, int> key { -1, -1 };
+    double best = -1.0e6, runnerUp = -1.0e6;
+    for (int scale = 0; scale < 2; ++scale)
+    {
+        const auto mask = cs::scaleMask (scale);
+        for (int tonic = 0; tonic < 12; ++tonic)
+        {
+            double score = cs::mod12 (last->pitch) == tonic ? 0.15 : 0.0;
+            for (int interval = 0; interval < 12; ++interval)
+            {
+                double weight = (mask & (1u << interval)) != 0 ? 1.0 : -1.0;
+                if (interval == 0) weight = 2.5;
+                if (interval == 7 || interval == (scale == 0 ? 4 : 3)) weight = 1.7;
+                score += weight * durations[(size_t) cs::mod12 (tonic + interval)] / total;
+            }
+            if (score > best)
+            {
+                runnerUp = best;
+                best = score;
+                key = { tonic, scale };
+            }
+            else
+                runnerUp = std::max (runnerUp, score);
+        }
+    }
+    return best - runnerUp >= 0.04 ? key : std::pair<int, int> { -1, -1 };
+}
+
+void harmonizeExistingSlots (cs::Progression& p, cs::Rng& rng)
+{
+    if (p.autoMelodyKey && p.melodySourceTonic >= 0)
+        cs::setTonalContext (p, p.melodySourceTonic, p.melodySourceScale);
+    const juce::ScopedValueSetter<bool> keepCuts (p.locks.rhythm, true);
+    cs::roll (p, rng);
 }
 
 double gatedDurationTicks (int steps, float gate)
@@ -55,6 +123,7 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
     t.setProperty ("ending", (int) p.ending, nullptr);
     t.setProperty ("variety", p.variety, nullptr);
     t.setProperty ("melodyFit", p.melodyFit, nullptr);
+    t.setProperty ("autoMelodyKey", p.autoMelodyKey, nullptr);
     t.setProperty ("syncopation", p.syncopation, nullptr);
     t.setProperty ("bassMotion", p.bassMotion, nullptr);
     t.setProperty ("bassPattern", (int) p.bassStyle, nullptr);
@@ -92,12 +161,19 @@ juce::ValueTree progressionToTree (const cs::Progression& p)
     if (! p.melody.empty())
     {
         juce::ValueTree melody ("Melody");
+        melody.setProperty ("filename", juce::String::fromUTF8 (p.melodyFilename.c_str()), nullptr);
+        melody.setProperty ("sourceSteps", p.melodySourceSteps, nullptr);
+        melody.setProperty ("sourceBpm", p.melodySourceBpm, nullptr);
+        melody.setProperty ("sourceTonic", p.melodySourceTonic, nullptr);
+        melody.setProperty ("sourceScale", p.melodySourceScale, nullptr);
+        melody.setProperty ("fitToLoop", p.fitMelodyToLoop, nullptr);
         for (const auto& note : p.melody)
         {
             juce::ValueTree item ("Note");
             item.setProperty ("start", note.start, nullptr);
             item.setProperty ("end", note.end, nullptr);
             item.setProperty ("pitch", note.pitch, nullptr);
+            item.setProperty ("velocity", note.velocity, nullptr);
             melody.appendChild (item, nullptr);
         }
         t.appendChild (melody, nullptr);
@@ -157,15 +233,32 @@ bool progressionFromTree (const juce::ValueTree& t, cs::Progression& p, int stat
     const float melodyFit = (float) t.getProperty ("melodyFit", p.melodyFit);
     if (std::isfinite (melodyFit))
         p.melodyFit = cs::clamp01 (melodyFit);
-    for (const auto item : t.getChildWithName ("Melody"))
+    p.autoMelodyKey = (bool) t.getProperty ("autoMelodyKey", false);
+    const auto melody = t.getChildWithName ("Melody");
+    p.melodyFilename = melody.getProperty ("filename").toString().substring (0, 512).toStdString();
+    const double sourceSteps = (double) melody.getProperty ("sourceSteps", 0.0);
+    if (std::isfinite (sourceSteps) && sourceSteps > 0.0)
+        p.melodySourceSteps = sourceSteps;
+    const double sourceBpm = (double) melody.getProperty ("sourceBpm", 0.0);
+    if (sourceBpm >= 20.0 && sourceBpm <= 999.0)
+        p.melodySourceBpm = sourceBpm;
+    const int sourceTonic = (int) melody.getProperty ("sourceTonic", -1);
+    const int sourceScale = (int) melody.getProperty ("sourceScale", -1);
+    if (sourceTonic >= 0 && sourceTonic < 12 && (sourceScale == 0 || sourceScale == 1))
+    {
+        p.melodySourceTonic = sourceTonic;
+        p.melodySourceScale = sourceScale;
+    }
+    p.fitMelodyToLoop = (bool) melody.getProperty ("fitToLoop", false);
+    for (const auto item : melody)
     {
         if (p.melody.size() == cs::kMaxMelodyNotes)
             break;
-        const float start = (float) item.getProperty ("start", -1.0f);
-        const float end = (float) item.getProperty ("end", -1.0f);
+        const double start = (double) item.getProperty ("start", -1.0);
+        const double end = (double) item.getProperty ("end", -1.0);
         const int pitch = (int) item.getProperty ("pitch", -1);
         if (item.hasType ("Note") && start >= 0.0f && end <= 1.0f && end > start && pitch >= 0 && pitch <= 127)
-            p.melody.push_back ({ start, end, pitch });
+            p.melody.push_back ({ start, end, pitch, juce::jlimit (1, 127, (int) item.getProperty ("velocity", 90)) });
     }
     p.syncopation = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("syncopation", 0.3f));
     p.bassMotion = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("bassMotion", 0.0f));
@@ -268,6 +361,25 @@ juce::AudioProcessorValueTreeState::ParameterLayout ChordSlotsProcessor::createL
         chordRhythms, 0, juce::AudioParameterChoiceAttributes().withAutomatable (false)));
     layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "synthModel", 1 }, "Synth Model",
                                                              juce::StringArray { "Clean Saw", "Rhodes EP", "Felt Piano", "Acoustic Piano" }, 0));
+    juce::StringArray arpRates;
+    for (const auto* rate : cs::kArpRateNames)
+        arpRates.add (rate);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "arpRate", 1 }, "Arp Rate", arpRates, 2));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "arpLength", 1 }, "Arp Note Length",
+        juce::NormalisableRange<float> (10.0f, 100.0f, 1.0f), 83.0f));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "arpOctaves", 1 }, "Arp Octave Range",
+        juce::StringArray { "1 octave", "2 octaves", "3 octaves" }, 0));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "compHitLength", 1 }, "Comping Hit Length",
+        juce::NormalisableRange<float> (25.0f, 100.0f, 1.0f), 100.0f));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { "compPatternAccent", 1 }, "Comping Pattern Accent",
+        juce::NormalisableRange<float> (0.0f, 150.0f, 1.0f), 100.0f));
+    juce::StringArray pulseRates { "Saved rate" };
+    pulseRates.addArray (arpRates);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "pulseRate", 1 }, "Pulse Rate", pulseRates, 0));
+    juce::StringArray directions { "Saved direction" };
+    for (const auto* direction : cs::kArpDirectionNames)
+        directions.add (direction);
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "arpDirection", 1 }, "Arp Direction", directions, 0));
     return layout;
 }
 
@@ -295,6 +407,13 @@ ChordSlotsProcessor::ChordSlotsProcessor()
     quantizeSwitchParam = apvts.getRawParameterValue ("quantizeSwitch");
     compStyleParam = apvts.getRawParameterValue ("compStyle");
     chordRhythmParam = apvts.getRawParameterValue ("chordRhythm");
+    arpRateParam = apvts.getRawParameterValue ("arpRate");
+    arpLengthParam = apvts.getRawParameterValue ("arpLength");
+    pulseRateParam = apvts.getRawParameterValue ("pulseRate");
+    arpOctavesParam = apvts.getRawParameterValue ("arpOctaves");
+    arpDirectionParam = apvts.getRawParameterValue ("arpDirection");
+    compHitLengthParam = apvts.getRawParameterValue ("compHitLength");
+    compPatternAccentParam = apvts.getRawParameterValue ("compPatternAccent");
     synthModelParam = apvts.getRawParameterValue ("synthModel");
 
     apvts.addParameterListener ("gate", this);
@@ -305,6 +424,13 @@ ChordSlotsProcessor::ChordSlotsProcessor()
     apvts.addParameterListener ("splitMidi", this);
     apvts.addParameterListener ("compStyle", this);
     apvts.addParameterListener ("chordRhythm", this);
+    apvts.addParameterListener ("arpRate", this);
+    apvts.addParameterListener ("arpLength", this);
+    apvts.addParameterListener ("pulseRate", this);
+    apvts.addParameterListener ("arpOctaves", this);
+    apvts.addParameterListener ("arpDirection", this);
+    apvts.addParameterListener ("compHitLength", this);
+    apvts.addParameterListener ("compPatternAccent", this);
     apvts.addParameterListener ("synthModel", this);
 
     variations[0] = cs::makeDefaultProgression (rng);
@@ -327,6 +453,13 @@ ChordSlotsProcessor::~ChordSlotsProcessor()
     apvts.removeParameterListener ("splitMidi", this);
     apvts.removeParameterListener ("compStyle", this);
     apvts.removeParameterListener ("chordRhythm", this);
+    apvts.removeParameterListener ("arpRate", this);
+    apvts.removeParameterListener ("arpLength", this);
+    apvts.removeParameterListener ("pulseRate", this);
+    apvts.removeParameterListener ("arpOctaves", this);
+    apvts.removeParameterListener ("arpDirection", this);
+    apvts.removeParameterListener ("compHitLength", this);
+    apvts.removeParameterListener ("compPatternAccent", this);
     apvts.removeParameterListener ("synthModel", this);
 }
 
@@ -380,6 +513,27 @@ cs::PerformanceParams ChordSlotsProcessor::getPerformanceParams() const noexcept
     const int rhythm = chordRhythmParam != nullptr ? juce::roundToInt (chordRhythmParam->load()) : 0;
     if (rhythm > 0 && rhythm <= cs::kNumExtraCompStyles)
         p.compStyle = static_cast<cs::CompStyle> (cs::kNumCompStyles + rhythm - 1);
+    const int direction = arpDirectionParam != nullptr ? juce::roundToInt (arpDirectionParam->load()) : 0;
+    if (direction > 0 && direction <= (int) std::size (cs::kArpDirectionNames))
+        p.arpDirection = static_cast<cs::CompStyle> ((int) cs::CompStyle::ArpUp + direction - 1);
+    else if (cs::isArpeggio (p.compStyle))
+        p.arpDirection = p.compStyle;
+    if (cs::isArpeggio (p.compStyle))
+        p.compStyle = p.arpDirection;
+    if (arpRateParam != nullptr)
+        p.arpRateSteps = cs::kArpRateSteps[(size_t) juce::jlimit (0, (int) cs::kArpRateSteps.size() - 1,
+                                                               juce::roundToInt (arpRateParam->load()))];
+    if (arpLengthParam != nullptr)
+        p.arpLength = arpLengthParam->load() / 100.0f;
+    const int pulseRate = pulseRateParam != nullptr ? juce::roundToInt (pulseRateParam->load()) : 0;
+    if (pulseRate > 0 && pulseRate <= (int) cs::kArpRateSteps.size())
+        p.pulseRateSteps = cs::kArpRateSteps[(size_t) (pulseRate - 1)];
+    if (arpOctavesParam != nullptr)
+        p.arpOctaves = juce::jlimit (1, cs::kMaxArpOctaves, 1 + juce::roundToInt (arpOctavesParam->load()));
+    if (compHitLengthParam != nullptr)
+        p.compHitLength = compHitLengthParam->load() / 100.0f;
+    if (compPatternAccentParam != nullptr)
+        p.compPatternAccent = compPatternAccentParam->load() / 100.0f;
     p.seed = perfSeed.load();
     return p;
 }
@@ -497,7 +651,7 @@ bool ChordSlotsProcessor::loadMidiToCurves (const juce::File& file)
 bool ChordSlotsProcessor::harmonizeMidi (const juce::File& file)
 {
     juce::MidiFile midi;
-    if (! readMidi (file, midi))
+    if (! readMidi (file, midi) || midi.getTimeFormat() <= 0)
         return false;
 
     const juce::MidiMessageSequence* selected = nullptr;
@@ -528,7 +682,9 @@ bool ChordSlotsProcessor::harmonizeMidi (const juce::File& file)
     for (int n = 0; n < selected->getNumEvents(); ++n)
     {
         const auto& event = *selected->getEventPointer (n);
-        if (isMelodyNote (event))
+        if (event.message.isEndOfTrackMetaEvent())
+            endTick = std::max (endTick, event.message.getTimeStamp());
+        else if (isMelodyNote (event))
             endTick = std::max (endTick, event.noteOffObject->message.getTimeStamp());
     }
     if (! std::isfinite (endTick) || endTick <= 0.0)
@@ -541,21 +697,55 @@ bool ChordSlotsProcessor::harmonizeMidi (const juce::File& file)
         const auto& event = *selected->getEventPointer (n);
         if (isMelodyNote (event))
         {
-            const float start = (float) (event.message.getTimeStamp() / endTick);
-            const float end = (float) (event.noteOffObject->message.getTimeStamp() / endTick);
+            const double start = event.message.getTimeStamp() / endTick;
+            const double end = event.noteOffObject->message.getTimeStamp() / endTick;
             if (end > start)
-                notes.push_back ({ start, end, event.message.getNoteNumber() });
+                notes.push_back ({ start, end, event.message.getNoteNumber(), event.message.getVelocity() });
         }
     }
     if (notes.empty())
         return false;
 
-    edit ([&notes] (cs::Progression& p, cs::Rng& rng)
+    const double sourceSteps = endTick * cs::kStepsPerQuarter / midi.getTimeFormat();
+    juce::MidiMessageSequence tempoEvents;
+    midi.findAllTempoEvents (tempoEvents);
+    double sourceBpm = 0.0;
+    for (const auto* event : tempoEvents)
+    {
+        const double bpm = 60.0 / event->message.getTempoSecondsPerQuarterNote();
+        if (bpm >= 20.0 && bpm <= 999.0)
+        {
+            sourceBpm = bpm;
+            break;
+        }
+    }
+    if (usesStandaloneTempo() && isAutoMidiTempoEnabled() && sourceBpm > 0.0)
+        setStandaloneBpm (sourceBpm);
+
+    const auto key = detectMelodyKey (midi, notes);
+    edit ([&notes, filename = file.getFileName().toStdString(), sourceSteps, sourceBpm, key] (cs::Progression& p, cs::Rng& rng)
     {
         p.melody = std::move (notes);
-        cs::roll (p, rng);
+        p.melodyFilename = filename;
+        p.melodySourceSteps = sourceSteps;
+        p.melodySourceBpm = sourceBpm;
+        p.melodySourceTonic = key.first;
+        p.melodySourceScale = key.second;
+        p.fitMelodyToLoop = false;
+        harmonizeExistingSlots (p, rng);
     });
     return true;
+}
+
+void ChordSlotsProcessor::setAutoMelodyKey (bool enabled)
+{
+    edit ([enabled] (cs::Progression& p, cs::Rng& rng)
+    {
+        p.autoMelodyKey = enabled;
+        if (enabled && p.melodySourceTonic >= 0
+            && (p.tonic != p.melodySourceTonic || p.scale != p.melodySourceScale))
+            harmonizeExistingSlots (p, rng);
+    });
 }
 
 void ChordSlotsProcessor::refeel() noexcept
@@ -643,6 +833,7 @@ bool ChordSlotsProcessor::transposeProgression (int semitones)
         auto transposed = variations[(size_t) idx];
         if (! cs::transposeProgression (transposed, semitones))
             return false;
+        transposed.autoMelodyKey = false;
         pushHistory (idx);
         variations[(size_t) idx] = std::move (transposed);
         publish();
@@ -757,11 +948,28 @@ void ChordSlotsProcessor::timerCallback()
     }
 }
 
+void ChordSlotsProcessor::setStandaloneBpm (double bpm) noexcept
+{
+    standaloneBpm.store (std::isfinite (bpm) ? juce::jlimit (20.0, 999.0, bpm) : 120.0);
+    tempoDirty.store (true);
+}
+
+void ChordSlotsProcessor::setAutoMidiTempoEnabled (bool enabled)
+{
+    autoMidiTempo.store (enabled);
+    if (enabled && usesStandaloneTempo())
+    {
+        const double sourceBpm = getProgression().melodySourceBpm;
+        if (sourceBpm > 0.0)
+            setStandaloneBpm (sourceBpm);
+    }
+}
+
 void ChordSlotsProcessor::publish()
 {
     const juce::ScopedLock sl (modelLock);
     const cs::PerformanceParams perf = getPerformanceParams();
-    const double bpm = lastBpm.load();
+    const double bpm = getLastBpm();
     publishedBpm.store (bpm);
     cs::PlayBank pb;
     for (int i = 0; i < cs::kNumVariations; ++i)
@@ -804,6 +1012,7 @@ void ChordSlotsProcessor::prepareToPlay (double newSampleRate, int)
     auditionCount = 0;
     alternativeEvent = -1;
     alternativeHeld = {};
+    partAuditioning.store (AuditionPart::None);
     pendingCount = 0;
     wasPlaying = false;
     resetTrigger();
@@ -878,6 +1087,8 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                 }
             }
         }
+    if (usesStandaloneTempo())
+        bpm = getStandaloneBpm();
     if (! (bpm >= 20.0 && bpm <= 999.0))
         bpm = 120.0;
     lastBpm.store (bpm);
@@ -935,12 +1146,13 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     {
         if (alternativeEvent < 0)
             return;
-        for (int ch = 0; ch < 2; ++ch)
+        for (size_t ch = 0; ch < alternativeHeld.size(); ++ch)
             for (int note = 0; note < 128; ++note)
-                if (alternativeHeld[(size_t) ch][(size_t) note])
-                    midi.addEvent (juce::MidiMessage::noteOff (ch == 0 ? kMidiChannelChords : kMidiChannelBass, note), 0);
+                if (alternativeHeld[ch][(size_t) note])
+                    midi.addEvent (juce::MidiMessage::noteOff ((int) ch + 1, note), 0);
         alternativeHeld = {};
         alternativeEvent = -1;
+        partAuditioning.store (AuditionPart::None);
     };
     if (numSamples > 0)
     {
@@ -959,6 +1171,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                 releaseAudition (0);
                 auditionRequest.store (-1);
                 activeAlternative.swap (pendingAlternative);
+                partAuditioning.store (activeAlternative->part);
                 alternativeEvent = 0;
                 alternativeSample = 0;
             }
@@ -1154,7 +1367,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         const auto& s = play.slots[slot];
         if (hitIdx < 0 || hitIdx >= s.numHits)
             return 0.0;
-        const double durTicks = juce::jmax (1.0, (double) s.hits[hitIdx].durationSteps * (double) kTicksPerStep * (double) gate - (gate >= 0.999f ? 1.0 : 0.0));
+        const double durTicks = gatedDurationTicks (s.hitAt (hitIdx).durationSteps, s.arpRate > 0 ? 1.0f : gate);
         return durTicks / (double) kTicksPerStep;
     };
 
@@ -1207,25 +1420,25 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         if (hitIdx < 0 || hitIdx >= s.numHits)
             return;
 
-        const auto& hit = s.hits[hitIdx];
+        const auto hit = s.hitAt (hitIdx);
         double elapsedTicks = 0.0;
         if (hitStartStep >= 0.0 && currentPlayStep > hitStartStep)
             elapsedTicks = (currentPlayStep - hitStartStep) * (double) kTicksPerStep;
 
         const int firstUpper = (split || patternedBass || s.sustainBassUnderComping) ? s.bassCount : 0;
-        const double hitDurTicks = juce::jmax (1.0, (double) hit.durationSteps * (double) kTicksPerStep * (double) gate - 1.0);
+        const double hitDurTicks = gatedDurationTicks (hit.durationSteps, s.arpRate > 0 ? 1.0f : gate);
         const double hitDurationMs = (double) hit.durationSteps * (60000.0 / (bpm * (double) cs::kStepsPerQuarter));
         double maxOffsetMs = 0.0;
         for (int i = firstUpper; i < s.n && i < cs::kMaxNotes; ++i)
             maxOffsetMs = std::max (maxOffsetMs, (double) s.offsetMs[i]);
         const double hitScale = cs::compHitOffsetScale (hitDurationMs, maxOffsetMs);
 
+        const auto arpNote = s.arpNoteFor (hit);
         for (int i = firstUpper; i < s.n && i < cs::kMaxNotes; ++i)
         {
-            const int voice = hit.selectedVoice (firstUpper, s.n);
-            if (voice >= 0 && i != voice)
+            if (arpNote.voice >= 0 && i != arpNote.voice)
                 continue;
-            const int note = s.notes[i];
+            const int note = arpNote.voice >= 0 ? arpNote.pitch : s.notes[i];
             const int baseVel = s.velocities[i] > 0 ? s.velocities[i] : s.velocity;
             const int vel = juce::jlimit (1, 127, (int) std::lround ((float) baseVel * hit.velScale));
             const double noteOffsetTicks = (double) s.offsetMs[i] * hitScale * msToTicks;
@@ -1412,24 +1625,25 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                         const int firstUpper = separateBass ? slot.bassCount : 0;
                         for (int h = 0; h < slot.numHits; ++h)
                         {
-                            const auto& hit = slot.hits[h];
+                            const auto hit = slot.hitAt (h);
                             const double hitOn = sectionStart + slot.start + hit.stepOffset;
-                            const double hitOff = hitOn + gatedDurationTicks (hit.durationSteps, gate) / kTicksPerStep;
+                            const double hitOff = hitOn + gatedDurationTicks (hit.durationSteps, slot.arpRate > 0 ? 1.0f : gate) / kTicksPerStep;
                             const double hitMs = hit.durationSteps * (60000.0 / (bpm * cs::kStepsPerQuarter));
                             double maxOffsetMs = 0.0;
                             for (int n = firstUpper; n < slot.n; ++n)
                                 maxOffsetMs = std::max (maxOffsetMs, (double) slot.offsetMs[n]);
                             const double hitScale = cs::compHitOffsetScale (hitMs, maxOffsetMs);
+                            const auto arpNote = slot.arpNoteFor (hit);
                             for (int n = firstUpper; n < slot.n; ++n)
                             {
-                                const int voice = hit.selectedVoice (firstUpper, slot.n);
-                                if (voice >= 0 && n != voice)
+                                if (arpNote.voice >= 0 && n != arpNote.voice)
                                     continue;
                                 const double strum = std::min (hitOff - hitOn - 1.0 / kTicksPerStep,
                                     (double) slot.offsetMs[n] * hitScale * stepsPerMs);
                                 const int vel = juce::jlimit (1, 127,
                                     (int) std::lround ((slot.velocities[n] > 0 ? slot.velocities[n] : slot.velocity) * hit.velScale));
-                                addSongNote (hitOn + strum, hitOff, slot.notes[n], vel, kMidiChannelChords, false,
+                                const int pitch = arpNote.voice >= 0 ? arpNote.pitch : slot.notes[n];
+                                addSongNote (hitOn + strum, hitOff, pitch, vel, kMidiChannelChords, false,
                                              songEntry.transpose);
                             }
                         }
@@ -1591,7 +1805,7 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
             for (int h = 0; h < ps.numHits; ++h)
             {
-                const double tHitOn = (double) (ps.start + ps.hits[h].stepOffset);
+                const double tHitOn = (double) (ps.start + ps.hitAt (h).stepOffset);
                 const double tHitOff = tHitOn + hitDurationSteps (slotNow, h);
                 if (startStep >= tHitOn && startStep < tHitOff)
                 {
@@ -1659,8 +1873,8 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
                 // Upper hits timeline
                 for (int h = 0; h < ps.numHits; ++h)
                 {
-                    const double tHitOn = (double) (ps.start + ps.hits[h].stepOffset) + loopOffset;
-                    const double tHitOff = (double) (ps.start + ps.hits[h].stepOffset) + hitDurationSteps (i, h) + loopOffset;
+                    const double tHitOn = (double) (ps.start + ps.hitAt (h).stepOffset) + loopOffset;
+                    const double tHitOff = tHitOn + hitDurationSteps (i, h);
 
                     if (tHitOn >= startStep && tHitOn < endStep)
                     {
@@ -1783,12 +1997,15 @@ void ChordSlotsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             if (msg.isNoteOnOrOff())
             {
                 midi.addEvent (msg, (int) std::max (int64_t { 0 }, offset));
-                alternativeHeld[msg.getChannel() == kMidiChannelBass ? 1 : 0][(size_t) msg.getNoteNumber()] = msg.isNoteOn();
+                alternativeHeld[(size_t) (msg.getChannel() - 1)][(size_t) msg.getNoteNumber()] = msg.isNoteOn();
             }
             ++alternativeEvent;
         }
         if (alternativeEvent >= preview.notes.getNumEvents())
+        {
             alternativeEvent = -1;
+            partAuditioning.store (AuditionPart::None);
+        }
         else
         {
             alternativeSample += numSamples;
@@ -1888,19 +2105,20 @@ void appendMidiSection (const cs::Progression& p, const cs::PerformanceParams& p
 
         for (int h = 0; h < slot.numHits; ++h)
         {
-            const auto& hit = slot.hits[h];
+            const auto hit = slot.hitAt (h);
             const double on = base + hit.stepOffset * (double) kTicksPerStep;
-            const double end = on + gatedDurationTicks (hit.durationSteps, gate);
+            const double end = on + gatedDurationTicks (hit.durationSteps, slot.arpRate > 0 ? 1.0f : gate);
             const double hitMs = hit.durationSteps * 60000.0 / (bpm * cs::kStepsPerQuarter);
             const double scale = cs::compHitOffsetScale (hitMs, maxOffset);
+            const auto arpNote = slot.arpNoteFor (hit);
             for (int j = firstUpper; j < slot.n; ++j)
             {
-                const int voice = hit.selectedVoice (firstUpper, slot.n);
-                if (voice >= 0 && j != voice)
+                if (arpNote.voice >= 0 && j != arpNote.voice)
                     continue;
                 const double noteOn = std::min (end - 1.0, on + slot.offsetMs[j] * scale * msToTicks);
                 const int velocity = (int) std::lround (slot.velocities[j] * hit.velScale);
-                notePair (*chords, kMidiChannelChords, slot.notes[j], velocity, noteOn, end);
+                const int pitch = arpNote.voice >= 0 ? arpNote.pitch : slot.notes[j];
+                notePair (*chords, kMidiChannelChords, pitch, velocity, noteOn, end);
             }
         }
     }
@@ -1928,7 +2146,7 @@ void ChordSlotsProcessor::auditionCompStyle (cs::CompStyle style)
 
     auto perf = getPerformanceParams();
     perf.compStyle = style;
-    const auto bpm = lastBpm.load();
+    const auto bpm = getLastBpm();
     const auto end = p.lengthSteps() * (double) kTicksPerStep;
     auto preview = std::make_unique<AlternativePreview>();
     preview->secondsPerTick = 60.0 / (bpm * kTicksPerQuarter);
@@ -1940,9 +2158,65 @@ void ChordSlotsProcessor::auditionCompStyle (cs::CompStyle style)
     queueAudition (std::move (preview));
 }
 
+namespace
+{
+void appendMelodyPreview (const cs::Progression& p, double end, juce::MidiMessageSequence& notes)
+{
+    const double melodySteps = p.melodyLengthSteps();
+    for (const auto& note : p.melody)
+    {
+        const double start = (note.start * melodySteps) * kTicksPerStep;
+        const double stop = std::min (end, (note.end * melodySteps) * kTicksPerStep);
+        if (! (start < stop))
+            continue;
+        notes.addEvent (juce::MidiMessage::noteOn (kMidiChannelMelody, note.pitch, (juce::uint8) note.velocity), start);
+        notes.addEvent (juce::MidiMessage::noteOff (kMidiChannelMelody, note.pitch), stop);
+    }
+}
+}
+
+void ChordSlotsProcessor::auditionMelody()
+{
+    const auto p = getProgression();
+    if (p.melody.empty())
+        return;
+
+    const auto bpm = getLastBpm();
+    const double end = p.lengthSteps() * (double) kTicksPerStep;
+    auto preview = std::make_unique<AlternativePreview>();
+    preview->secondsPerTick = 60.0 / (bpm * kTicksPerQuarter);
+    preview->inContext = true;
+    preview->part = AuditionPart::Melody;
+
+    auto& notes = preview->notes;
+    juce::MidiMessageSequence bass;
+    appendMidiSection (p, getPerformanceParams(), bpm, gateParam->load(), 0.0, end, 0, &notes,
+                       isSplitMidi() ? &bass : &notes);
+    notes.addSequence (bass, 0.0);
+    appendMelodyPreview (p, end, notes);
+    notes.addEvent (juce::MidiMessage::endOfTrack(), end);
+    setPreviewPlaying (false);
+    queueAudition (std::move (preview));
+}
+
+void ChordSlotsProcessor::auditionArp()
+{
+    const auto midi = createMidiFile (MidiExportMode::ArpOnly);
+    if (midi.getNumTracks() == 0)
+        return;
+
+    auto preview = std::make_unique<AlternativePreview>();
+    preview->secondsPerTick = 60.0 / (getLastBpm() * kTicksPerQuarter);
+    preview->inContext = true;
+    preview->part = AuditionPart::Arp;
+    preview->notes = *midi.getTrack (0);
+    setPreviewPlaying (false);
+    queueAudition (std::move (preview));
+}
+
 void ChordSlotsProcessor::auditionBassPattern (const cs::Progression& p)
 {
-    const auto bpm = lastBpm.load();
+    const auto bpm = getLastBpm();
     const auto end = p.lengthSteps() * (double) kTicksPerStep;
     auto preview = std::make_unique<AlternativePreview>();
     preview->secondsPerTick = 60.0 / (bpm * kTicksPerQuarter);
@@ -1980,7 +2254,7 @@ void ChordSlotsProcessor::auditionAlternative (const cs::Progression& p, int slo
         return;
 
     auto preview = std::make_unique<AlternativePreview>();
-    const auto bpm = lastBpm.load();
+    const auto bpm = getLastBpm();
     const bool split = isSplitMidi();
     preview->secondsPerTick = 60.0 / (bpm * kTicksPerQuarter);
     preview->inContext = inContext;
@@ -1993,6 +2267,7 @@ void ChordSlotsProcessor::auditionAlternative (const cs::Progression& p, int slo
         const auto gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
         appendMidiSection (p, getPerformanceParams(), bpm, gate, 0.0, end, 0, &notes, split ? &bass : &notes);
         notes.addSequence (bass, 0.0);
+        appendMelodyPreview (p, end, notes);
         notes.addEvent (juce::MidiMessage::endOfTrack(), end);
     }
     else
@@ -2024,21 +2299,25 @@ juce::MidiFile ChordSlotsProcessor::createMidiFile (MidiExportMode mode) const
         return createSongMidiFile();
     const auto p = getProgression();
     const auto perf = getPerformanceParams();
-    const double bpm = lastBpm.load();
+    const double bpm = getLastBpm();
     const float gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
     const double endTick = p.lengthSteps() * (double) kTicksPerStep;
     juce::MidiFile file;
     file.setTicksPerQuarterNote (kTicksPerQuarter);
+    const bool arp = mode == MidiExportMode::ArpOnly;
+    if (arp && ! cs::isArpeggio (perf.compStyle))
+        return file;
     juce::MidiMessageSequence first, second;
     const bool split = mode == MidiExportMode::Master && isSplitMidi();
     first.addEvent (juce::MidiMessage::textMetaEvent (3,
-        mode == MidiExportMode::BassOnly ? "Bass" : (mode == MidiExportMode::ChordsOnly || split ? "Chords" : "ChordSlots")), 0.0);
+        arp ? "Arp" : mode == MidiExportMode::BassOnly ? "Bass"
+            : (mode == MidiExportMode::ChordsOnly || split ? "Chords" : "ChordSlots")), 0.0);
     first.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / bpm)), 0.0);
     if (split)
         second.addEvent (juce::MidiMessage::textMetaEvent (3, "Bass"), 0.0);
 
     auto* chords = mode == MidiExportMode::BassOnly ? nullptr : &first;
-    auto* bass = mode == MidiExportMode::ChordsOnly ? nullptr : (split ? &second : &first);
+    auto* bass = mode == MidiExportMode::ChordsOnly || arp ? nullptr : (split ? &second : &first);
     appendMidiSection (p, perf, bpm, gate, 0.0, endTick, 0, chords, bass);
     closeMidiTrack (file, first, endTick);
     if (split)
@@ -2050,7 +2329,7 @@ juce::MidiFile ChordSlotsProcessor::createSongMidiFile() const
 {
     const auto arrangement = getSong();
     const auto perf = getPerformanceParams();
-    const double bpm = lastBpm.load();
+    const double bpm = getLastBpm();
     const float gate = juce::jlimit (0.1f, 1.0f, gateParam->load());
     juce::MidiFile file;
     file.setTicksPerQuarterNote (kTicksPerQuarter);
@@ -2076,6 +2355,9 @@ juce::MidiFile ChordSlotsProcessor::createSongMidiFile() const
 
 juce::File ChordSlotsProcessor::writeTempMidiFile (MidiExportMode mode) const
 {
+    const auto midi = createMidiFile (mode);
+    if (midi.getNumTracks() == 0)
+        return {};
     const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("ChordSlots");
     if (! dir.createDirectory())
         return {};
@@ -2087,13 +2369,14 @@ juce::File ChordSlotsProcessor::writeTempMidiFile (MidiExportMode mode) const
         suffix = " Bass";
     else if (mode == MidiExportMode::Song)
         suffix = " Song";
+    else if (mode == MidiExportMode::ArpOnly)
+        suffix = " Arp";
 
     const auto name = juce::File::createLegalFileName ("ChordSlots" + suffix + " " + describeProgression()).substring (0, 80);
     const auto file = dir.getChildFile (name + ".mid");
     file.deleteFile();
 
     juce::FileOutputStream out (file);
-    const auto midi = createMidiFile (mode);
     if (! out.openedOk() || ! midi.writeTo (out, midi.getNumTracks() == 1 ? 0 : 1))
         return {};
     out.flush();
@@ -2107,6 +2390,11 @@ void ChordSlotsProcessor::getStateInformation (juce::MemoryBlock& dest)
     root.setProperty ("version", 4, nullptr);
     root.setProperty ("editVariation", editVariation.load(), nullptr);
     root.setProperty ("followPlayback", followPlayback.load(), nullptr);
+    if (usesStandaloneTempo())
+    {
+        root.setProperty ("standaloneBpm", getStandaloneBpm(), nullptr);
+        root.setProperty ("autoMidiTempo", isAutoMidiTempoEnabled(), nullptr);
+    }
     root.appendChild (apvts.copyState(), nullptr);
     juce::ValueTree songTree ("Song");
     songTree.setProperty ("enabled", songEnabled.load(), nullptr);
@@ -2145,6 +2433,11 @@ void ChordSlotsProcessor::setStateInformation (const void* data, int size)
         return;
 
     pendingMidiVariation.store (-1);
+    if (usesStandaloneTempo())
+    {
+        setStandaloneBpm ((double) root.getProperty ("standaloneBpm", 120.0));
+        autoMidiTempo.store ((bool) root.getProperty ("autoMidiTempo", ! root.hasProperty ("standaloneBpm")));
+    }
 
     const int ver = (int) root.getProperty ("version", 1);
     const char* varNames[cs::kNumVariations] = { "ProgressionA", "ProgressionB", "ProgressionC", "ProgressionD" };
@@ -2205,22 +2498,38 @@ void ChordSlotsProcessor::setStateInformation (const void* data, int size)
 
     // Restore parameter tree AFTER models are restored!
     auto params = root.getChildWithName (apvts.state.getType()).createCopy();
+    constexpr const char* optionalParameters[] { "chordRhythm", "arpRate", "arpLength", "arpOctaves", "pulseRate", "arpDirection",
+                                                  "compHitLength", "compPatternAccent" };
     if (params.isValid())
     {
-        // APVTS retains the current value for missing entries, so migrate
-        // presets saved before the chord-rhythm parameter explicitly.
-        if (! params.getChildWithProperty ("id", "chordRhythm").isValid())
+        // APVTS retains current values for missing parameters in older presets.
+        const int savedComp = (int) params.getChildWithProperty ("id", "compStyle").getProperty ("value", 0);
+        const int savedRhythm = (int) params.getChildWithProperty ("id", "chordRhythm").getProperty ("value", 0);
+        const auto savedArp = static_cast<cs::CompStyle> (cs::kNumCompStyles + savedRhythm - 1);
+        for (const auto* id : optionalParameters)
         {
-            juce::ValueTree rhythm ("PARAM");
-            rhythm.setProperty ("id", "chordRhythm", nullptr);
-            rhythm.setProperty ("value", 0, nullptr);
-            params.appendChild (rhythm, nullptr);
+            if (params.getChildWithProperty ("id", id).isValid())
+                continue;
+            auto* parameter = apvts.getParameter (id);
+            juce::ValueTree entry ("PARAM");
+            entry.setProperty ("id", id, nullptr);
+            float value = parameter->convertFrom0to1 (parameter->getDefaultValue());
+            if (juce::String (id) == "pulseRate" && savedComp == (int) cs::CompStyle::PulseEighth)
+                value = 3.0f;
+            if (juce::String (id) == "arpDirection" && cs::isArpeggio (savedArp))
+                value = (float) ((int) savedArp - (int) cs::CompStyle::ArpUp + 1);
+            entry.setProperty ("value", value, nullptr);
+            params.appendChild (entry, nullptr);
         }
         apvts.replaceState (params);
     }
     else
     {
-        apvts.getParameter ("chordRhythm")->setValueNotifyingHost (0.0f);
+        for (const auto* id : optionalParameters)
+        {
+            auto* parameter = apvts.getParameter (id);
+            parameter->setValueNotifyingHost (parameter->getDefaultValue());
+        }
     }
     pendingMidiVariation.store (-1);
 

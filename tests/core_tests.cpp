@@ -1851,6 +1851,14 @@ static void testMelodyHarmonization()
     CHECK (melodyCost (ch (0, ""), f, 0.0f) == 0.0f);
     CHECK (melodyCost (ch (0, ""), f, 0.25f) < melodyCost (ch (0, ""), f, 0.75f));
     CHECK (melodyCost (ch (0, ""), f, 0.75f) < melodyCost (ch (0, ""), f, 1.0f));
+    CHECK (melodyMatch (ch (0, ""), f) == 0.0f);
+    CHECK (melodyClashMask (ch (0, ""), f) == (1u << 5));
+    CHECK (melodyMatch (ch (0, "m"), f) > 0.9f);
+    CHECK (melodyClashMask (ch (0, "m"), f) == 0);
+    auto passing = f;
+    passing[0] = 9.0f * f[5];
+    CHECK (melodyMatch (ch (0, ""), passing) > 0.89f);
+    CHECK (melodyClashMask (ch (0, ""), passing) == (1u << 5));
 
     for (unsigned seed = 0; seed < 12; ++seed)
     {
@@ -1863,6 +1871,7 @@ static void testMelodyHarmonization()
 
     auto ignored = p, noMelody = p;
     ignored.melodyFit = 0.0f;
+    CHECK (slotMelodyProfile (ignored, 4, true) == f);
     noMelody.melody.clear();
     Rng first (81), second (81);
     roll (ignored, first);

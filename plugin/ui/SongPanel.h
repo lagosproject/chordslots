@@ -15,6 +15,8 @@ public:
         setComponentID ("song-panel");
         variation.setComponentID ("song-variation");
         transpose.setComponentID ("song-transpose");
+        title.setColour (juce::Label::textColourId, ui::songAccent);
+        sectionTitle.setColour (juce::Label::textColourId, ui::songAccent);
         title.setFont (ui::font (17.0f, true));
         sectionTitle.setFont (ui::font (16.0f, true));
         empty.setText ("Add a section to arrange your variations.", juce::dontSendNotification);
@@ -142,9 +144,9 @@ public:
     {
         for (auto bounds : { stageBounds, railBounds })
         {
-            g.setColour (ui::panel);
+            g.setColour (ui::panel.interpolatedWith (ui::songAccent, 0.045f));
             g.fillRoundedRectangle (bounds.toFloat(), 7.0f);
-            g.setColour (ui::outline);
+            g.setColour (ui::outline.interpolatedWith (ui::songAccent, 0.24f));
             g.drawRoundedRectangle (bounds.toFloat().reduced (0.5f), 7.0f, 1.0f);
         }
     }

@@ -92,8 +92,9 @@ struct Locks
 
 struct MelodyNote
 {
-    float start = 0.0f, end = 0.0f; // fractions of the loop
+    double start = 0.0, end = 0.0; // fractions of the imported phrase (loop for legacy sessions)
     int pitch = 60;
+    int velocity = 90;
 };
 
 constexpr size_t kMaxMelodyNotes = 4096;
@@ -110,6 +111,13 @@ struct Progression
     int numSlots = 4;
     int snap = 12; // cut grid in steps: 24 = 1/4, 16 = 1/4T, 12 = 1/8, 8 = 1/8T, 6 = 1/16, 4 = 1/16T, 3 = 1/32
     std::vector<MelodyNote> melody;
+    std::string melodyFilename;
+    double melodySourceSteps = 0.0; // zero for legacy loop-relative melodies
+    double melodySourceBpm = 0.0; // zero when the MIDI file has no usable tempo event
+    int melodySourceTonic = -1;
+    int melodySourceScale = -1;
+    bool autoMelodyKey = false;
+    bool fitMelodyToLoop = false;
     float melodyFit = 0.75f;
     float variety = 0.5f;     // sampling temperature for a full Roll
     float adventure = 0.3f;   // 0 = diatonic triads, 1 = borrowed chords and extensions
@@ -128,6 +136,10 @@ struct Progression
     Meter meter() const noexcept { return getMeter (timeSigNum, timeSigDen); }
     int stepsPerBar() const noexcept { return meter().stepsPerBar; }
     int lengthSteps() const noexcept { return bars * stepsPerBar(); }
+    double melodyLengthSteps() const noexcept
+    {
+        return ! fitMelodyToLoop && melodySourceSteps > 0.0 ? melodySourceSteps : lengthSteps();
+    }
     int slotEnd (int i) const noexcept { return i + 1 < numSlots ? slots[(size_t) (i + 1)].start : lengthSteps(); }
     int maxSlots() const noexcept { return std::min (kMaxSlots, lengthSteps() / std::max (1, snap)); }
 };
@@ -443,31 +455,33 @@ inline float contextualEditCost (const Progression& p, int slot, const Candidate
 
 using MelodyProfile = std::array<float, 12>;
 
-inline MelodyProfile slotMelodyProfile (const Progression& p, int slot)
+inline MelodyProfile slotMelodyProfile (const Progression& p, int slot, bool includeWhenDisabled = false)
 {
     MelodyProfile profile {};
-    if (p.melody.empty() || p.melodyFit <= 0.0f)
+    if (p.melody.empty() || (! includeWhenDisabled && p.melodyFit <= 0.0f))
         return profile;
 
-    const int length = p.lengthSteps();
+    const double melodyLength = p.melodyLengthSteps();
     const auto meter = p.meter();
     const int slotStart = p.slots[(size_t) slot].start, slotEnd = p.slotEnd (slot);
     for (const auto& note : p.melody)
     {
         if (! (note.start >= 0.0f && note.end <= 1.0f && note.end > note.start))
             continue;
-        const int start = std::clamp ((int) std::lround (note.start * length), 0, length - 1);
-        const int end = std::clamp ((int) std::lround (note.end * length), start + 1, length);
-        const int overlap = std::min (slotEnd, end) - std::max (slotStart, start);
+        const double start = note.start * melodyLength;
+        const double end = note.end * melodyLength;
+        const double overlap = std::min<double> (slotEnd, end) - std::max<double> (slotStart, start);
         if (overlap <= 0)
             continue;
-        const int offset = start % meter.stepsPerBar;
+        const int offset = (int) std::lround (start) % meter.stepsPerBar;
         const auto endStrong = meter.strongOffsets.end();
         const bool strong = std::find (meter.strongOffsets.begin(), endStrong, offset) != endStrong;
         profile[(size_t) mod12 (note.pitch)] += (float) overlap * (strong ? 1.5f : 1.0f);
     }
     return profile;
 }
+
+constexpr float melodyClashCost = 1.4f;
 
 inline float melodyNoteCost (Chord chord, int pitchClass)
 {
@@ -480,7 +494,7 @@ inline float melodyNoteCost (Chord chord, int pitchClass)
     const bool major = hasMajorThird (notes), minor = hasMinorThird (notes);
     const bool dominant = seventhKind (notes) == SeventhKind::Minor7 && (major || isSus (notes));
     if ((major && interval == 5) || (! dominant && interval == 1) || (dominant && interval == 11))
-        return 1.4f;
+        return melodyClashCost;
     if (interval == 2 || (minor && interval == 5) || (major && interval == 6) || interval == 9)
         return 0.12f;
     return 0.55f;
@@ -502,6 +516,21 @@ inline float melodyCost (Chord chord, const MelodyProfile& profile, float weight
         }
     }
     return total > 0.0f ? weight * penalty / total : 0.0f;
+}
+
+/** Intrinsic compatibility of a chord with the slot's melody, independent of the generator weight. */
+inline float melodyMatch (Chord chord, const MelodyProfile& profile)
+{
+    return clamp01 (1.0f - melodyCost (chord, profile, 1.0f) / melodyClashCost);
+}
+
+inline unsigned melodyClashMask (Chord chord, const MelodyProfile& profile)
+{
+    unsigned clashes = 0;
+    for (int pc = 0; pc < 12; ++pc)
+        if (profile[(size_t) pc] > 0.0f && melodyNoteCost (chord, pc) == melodyClashCost)
+            clashes |= 1u << pc;
+    return clashes;
 }
 
 inline float slotUnaryCost (const Progression& p, int slot, const Candidate& cand,
@@ -1993,6 +2022,7 @@ inline void applyMood (Progression& p, int moodIdx, bool alsoSetScale = true)
 
 struct PlaySlot
 {
+    struct ArpNote { uint8_t pitch = 0; int8_t voice = -1; };
     int start = 0, end = 0;
     int n = 0;
     int notes[kMaxNotes] = {};
@@ -2002,10 +2032,31 @@ struct PlaySlot
     int bassCount = 0;
     int primaryBass = -1;
     int numHits = 0;
+    int arpRate = 0, arpDuration = 0, arpDirection = 1;
+    int pulseRate = 0;
+    float pulseLegacyLength = 1.0f, pulseAccent = 1.0f;
+    bool arpBounce = false;
+    int numArpNotes = 0;
+    ArpNote arpNotes[kPerfMaxNotes * kMaxArpOctaves] {};
     bool sustainBassUnderComping = false;
     CompHit hits[kMaxCompHitsPerSlot] = {};
     int numBassHits = 0;
     BassHit bassHits[kMaxBassHitsPerSlot] = {};
+
+    CompHit hitAt (int index) const noexcept
+    {
+        if (arpRate > 0)
+            return arpHit (index, end - start, arpRate, arpDuration, arpDirection);
+        if (pulseRate > 0)
+            return pulseHit (index, end - start, pulseRate, pulseLegacyLength, pulseAccent);
+        return hits[index];
+    }
+
+    ArpNote arpNoteFor (const CompHit& hit) const noexcept
+    {
+        return hit.arpVoice != 0 && numArpNotes > 0
+            ? arpNotes[arpSequenceIndex (hit.arpVoice, numArpNotes, arpBounce)] : ArpNote {};
+    }
 };
 
 static_assert (kMaxBars * kStepsPerBar / 12 <= kMaxCompHitsPerSlot,
@@ -2062,8 +2113,27 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
             o.numBassHits = getBassHits (p.bassStyle, pb, nextBass, o.end - o.start, o.bassHits, kMaxBassHitsPerSlot);
         }
 
-        o.numHits = getCompHits (perf.compStyle, o.end - o.start, o.hits, kMaxCompHitsPerSlot,
-                                 p.timeSigNum, p.timeSigDen, o.start);
+        if (isArpeggio (perf.compStyle))
+        {
+            o.arpRate = std::max (1, perf.arpRateSteps);
+            o.arpDuration = arpDurationSteps (o.arpRate, perf.arpLength);
+            o.arpDirection = perf.compStyle == CompStyle::ArpDown ? -1 : 1;
+            o.arpBounce = perf.compStyle == CompStyle::ArpUpDown;
+            o.numHits = (o.end - o.start + o.arpRate - 1) / o.arpRate;
+        }
+        else if (isPulse (perf.compStyle))
+        {
+            o.pulseRate = pulseRateFor (perf);
+            o.pulseLegacyLength = perf.compHitLength;
+            o.pulseAccent = perf.compPatternAccent;
+            o.numHits = (o.end - o.start + o.pulseRate - 1) / o.pulseRate;
+        }
+        else
+        {
+            o.numHits = getCompHits (perf.compStyle, o.end - o.start, o.hits, kMaxCompHitsPerSlot,
+                                     p.timeSigNum, p.timeSigDen, o.start);
+            shapeCompHits (o.hits, o.numHits, perf);
+        }
         o.sustainBassUnderComping = isArpeggio (perf.compStyle) || (o.numHits > 1 && ! isShldRhythm (perf.compStyle));
 
         PerfInput in;
@@ -2097,6 +2167,27 @@ inline PlayData toPlayData (const Progression& p, const PerformanceParams& perf 
             o.notes[j] = out.notes[(size_t) j].pitch;
             o.velocities[j] = out.notes[(size_t) j].velocity;
             o.offsetMs[j] = out.notes[(size_t) j].offsetMs;
+        }
+        if (o.arpRate > 0)
+        {
+            const int octaves = std::clamp (perf.arpOctaves, 1, kMaxArpOctaves);
+            for (int octave = 0; octave < octaves; ++octave)
+                for (int j = bCount; j < o.n; ++j)
+                {
+                    const int pitch = o.notes[j] + 12 * octave;
+                    if (pitch <= 127)
+                        o.arpNotes[o.numArpNotes++] = { (uint8_t) pitch, (int8_t) j };
+                }
+            if (octaves > 1)
+            {
+                auto* end = o.arpNotes + o.numArpNotes;
+                std::sort (o.arpNotes, end, [] (auto a, auto b)
+                {
+                    return a.pitch < b.pitch || (a.pitch == b.pitch && a.voice < b.voice);
+                });
+                o.numArpNotes = (int) (std::unique (o.arpNotes, end, [] (auto a, auto b) { return a.pitch == b.pitch; })
+                                      - o.arpNotes);
+            }
         }
     }
     return d;

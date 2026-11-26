@@ -37,11 +37,34 @@ struct PatternPreview
     std::vector<PreviewNote> notes;
 };
 
-PatternPreview compPreview (cs::CompStyle style, int voices)
+const char* compingName (cs::CompStyle style)
+{
+    if (cs::isArpeggio (style))
+        return "Arp";
+    return cs::isPulse (style) ? "Pulse" : cs::compStyleName (static_cast<int> (style));
+}
+
+PatternPreview compPreview (cs::CompStyle style, int voices, const cs::PerformanceParams& settings)
 {
     PatternPreview preview { cs::compPreviewBars (style) * cs::kStepsPerBar, {} };
-    for (const auto& hit : cs::getCompHits (style, preview.steps))
-        preview.notes.push_back ({ hit.stepOffset, hit.durationSteps, hit.velScale, hit.selectedVoice (0, voices) });
+    cs::CompHit hits[cs::kMaxCompHitsPerSlot];
+    const int count = cs::getCompHits (style, preview.steps, hits, cs::kMaxCompHitsPerSlot,
+                                      4, 4, 0, settings.arpRateSteps, settings.arpLength);
+    auto params = settings;
+    params.compStyle = style;
+    const bool pulse = cs::isPulse (style);
+    const int pulseRate = pulse ? cs::pulseRateFor (params) : 1;
+    if (! pulse)
+        cs::shapeCompHits (hits, count, params);
+    const int numHits = pulse ? (preview.steps + pulseRate - 1) / pulseRate : count;
+    for (int i = 0; i < numHits; ++i)
+    {
+        const auto hit = pulse ? cs::pulseHit (i, preview.steps, pulseRate, params.compHitLength,
+                                              params.compPatternAccent) : hits[i];
+        const int pitch = hit.arpVoice != 0 && voices > 0
+            ? cs::arpSequenceIndex (hit.arpVoice, voices * settings.arpOctaves, style == cs::CompStyle::ArpUpDown) : -1;
+        preview.notes.push_back ({ hit.stepOffset, hit.durationSteps, hit.velScale, pitch });
+    }
     return preview;
 }
 
@@ -188,6 +211,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
       dragChordsTile (p, ChordSlotsProcessor::MidiExportMode::ChordsOnly, "Chords"),
       dragBassTile (p, ChordSlotsProcessor::MidiExportMode::BassOnly, "Bass"),
       dragSongTile (p, ChordSlotsProcessor::MidiExportMode::Song, "Drag Song"),
+      dragArpTile (p, ChordSlotsProcessor::MidiExportMode::ArpOnly, "Drag arp"),
       songPanel (p),
       gateAttachment (p.apvts, "gate", gate),
       volumeAttachment (p.apvts, "synthVol", volume),
@@ -281,7 +305,11 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         if (refreshing) return;
         const int tonic = keyBox.getSelectedId() - 1;
         if (tonic >= 0)
-            processor.edit ([tonic] (cs::Progression& pr, cs::Rng&) { cs::setTonalContext (pr, tonic, pr.scale); });
+            processor.edit ([tonic] (cs::Progression& pr, cs::Rng&)
+            {
+                pr.autoMelodyKey = false;
+                cs::setTonalContext (pr, tonic, pr.scale);
+            });
     };
 
     scaleBox.onChange = [this]
@@ -289,7 +317,11 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
         if (refreshing) return;
         const int scale = scaleBox.getSelectedId() - 1;
         if (scale >= 0)
-            processor.edit ([scale] (cs::Progression& pr, cs::Rng&) { cs::setTonalContext (pr, pr.tonic, scale); });
+            processor.edit ([scale] (cs::Progression& pr, cs::Rng&)
+            {
+                pr.autoMelodyKey = false;
+                cs::setTonalContext (pr, pr.tonic, scale);
+            });
     };
 
     barsBox.onChange = [this]
@@ -520,6 +552,67 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     addAndMakeVisible (bassPatternBox);
     bassPatternBox.setTooltip ("Browse and audition bass patterns");
     bassPatternBox.onClick = [this] { showBassPatternBrowser(); };
+    setupCombo (arpDirectionBox, arpDirectionLabel, "DIRECTION", "Choose the order in which the arp plays the chord voices");
+    arpDirectionBox.setComponentID ("arp-direction");
+    int arpDirectionId = 1;
+    for (const auto* direction : cs::kArpDirectionNames)
+        arpDirectionBox.addItem (direction, arpDirectionId++);
+    arpDirectionAttachment = std::make_unique<juce::ParameterAttachment> (*p.apvts.getParameter ("arpDirection"), nullptr);
+    arpDirectionBox.onChange = [this]
+    {
+        if (const int direction = arpDirectionBox.getSelectedId(); direction > 0)
+        {
+            if (processor.isArpAuditioning())
+                processor.stopAlternativeAudition();
+            arpDirectionAttachment->setValueAsCompleteGesture ((float) direction);
+        }
+    };
+    setupCombo (arpRateBox, arpRateLabel, "ARP RATE", "Set the interval between arpeggio notes");
+    arpRateBox.setComponentID ("arp-rate");
+    int arpRateId = 1;
+    for (const auto* rate : cs::kArpRateNames)
+        arpRateBox.addItem (rate, arpRateId++);
+    arpRateAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "arpRate", arpRateBox);
+    setupKnob (arpLength, arpLengthLabel, "ARP LENGTH", "Set each arp note's length as a percentage of its rate interval");
+    arpLength.setComponentID ("arp-length");
+    arpLength.setTextValueSuffix ("%");
+    arpLengthAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (p.apvts, "arpLength", arpLength);
+    setupCombo (arpOctavesBox, arpOctavesLabel, "OCTAVE RANGE", "Extend the upper chord voices into higher octaves");
+    arpOctavesBox.setComponentID ("arp-octaves");
+    for (int octave = 1; octave <= cs::kMaxArpOctaves; ++octave)
+        arpOctavesBox.addItem (juce::String (octave) + (octave == 1 ? " octave" : " octaves"), octave);
+    arpOctavesAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, "arpOctaves", arpOctavesBox);
+    setupCombo (pulseRateBox, pulseRateLabel, "PULSE RATE", "Set the subdivision between repeated chord hits");
+    pulseRateBox.setComponentID ("pulse-rate");
+    int pulseRateId = 1;
+    for (const auto* rate : cs::kArpRateNames)
+        pulseRateBox.addItem (rate, pulseRateId++);
+    pulseRateAttachment = std::make_unique<juce::ParameterAttachment> (*p.apvts.getParameter ("pulseRate"), nullptr);
+    pulseRateBox.onChange = [this]
+    {
+        const int rate = pulseRateBox.getSelectedId();
+        if (rate > 0)
+            pulseRateAttachment->setValueAsCompleteGesture ((float) rate);
+    };
+    setupKnob (compPatternAccent, compPatternAccentLabel, "PATTERN ACCENT", "Adjust velocity contrast between accents in the comping pattern");
+    compPatternAccent.setComponentID ("comp-pattern-accent");
+    compPatternAccent.setTextValueSuffix ("%");
+    compPatternAccentAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (p.apvts, "compPatternAccent", compPatternAccent);
+    arpAuditionButton.setComponentID ("hear-arp");
+    arpAuditionButton.setTooltip ("Preview only the arp over the current loop while the DAW is stopped");
+    arpAuditionButton.onClick = [this]
+    {
+        if (processor.isArpAuditioning())
+            processor.stopAlternativeAudition();
+        else
+            processor.auditionArp();
+    };
+    arpSaveButton.setTooltip ("Save the arp by itself as a MIDI file");
+    arpSaveButton.onClick = [this] { saveMidi (ChordSlotsProcessor::MidiExportMode::ArpOnly); };
+    dragArpTile.setTooltip ("Drag the arp by itself onto a MIDI track in your DAW");
+    addChildComponent (arpAuditionButton);
+    addChildComponent (arpSaveButton);
+    addChildComponent (dragArpTile);
     resetCurvesBtn.setTooltip ("Set all three target curves to 50% and roll chords to fit them.");
     resetCurvesBtn.onClick = [this]
     {
@@ -536,9 +629,88 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     };
     addAndMakeVisible (resetCurvesBtn);
 
-    analyzeMidiBtn.setTooltip ("Analyze a MIDI file or harmonize a MIDI melody");
+    startMelodyButton.setComponentID ("start-with-melody");
+    startMelodyButton.getProperties().set ("primary", true);
+    startMelodyButton.setColour (juce::TextButton::textColourOffId, ui::background);
+    startMelodyButton.setTooltip ("Choose a MIDI melody to harmonize, or drop a MIDI file in Harmony");
+    startMelodyButton.onClick = [this] { importMidi (true); };
+    addAndMakeVisible (startMelodyButton);
+    analyzeMidiBtn.setTooltip ("Extract target curves from MIDI or clear the imported melody");
     analyzeMidiBtn.onClick = [this] { showMidiImportMenu(); };
     addAndMakeVisible (analyzeMidiBtn);
+    melodyAuditionButton.setComponentID ("midi-hear-melody");
+    melodyAuditionButton.setTooltip ("Preview melody, chords and bass over the current loop while the DAW is stopped");
+    melodyAuditionButton.onClick = [this]
+    {
+        if (processor.isMelodyAuditioning())
+            processor.stopAlternativeAudition();
+        else
+            processor.auditionMelody();
+    };
+    addAndMakeVisible (melodyAuditionButton);
+    melodyTimingButton.setComponentID ("midi-timing");
+    melodyTimingButton.setTooltip ("Switch between the file's original beat positions and scaling the phrase to the loop");
+    melodyTimingButton.onClick = [this]
+    {
+        processor.stopAlternativeAudition();
+        processor.edit ([] (cs::Progression& p, cs::Rng&) { p.fitMelodyToLoop = ! p.fitMelodyToLoop; });
+        refresh();
+    };
+    midiDetailsButton.setComponentID ("midi-details");
+    midiDetailsButton.setClickingTogglesState (true);
+    midiDetailsButton.onClick = [this] { resized(); repaint(); };
+    autoMelodyKeyButton.setComponentID ("midi-auto-key");
+    autoMelodyKeyButton.setClickingTogglesState (true);
+    autoMelodyKeyButton.setTooltip ("Use the detected key and scale to harmonize the melody");
+    autoMelodyKeyButton.onClick = [this]
+    {
+        processor.stopAlternativeAudition();
+        processor.setAutoMelodyKey (autoMelodyKeyButton.getToggleState());
+        refresh();
+    };
+    for (auto* button : { &melodyTimingButton, &midiDetailsButton, &autoMelodyKeyButton })
+        addChildComponent (*button);
+    midiFilename.setComponentID ("midi-filename");
+    midiKeyDetails.setComponentID ("midi-key-details");
+    midiTempoDetails.setComponentID ("midi-tempo-details");
+    midiFilename.setFont (ui::font (13.0f, true));
+    midiFilename.setColour (juce::Label::textColourId, ui::text);
+    addChildComponent (midiFilename);
+    for (auto* label : { &midiKeyDetails, &midiTempoDetails })
+    {
+        label->setFont (ui::font (12.0f));
+        label->setColour (juce::Label::textColourId, ui::textDim);
+        addChildComponent (*label);
+    }
+    if (processor.usesStandaloneTempo())
+    {
+        standaloneTempo.setComponentID ("standalone-bpm");
+        standaloneTempo.setName ("Tempo");
+        standaloneTempo.setSliderStyle (juce::Slider::IncDecButtons);
+        standaloneTempo.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 66, 27);
+        standaloneTempo.setRange (20.0, 999.0, 0.1);
+        standaloneTempo.setTextValueSuffix (" BPM");
+        standaloneTempo.setTooltip ("Standalone tempo. To stretch an imported phrase, use Fit to Loop in Melody MIDI.");
+        standaloneTempo.onValueChange = [this]
+        {
+            if (processor.isMelodyAuditioning())
+                processor.stopAlternativeAudition();
+            processor.setAutoMidiTempoEnabled (false);
+            autoMidiTempoButton.setToggleState (false, juce::dontSendNotification);
+            processor.setStandaloneBpm (standaloneTempo.getValue());
+        };
+        addAndMakeVisible (standaloneTempo);
+        autoMidiTempoButton.setComponentID ("auto-midi-tempo");
+        autoMidiTempoButton.setClickingTogglesState (true);
+        autoMidiTempoButton.onClick = [this]
+        {
+            if (processor.isMelodyAuditioning())
+                processor.stopAlternativeAudition();
+            processor.setAutoMidiTempoEnabled (autoMidiTempoButton.getToggleState());
+            standaloneTempo.setValue (processor.getStandaloneBpm(), juce::dontSendNotification);
+        };
+        addAndMakeVisible (autoMidiTempoButton);
+    }
 
     setupKnob (melodyFit, melodyFitLabel, "MELODY FIT",
               "Set how strongly Roll favors chords that fit the imported melody. Set to 0% to ignore it.");
@@ -752,7 +924,8 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 
     rollButton.getProperties().set ("primary", true);
     rollButton.setColour (juce::TextButton::textColourOffId, ui::background);
-    rollButton.setTooltip ("Generate new chords for all unlocked slots");
+    rollButton.setComponentID ("start-with-chords");
+    rollButton.setTooltip ("Start with chords or roll new chords for all unlocked slots");
     rollButton.onClick = [this]
     {
         processor.edit ([] (cs::Progression& pr, cs::Rng& rng) { cs::roll (pr, rng); });
@@ -778,7 +951,11 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 
     saveButton.getProperties().set ("icon", (int) ui::ButtonIcon::Save);
     saveButton.setTooltip ("Export progression as standard MIDI file");
-    saveButton.onClick = [this] { saveMidi(); };
+    saveButton.onClick = [this]
+    {
+        saveMidi (songPanel.isVisible() ? ChordSlotsProcessor::MidiExportMode::Song
+                                        : ChordSlotsProcessor::MidiExportMode::Master);
+    };
     addAndMakeVisible (saveButton);
 
     splitMidiButton.setClickingTogglesState (true);
@@ -787,7 +964,10 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
     addAndMakeVisible (songButton);
     songButton.setToggleState (p.isSongEnabled(), juce::dontSendNotification);
     songButton.setTooltip ("Arrange variations into a Song chain");
-    songButton.onClick = [this] { showSongMenu(); };
+    songButton.onClick = [this] { showSongView(); };
+    harmonyViewButton.getProperties().set ("workspaceTabAccent", ui::harmonyAccent.toString());
+    grooveViewButton.getProperties().set ("workspaceTabAccent", ui::feelAccent.toString());
+    songButton.getProperties().set ("workspaceTabAccent", ui::songAccent.toString());
     addChildComponent (songPanel);
     songPanel.onChange = [this] { updateTransport(); };
 
@@ -834,6 +1014,7 @@ ChordSlotsEditor::ChordSlotsEditor (ChordSlotsProcessor& p)
 
     setWantsKeyboardFocus (true);
     setResizable (true, true);
+    midiViewBtn.setToggleState (! processor.getProgression().melody.empty(), juce::dontSendNotification);
     showGrooveView (false);
     setResizeLimits (900, 570, 1920, 1200);
     setSize (1040, 650);
@@ -856,13 +1037,29 @@ void ChordSlotsEditor::showPerformanceBrowser()
     const int bass = voicing.bassCount > 0 ? voicing.bassCount : voicing.computeBassCount();
     const int voices = std::min (voicing.n, cs::kPerfMaxNotes) - bass;
     const auto safe = juce::Component::SafePointer<ChordSlotsEditor> (this);
-    auto browser = std::make_unique<PerformanceBrowser> (static_cast<int> (processor.getPerformanceParams().compStyle),
-        cs::kNumCompStyles + cs::kNumExtraCompStyles, cs::compStyleName,
-        [voices] (int index) { return compPreview (static_cast<cs::CompStyle> (index), voices); },
-        [safe] (int index)
+    const auto settings = processor.getPerformanceParams();
+    std::vector<cs::CompStyle> styles;
+    for (int i = 0; i < cs::kNumCompStyles + cs::kNumExtraCompStyles; ++i)
+    {
+        const auto style = static_cast<cs::CompStyle> (i);
+        if (style == cs::CompStyle::ArpUp)
+            styles.push_back (settings.arpDirection);
+        else if (cs::isArpeggio (style))
+            continue;
+        else if (style == cs::CompStyle::PulseQuarter && settings.compStyle == cs::CompStyle::PulseEighth)
+            styles.push_back (cs::CompStyle::PulseEighth);
+        else if (style != cs::CompStyle::PulseEighth)
+            styles.push_back (style);
+    }
+    const auto selected = std::find (styles.begin(), styles.end(), settings.compStyle);
+    auto browser = std::make_unique<PerformanceBrowser> (static_cast<int> (selected - styles.begin()), (int) styles.size(),
+        [styles] (int row) { return compingName (styles[(size_t) row]); },
+        [voices, settings, styles] (int row) { return compPreview (styles[(size_t) row], voices, settings); },
+        [safe, styles] (int row)
         {
             if (auto* editor = safe.getComponent())
             {
+                const int index = (int) styles[(size_t) row];
                 if (index < cs::kNumCompStyles)
                 {
                     editor->compAttachment->setValueAsCompleteGesture ((float) index);
@@ -872,13 +1069,13 @@ void ChordSlotsEditor::showPerformanceBrowser()
                 {
                     editor->chordRhythmAttachment->setValueAsCompleteGesture ((float) (index - cs::kNumCompStyles + 1));
                 }
-                editor->refreshCompingSelection();
+                editor->refresh();
             }
         },
-        [safe] (int index)
+        [safe, styles] (int row)
         {
             if (auto* editor = safe.getComponent())
-                editor->processor.auditionCompStyle (static_cast<cs::CompStyle> (index));
+                editor->processor.auditionCompStyle (styles[(size_t) row]);
         });
     auto& callout = juce::CallOutBox::launchAsynchronously (std::move (browser), compBox.getBounds(), this);
     callout.setDismissalMouseClicksAreAlwaysConsumed (true);
@@ -930,9 +1127,21 @@ void ChordSlotsEditor::showBassPatternBrowser()
 
 void ChordSlotsEditor::refreshCompingSelection()
 {
-    const auto* name = cs::compStyleName (static_cast<int> (processor.getPerformanceParams().compStyle));
+    const auto settings = processor.getPerformanceParams();
+    const auto* name = compingName (settings.compStyle);
+    if (cs::isArpeggio (settings.compStyle))
+        arpDirectionBox.setSelectedId ((int) settings.arpDirection - (int) cs::CompStyle::ArpUp + 1, juce::dontSendNotification);
+    if (cs::isPulse (settings.compStyle))
+    {
+        const auto rate = std::find (cs::kArpRateSteps.begin(), cs::kArpRateSteps.end(), cs::pulseRateFor (settings));
+        pulseRateBox.setSelectedId (1 + static_cast<int> (rate - cs::kArpRateSteps.begin()), juce::dontSendNotification);
+    }
     if (compBox.getButtonText() != name)
+    {
+        if (processor.isArpAuditioning())
+            processor.stopAlternativeAudition();
         compBox.setButtonText (name);
+    }
 }
 
 void ChordSlotsEditor::setupCombo (juce::ComboBox& box, juce::Label& label, const juce::String& caption,
@@ -1030,11 +1239,14 @@ void ChordSlotsEditor::showKeyActions()
         });
 }
 
-void ChordSlotsEditor::showSongMenu()
+void ChordSlotsEditor::showSongView()
 {
+    if (songPanel.isVisible())
+        return;
+
     setRollSettingsOpen (false);
     pickerOverlay.setVisible (false);
-    songPanel.setVisible (! songPanel.isVisible());
+    songPanel.setVisible (true);
     songPanel.refresh();
     songPanel.toFront (false);
     resized();
@@ -1096,7 +1308,16 @@ void ChordSlotsEditor::rebuildKeyNames (int scale)
 
 void ChordSlotsEditor::refresh()
 {
+    standaloneTempo.setValue (processor.getStandaloneBpm(), juce::dontSendNotification);
     const cs::Progression p = processor.getProgression();
+    if (processor.usesStandaloneTempo())
+    {
+        autoMidiTempoButton.setToggleState (processor.isAutoMidiTempoEnabled(), juce::dontSendNotification);
+        const juce::String source = p.melodySourceBpm > 0.0
+            ? "Imported tempo: " + juce::String (p.melodySourceBpm, 1) + " BPM. "
+            : "No file tempo available. ";
+        autoMidiTempoButton.setTooltip (source + "Use the MIDI file's first tempo when importing. Enter a BPM to switch to manual tempo.");
+    }
     const juce::ScopedValueSetter<bool> guard (refreshing, true);
 
     rebuildKeyNames (p.scale);
@@ -1143,6 +1364,7 @@ void ChordSlotsEditor::refresh()
     }
     voicingBox.setSelectedId (p.voicingStyle + 1, juce::dontSendNotification);
     bassPatternBox.setButtonText (bassPatternNames[static_cast<int> (p.bassStyle)]);
+    refreshCompingSelection();
     songButton.setToggleState (songPanel.isVisible(), juce::dontSendNotification);
     songPanel.refresh();
 
@@ -1158,7 +1380,23 @@ void ChordSlotsEditor::refresh()
     bassMotion.setValue (p.bassMotion, juce::dontSendNotification);
     melodyFit.setValue (p.melodyFit, juce::dontSendNotification);
     melodyFit.setEnabled (! p.melody.empty());
-    analyzeMidiBtn.setButtonText (juce::String::fromUTF8 (p.melody.empty() ? "Import MIDI ▾" : "MIDI: Melody ▾"));
+    updateMidiImportLabel (p);
+    melodyAuditionButton.setEnabled (! p.melody.empty());
+    const auto filename = p.melodyFilename.empty() ? juce::String ("Imported melody") : utf8 (p.melodyFilename);
+    midiFilename.setText (p.melody.empty() ? juce::String() : filename, juce::dontSendNotification);
+    midiFilename.setTooltip (filename);
+    melodyTimingButton.setEnabled (p.melodySourceSteps > 0.0);
+    melodyTimingButton.setButtonText (p.melodySourceSteps <= 0.0 ? "Loop timing"
+                                    : p.fitMelodyToLoop ? "Fit to Loop" : "Original timing");
+    autoMelodyKeyButton.setToggleState (p.autoMelodyKey, juce::dontSendNotification);
+    const auto detectedKey = p.melodySourceTonic >= 0
+        ? utf8 (cs::pitchClassName (p.melodySourceTonic, p.melodySourceTonic, p.melodySourceScale))
+            + (p.melodySourceScale == 0 ? " Major" : " Natural Minor")
+        : juce::String ("Unclear");
+    midiKeyDetails.setText ("Detected key: " + detectedKey + "   |   Using: " + keyName, juce::dontSendNotification);
+    const auto fileTempo = p.melodySourceBpm > 0.0 ? juce::String (p.melodySourceBpm, 1) + " BPM" : juce::String ("Unavailable");
+    midiTempoDetails.setText ("File tempo: " + fileTempo + "   |   Playback: "
+                              + juce::String (processor.getLastBpm(), 1) + " BPM", juce::dontSendNotification);
 
     const cs::TriggerConfig tc = processor.getTriggerConfig();
     const char* modeNames[] = { "Auto", "Trig", "Loop" };
@@ -1263,6 +1501,8 @@ void ChordSlotsEditor::updateTransport()
 {
     const bool song = songPanel.isVisible();
     const bool playing = processor.isPreviewPlaying();
+    melodyAuditionButton.setButtonText (processor.isMelodyAuditioning() ? "Stop melody" : "Hear melody");
+    arpAuditionButton.setButtonText (processor.isArpAuditioning() ? "Stop arp" : "Hear arp");
     const bool canExport = ! song || processor.getSong().numEntries > 0;
     playButton.setButtonText (playing ? "Stop" : song ? "Play song" : "Play");
     playButton.setToggleState (playing, juce::dontSendNotification);
@@ -1272,22 +1512,25 @@ void ChordSlotsEditor::updateTransport()
     updateDragTileVisibility();
 }
 
-void ChordSlotsEditor::saveMidi()
+void ChordSlotsEditor::saveMidi (ChordSlotsProcessor::MidiExportMode mode)
 {
-    const bool song = songPanel.isVisible();
+    const bool song = mode == ChordSlotsProcessor::MidiExportMode::Song;
+    const bool arp = mode == ChordSlotsProcessor::MidiExportMode::ArpOnly;
+    const auto midi = processor.createMidiFile (mode);
+    if (midi.getNumTracks() == 0)
+        return;
     const auto start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-        .getChildFile (song ? "ChordSlots Song.mid" : "ChordSlots - " + processor.describeProgression() + ".mid");
-    chooser = std::make_unique<juce::FileChooser> (song ? "Save Song MIDI" : "Save progression MIDI", start, "*.mid");
+        .getChildFile (song ? "ChordSlots Song.mid" : arp ? "ChordSlots Arp.mid"
+                     : "ChordSlots - " + processor.describeProgression() + ".mid");
+    chooser = std::make_unique<juce::FileChooser> (song ? "Save Song MIDI" : arp ? "Save Arp MIDI" : "Save progression MIDI", start, "*.mid");
     juce::Component::SafePointer<ChordSlotsEditor> safe (this);
-    chooser->launchAsync (juce::FileBrowserComponent::saveMode, [safe, song] (const juce::FileChooser& fc)
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode, [safe, song, midi] (const juce::FileChooser& fc)
     {
         if (! safe || fc.getResult() == juce::File()) return;
         const auto file = fc.getResult().withFileExtension ("mid");
-        auto write = [safe, song, file]
+        auto write = [safe, song, file, midi]
         {
             if (! safe) return;
-            const auto mode = song ? ChordSlotsProcessor::MidiExportMode::Song : ChordSlotsProcessor::MidiExportMode::Master;
-            const auto midi = safe->processor.createMidiFile (mode);
             const auto result = SongPanel::saveMidiTo (file, midi, song || midi.getNumTracks() > 1 ? 1 : 0);
             if (result.failed())
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Save MIDI", result.getErrorMessage());
@@ -1362,20 +1605,100 @@ void ChordSlotsEditor::applyShapeStamp (int stampId)
 
 void ChordSlotsEditor::showMidiImportMenu()
 {
+    const auto p = processor.getProgression();
     juce::PopupMenu menu;
     menu.addItem (1, "Analyze MIDI");
-    menu.addItem (2, "Harmonize Melody");
-    menu.addItem (3, "Clear Melody", ! processor.getProgression().melody.empty());
+    menu.addItem (3, "Clear Melody", ! p.melody.empty());
     auto editor = juce::Component::SafePointer<ChordSlotsEditor> (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&analyzeMidiBtn), [editor] (int command)
     {
         if (editor == nullptr)
             return;
-        if (command == 1 || command == 2)
-            editor->importMidi (command == 2);
+        if (command == 1)
+            editor->importMidi (false);
         else if (command == 3)
-            editor->processor.edit ([] (cs::Progression& p, cs::Rng&) { p.melody.clear(); });
+        {
+            editor->processor.stopAlternativeAudition();
+            editor->processor.edit ([] (cs::Progression& p, cs::Rng&)
+            {
+                p.melody.clear();
+                p.melodyFilename.clear();
+                p.melodySourceSteps = 0.0;
+                p.melodySourceBpm = 0.0;
+                p.melodySourceTonic = -1;
+                p.melodySourceScale = -1;
+                p.fitMelodyToLoop = false;
+            });
+        }
     });
+}
+
+void ChordSlotsEditor::updateMidiImportLabel (const cs::Progression& p)
+{
+    startMelodyButton.setButtonText (midiDragOver ? "Release MIDI"
+                                                : p.melody.empty() ? "Start with a Melody" : "Replace Melody");
+}
+
+bool ChordSlotsEditor::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    if (grooveView || songPanel.isVisible() || files.size() != 1)
+        return false;
+    const auto extension = files[0].fromLastOccurrenceOf (".", true, false);
+    return extension.equalsIgnoreCase (".mid") || extension.equalsIgnoreCase (".midi");
+}
+
+void ChordSlotsEditor::fileDragEnter (const juce::StringArray&, int, int)
+{
+    midiDragOver = true;
+    updateMidiImportLabel (processor.getProgression());
+}
+
+void ChordSlotsEditor::fileDragExit (const juce::StringArray&)
+{
+    midiDragOver = false;
+    updateMidiImportLabel (processor.getProgression());
+}
+
+void ChordSlotsEditor::filesDropped (const juce::StringArray& files, int, int)
+{
+    fileDragExit (files);
+    if (! isInterestedInFileDrag (files))
+        return;
+
+    juce::PopupMenu menu;
+    menu.addItem (2, "Harmonize Melody");
+    menu.addItem (1, "Analyze MIDI");
+    auto editor = juce::Component::SafePointer<ChordSlotsEditor> (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&startMelodyButton),
+                        [editor, file = juce::File (files[0])] (int command)
+    {
+        if (editor != nullptr && (command == 1 || command == 2))
+            editor->importMidiFile (file, command == 2);
+    });
+}
+
+void ChordSlotsEditor::importMidiFile (const juce::File& file, bool harmonize)
+{
+    if (! harmonize)
+    {
+        if (processor.loadMidiToCurves (file))
+            processor.edit ([] (cs::Progression& p, cs::Rng& rng) { cs::roll (p, rng); });
+        return;
+    }
+
+    if (! processor.harmonizeMidi (file))
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon, "Harmonize Melody",
+            "Choose a beat-based MIDI file with a pitched track containing 1–4096 notes.");
+        return;
+    }
+
+    processor.stopAlternativeAudition();
+    midiViewBtn.setToggleState (true, juce::dontSendNotification);
+    midiDetailsButton.setToggleState (true, juce::dontSendNotification);
+    timeline.setMidiVisible (true);
+    refresh();
+    resized();
 }
 
 void ChordSlotsEditor::importMidi (bool harmonize)
@@ -1391,15 +1714,7 @@ void ChordSlotsEditor::importMidi (bool harmonize)
         if (editor == nullptr || ! file.existsAsFile())
             return;
 
-        auto& proc = editor->processor;
-        if (harmonize)
-        {
-            if (! proc.harmonizeMidi (file))
-                juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon, "Harmonize Melody",
-                    "Choose a MIDI track with pitched notes and durations (maximum 4096 notes).");
-        }
-        else if (proc.loadMidiToCurves (file))
-            proc.edit ([] (cs::Progression& p, cs::Rng& rng) { cs::roll (p, rng); });
+        editor->importMidiFile (file, harmonize);
     });
 }
 
@@ -1520,16 +1835,24 @@ void ChordSlotsEditor::RollSettingsPanel::paint (juce::Graphics& g)
 void ChordSlotsEditor::paint (juce::Graphics& g)
 {
     g.fillAll (ui::background);
-    for (auto bounds : { railBounds, targetCurvesBounds, footerBounds })
+    g.setColour (ui::panel);
+    g.fillRect (workspaceTabBounds);
+    const auto workspaceAccent = songPanel.isVisible() ? ui::songAccent
+                                                       : grooveView ? ui::feelAccent : ui::harmonyAccent;
+    g.setColour (ui::outline.interpolatedWith (workspaceAccent, 0.30f));
+    g.fillRect (workspaceTabBounds.withTop (workspaceTabBounds.getBottom() - 1));
+
+    for (auto bounds : { railBounds, targetCurvesBounds, footerBounds, midiPanelBounds })
     {
         if (bounds.isEmpty()) continue;
-        g.setColour (ui::panel);
+        const bool isWorkspacePanel = bounds == railBounds || bounds == targetCurvesBounds;
+        g.setColour (ui::panel.interpolatedWith (workspaceAccent, isWorkspacePanel ? 0.045f : 0.0f));
         g.fillRoundedRectangle (bounds.toFloat(), 7.0f);
-        g.setColour (ui::outline);
+        g.setColour (ui::outline.interpolatedWith (workspaceAccent, isWorkspacePanel ? 0.24f : 0.0f));
         g.drawRoundedRectangle (bounds.toFloat().reduced (0.5f), 7.0f, 1.0f);
     }
 
-    g.setColour (ui::text);
+    g.setColour (workspaceAccent);
     if (! railBounds.isEmpty() && ! pickerOverlay.isVisible())
     {
         g.setFont (ui::font (16.0f, true));
@@ -1542,6 +1865,7 @@ void ChordSlotsEditor::paint (juce::Graphics& g)
     if (! targetCurvesBounds.isEmpty())
     {
         auto legend = targetCurvesBounds.reduced (10, 0).withHeight (26);
+        g.setColour (workspaceAccent);
         g.setFont (ui::font (12.0f, true));
         g.drawText ("Target curves", legend.removeFromLeft (116), juce::Justification::centredLeft);
         g.setFont (ui::font (11.0f));
@@ -1560,6 +1884,8 @@ void ChordSlotsEditor::resized()
     const bool drawer = harmony && loopSummary.getToggleState();
     const bool rollOptions = harmony && rollSettingsButton.getToggleState();
     const bool curves = harmony && ! inspecting;
+    const bool midiPanel = harmony && ! midiFilename.getText().isEmpty();
+    const bool midiDetails = midiPanel && midiDetailsButton.getToggleState();
 
     auto setVisible = [] (bool show, std::initializer_list<juce::Component*> controls)
     {
@@ -1569,8 +1895,11 @@ void ChordSlotsEditor::resized()
 
     setVisible (drawer, { &keyBox, &keyLabel, &scaleBox, &keyActionsButton, &barsBox, &barsLabel,
                           &meterBox, &meterLabel, &slotsBox, &slotsLabel, &snapBox, &snapLabel });
-    setVisible (harmony, { &loopSummary, &midiViewBtn, &rollButton, &rollSettingsButton });
-    setVisible (curves, { &lanes, &shapeBox, &resetCurvesBtn, &analyzeMidiBtn, &melodyFit, &melodyFitLabel, &gestures });
+    setVisible (harmony, { &loopSummary, &midiViewBtn, &rollButton, &rollSettingsButton,
+                           &startMelodyButton, &analyzeMidiBtn });
+    setVisible (midiPanel, { &midiFilename, &melodyAuditionButton, &melodyTimingButton, &midiDetailsButton });
+    setVisible (midiDetails, { &midiKeyDetails, &midiTempoDetails, &autoMelodyKeyButton });
+    setVisible (curves, { &lanes, &shapeBox, &resetCurvesBtn, &melodyFit, &melodyFitLabel, &gestures });
     rollSettingsPanel.setVisible (rollOptions);
     fitLabel.setVisible (! song);
     setVisible (rollOptions, { &moodBox, &moodLabel, &lockCaption, &lockRhythm, &lockRoots, &lockColors,
@@ -1582,6 +1911,16 @@ void ChordSlotsEditor::resized()
                   &endingBox, &endingLabel });
     setVisible (feel, { &compBox, &compLabel, &bassPatternBox, &bassPatternLabel, &refeelButton,
                         &strum, &strumLabel, &accent, &accentLabel, &humanize, &humanizeLabel, &gate, &gateLabel });
+    const auto comping = processor.getPerformanceParams();
+    const auto compingStyle = comping.compStyle;
+    const bool showArp = feel && cs::isArpeggio (compingStyle);
+    const bool showPulse = feel && cs::isPulse (compingStyle);
+    const bool showPatternAccent = feel && (showPulse ? cs::pulseRateFor (comping) != 24 : cs::hasCompPatternAccents (compingStyle));
+    setVisible (showArp, { &arpDirectionBox, &arpDirectionLabel, &arpRateBox, &arpRateLabel, &arpLength, &arpLengthLabel, &arpOctavesBox, &arpOctavesLabel,
+                          &arpAuditionButton, &arpSaveButton, &dragArpTile });
+    setVisible (showPulse, { &pulseRateBox, &pulseRateLabel });
+    setVisible (showPatternAccent, { &compPatternAccent, &compPatternAccentLabel });
+    gateLabel.setText (showArp ? "BASS GATE" : "GATE", juce::dontSendNotification);
     setVisible (! song, { &timeline, &splitMidiButton });
 
 
@@ -1595,10 +1934,6 @@ void ChordSlotsEditor::resized()
         row.removeFromLeft (5);
     };
     auto header = area.removeFromTop (32);
-    place (header, harmonyViewButton, 77);
-    place (header, grooveViewButton, 54);
-    place (header, songButton, 54);
-    header.removeFromLeft (14);
     place (header, undoButton, 32);
     place (header, redoButton, 32);
     if (optionsButton.isVisible())
@@ -1611,7 +1946,18 @@ void ChordSlotsEditor::resized()
         place (variations, button, 27);
     place (variations, followButton, 59);
     place (variations, copyVarButton, 62);
-    area.removeFromTop (12);
+    if (standaloneTempo.isVisible())
+    {
+        place (header, standaloneTempo, 118);
+        place (header, autoMidiTempoButton, 43);
+    }
+    area.removeFromTop (6);
+    workspaceTabBounds = area.removeFromTop (31);
+    auto tabs = workspaceTabBounds.withTrimmedTop (3).withTrimmedLeft (5);
+    place (tabs, harmonyViewButton, 85);
+    place (tabs, grooveViewButton, 72);
+    place (tabs, songButton, 72);
+    area.removeFromTop (6);
 
     footerBounds = area.removeFromBottom (45);
     auto footer = footerBounds.reduced (8, 7);
@@ -1620,16 +1966,9 @@ void ChordSlotsEditor::resized()
     if (! song)
     {
         place (footer, fitLabel, 85);
-        auto rollGroup = footer.removeFromLeft (109);
-        if (harmony)
-        {
-            rollButton.setBounds (rollGroup.removeFromLeft (77));
-            rollSettingsButton.setBounds (rollGroup.withTrimmedLeft (2));
-        }
-        else
-        {
-            refeelButton.setBounds (rollGroup.withWidth (88));
-        }
+        auto feelAction = footer.removeFromLeft (109);
+        if (feel)
+            refeelButton.setBounds (feelAction.withWidth (88));
         auto separator = footer.removeFromLeft (15);
         footerSeparator = separator.withSizeKeepingCentre (1, 21);
     }
@@ -1646,7 +1985,7 @@ void ChordSlotsEditor::resized()
     updateTransport();
 
     area.removeFromBottom (9);
-    railBounds = targetCurvesBounds = {};
+    railBounds = targetCurvesBounds = midiPanelBounds = {};
     if (song)
     {
         songPanel.setBounds (area);
@@ -1663,7 +2002,7 @@ void ChordSlotsEditor::resized()
     if (rollOptions)
     {
         const int height = moreOptions.getToggleState() ? 366 : 258;
-        rollSettingsPanel.setBounds (rollButton.getX(), footerBounds.getY() - height - 5, 328, height);
+        rollSettingsPanel.setSize (328, height);
         auto rail = rollSettingsPanel.getLocalBounds().reduced (12, 7).withTrimmedTop (29);
         field (rail, moodLabel, moodBox);
         lockCaption.setBounds (rail.removeFromTop (22));
@@ -1691,6 +2030,21 @@ void ChordSlotsEditor::resized()
         auto rail = railBounds.reduced (12, 7).withTrimmedTop (29);
         field (rail, compLabel, compBox);
         field (rail, bassPatternLabel, bassPatternBox);
+        if (showArp)
+        {
+            field (rail, arpDirectionLabel, arpDirectionBox);
+            field (rail, arpRateLabel, arpRateBox);
+            field (rail, arpLengthLabel, arpLength);
+            field (rail, arpOctavesLabel, arpOctavesBox);
+            auto arpActions = rail.removeFromTop (28).reduced (0, 2);
+            place (arpActions, arpAuditionButton, 94);
+            place (arpActions, arpSaveButton, 90);
+            dragArpTile.setBounds (arpActions);
+        }
+        if (showPulse)
+            field (rail, pulseRateLabel, pulseRateBox);
+        if (showPatternAccent)
+            field (rail, compPatternAccentLabel, compPatternAccent);
         rail.removeFromTop (10);
         field (rail, strumLabel, strum);
         field (rail, accentLabel, accent);
@@ -1701,8 +2055,16 @@ void ChordSlotsEditor::resized()
     }
 
     auto stageHeader = area.removeFromTop (30);
-    loopSummary.setBounds (stageHeader.removeFromLeft (juce::jmin (350, stageHeader.getWidth() - 77)));
     midiViewBtn.setBounds (stageHeader.removeFromRight (70));
+    stageHeader.removeFromRight (6);
+    analyzeMidiBtn.setBounds (stageHeader.removeFromRight (92));
+    stageHeader.removeFromRight (6);
+    place (stageHeader, rollButton, 145);
+    place (stageHeader, rollSettingsButton, 30);
+    place (stageHeader, startMelodyButton, 145);
+    if (rollOptions)
+        rollSettingsPanel.setTopLeftPosition (rollButton.getX(), stageHeader.getBottom() + 5);
+    loopSummary.setBounds (stageHeader.removeFromLeft (juce::jmin (350, stageHeader.getWidth())));
     if (drawer)
     {
         auto key = area.removeFromTop (40).withTrimmedTop (3);
@@ -1724,6 +2086,27 @@ void ChordSlotsEditor::resized()
 
     }
     area.removeFromTop (8);
+    if (midiPanel)
+    {
+        midiPanelBounds = area.removeFromTop (midiDetails ? 63 : 34);
+        auto panel = midiPanelBounds.reduced (7, 4);
+        auto row = panel.removeFromTop (26);
+        midiDetailsButton.setButtonText (midiDetails ? "Hide details" : "Details");
+        midiDetailsButton.setBounds (row.removeFromRight (87));
+        row.removeFromRight (5);
+        melodyTimingButton.setBounds (row.removeFromRight (121));
+        row.removeFromRight (5);
+        melodyAuditionButton.setBounds (row.removeFromRight (108));
+        midiFilename.setBounds (row);
+        if (midiDetails)
+        {
+            panel.removeFromTop (3);
+            autoMelodyKeyButton.setBounds (panel.removeFromRight (139));
+            midiKeyDetails.setBounds (panel.removeFromLeft (panel.getWidth() * 3 / 5));
+            midiTempoDetails.setBounds (panel);
+        }
+        area.removeFromTop (6);
+    }
     const int timelineHeight = midiViewBtn.getToggleState() ? juce::jlimit (137, 210, area.getHeight() - 173) : 120;
     timeline.setBounds (area.removeFromTop (timelineHeight));
     area.removeFromTop (8);
@@ -1740,7 +2123,6 @@ void ChordSlotsEditor::resized()
         gestureHelp.setBounds (area.removeFromBottom (26).reduced (8, 0));
     place (tools, shapeBox, 134);
     place (tools, resetCurvesBtn, 68);
-    place (tools, analyzeMidiBtn, 134);
     tools.removeFromLeft (10);
     place (tools, melodyFitLabel, 86);
     place (tools, melodyFit, 138);

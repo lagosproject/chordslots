@@ -12,6 +12,7 @@
 
 //==============================================================================
 class ChordSlotsEditor final : public juce::AudioProcessorEditor,
+                               public juce::FileDragAndDropTarget,
                                private juce::ChangeListener,
                                private juce::Timer
 {
@@ -22,6 +23,10 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
+    bool isInterestedInFileDrag (const juce::StringArray&) override;
+    void fileDragEnter (const juce::StringArray&, int, int) override;
+    void fileDragExit (const juce::StringArray&) override;
+    void filesDropped (const juce::StringArray&, int, int) override;
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -37,11 +42,13 @@ private:
     void showInputMenu();
     void showOptionsMenu();
     void updateTooltips();
-    void showSongMenu();
+    void showSongView();
     void showKeyActions();
-    void saveMidi();
+    void saveMidi (ChordSlotsProcessor::MidiExportMode mode);
     void showMidiImportMenu();
     void importMidi (bool harmonize);
+    void importMidiFile (const juce::File&, bool harmonize);
+    void updateMidiImportLabel (const cs::Progression&);
     void applyShapeStamp (int stampId);
     bool keyPressed (const juce::KeyPress& key) override;
 
@@ -78,7 +85,13 @@ private:
     juce::TextButton bassPatternBox;
     juce::Label moodLabel, styleLabel, voicingLabel, bassPatternLabel;
     juce::TextButton resetCurvesBtn { "Reset" };
-    juce::TextButton analyzeMidiBtn;
+    juce::TextButton startMelodyButton;
+    juce::TextButton analyzeMidiBtn { "MIDI options" };
+    juce::TextButton melodyAuditionButton { "Hear melody" };
+    juce::TextButton melodyTimingButton { "Original timing" }, midiDetailsButton { "Details" };
+    juce::TextButton autoMelodyKeyButton { "Auto Key & Scale" };
+    juce::Label midiFilename, midiKeyDetails, midiTempoDetails;
+    bool midiDragOver = false;
     juce::Slider melodyFit;
     juce::Label melodyFitLabel;
 
@@ -91,7 +104,7 @@ private:
     juce::ComboBox endingBox;
     juce::Label endingLabel;
     juce::Label adventureLabel, varietyLabel, syncopationLabel, bassMotionLabel;
-    juce::TextButton undoButton { "Undo" }, redoButton { "Redo" }, rollButton { "ROLL" };
+    juce::TextButton undoButton { "Undo" }, redoButton { "Redo" }, rollButton { "Roll Chords" };
     juce::TextButton rollSettingsButton { "Roll settings" };
     struct RollSettingsPanel final : juce::Component
     {
@@ -101,6 +114,10 @@ private:
     // Footer Panel 2: Groove & Feel
     juce::TextButton compBox;
     juce::Label compLabel;
+    juce::ComboBox arpDirectionBox, arpRateBox, arpOctavesBox, pulseRateBox;
+    juce::Label arpDirectionLabel, arpRateLabel, arpLengthLabel, arpOctavesLabel, pulseRateLabel, compPatternAccentLabel;
+    juce::Slider arpLength, compPatternAccent;
+    juce::TextButton arpAuditionButton { "Hear arp" }, arpSaveButton { "Save arp" };
     void showPerformanceBrowser();
     void showBassPatternBrowser();
     void refreshCompingSelection();
@@ -112,6 +129,8 @@ private:
     juce::ComboBox synthModelBox;
     juce::Label synthModelLabel;
     juce::Slider gate, volume;
+    juce::Slider standaloneTempo;
+    juce::TextButton autoMidiTempoButton { "Auto" };
     juce::Label gateLabel, volumeLabel;
     juce::TextButton playButton { "Play" }, saveButton { "Save MIDI" };
     juce::TextButton splitMidiButton { "Split Ch 1/2" };
@@ -120,6 +139,7 @@ private:
     MidiDragTile dragChordsTile;
     MidiDragTile dragBassTile;
     MidiDragTile dragSongTile;
+    MidiDragTile dragArpTile;
     SongPanel songPanel;
 
     // Context / Hint bar & Targeted Rolls
@@ -129,13 +149,16 @@ private:
     juce::AudioProcessorValueTreeState::SliderAttachment gateAttachment, volumeAttachment,
         strumAttachment, accentAttachment, humanizeAttachment;
     juce::AudioProcessorValueTreeState::ButtonAttachment splitMidiAttachment;
-    std::unique_ptr<juce::ParameterAttachment> compAttachment, chordRhythmAttachment;
+    std::unique_ptr<juce::ParameterAttachment> compAttachment, chordRhythmAttachment, pulseRateAttachment, arpDirectionAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> arpRateAttachment, arpOctavesAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> arpLengthAttachment, compPatternAccentAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> synthModelAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
     int keyNamesScale = -1;
     bool refreshing = false;
 
-    juce::Rectangle<int> targetCurvesBounds, railBounds, footerBounds, footerSeparator;
+    juce::Rectangle<int> workspaceTabBounds;
+    juce::Rectangle<int> targetCurvesBounds, railBounds, footerBounds, footerSeparator, midiPanelBounds;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordSlotsEditor)
 };

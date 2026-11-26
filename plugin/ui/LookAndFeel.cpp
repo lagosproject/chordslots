@@ -58,6 +58,36 @@ ChordSlotsLookAndFeel::ChordSlotsLookAndFeel()
 
 void ChordSlotsLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)
 {
+    if (b.getProperties().contains ("workspaceTabAccent"))
+    {
+        const auto accent = juce::Colour::fromString (b.getProperties()["workspaceTabAccent"].toString());
+        const auto bounds = b.getLocalBounds().toFloat();
+        const bool active = b.getToggleState();
+        if (active || over || down)
+        {
+            const auto surface = active ? bounds : bounds.withTrimmedBottom (1.0f);
+            juce::Path shape;
+            shape.addRoundedRectangle (surface.getX(), surface.getY(), surface.getWidth(), surface.getHeight(),
+                                       6.0f, 6.0f, true, true, false, false);
+            g.setGradientFill (juce::ColourGradient::vertical (
+                ui::panel.interpolatedWith (accent, active ? 0.26f : 0.13f), surface.getY(),
+                active ? ui::background : ui::panel, surface.getBottom()));
+            g.fillPath (shape);
+        }
+
+        const auto indicator = bounds.withTrimmedTop (3.0f).withHeight (active ? 2.0f : 1.0f)
+                                     .withSizeKeepingCentre (active ? 34.0f : 18.0f, active ? 2.0f : 1.0f);
+        g.setColour (accent.withAlpha (active || over ? 1.0f : 0.60f));
+        g.fillRoundedRectangle (indicator, 1.0f);
+
+        if (b.hasKeyboardFocus (false))
+        {
+            g.setColour (accent);
+            g.drawRoundedRectangle (bounds.reduced (2.0f), 4.0f, 1.0f);
+        }
+        return;
+    }
+
     const auto r = b.getLocalBounds().toFloat().reduced (0.75f);
     const bool primary = b.getProperties().getWithDefault ("primary", false);
     juce::Colour fill = primary ? ui::accent
@@ -85,6 +115,17 @@ void ChordSlotsLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Butto
 
 void ChordSlotsLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool over, bool down)
 {
+    if (button.getProperties().contains ("workspaceTabAccent"))
+    {
+        const auto accent = juce::Colour::fromString (button.getProperties()["workspaceTabAccent"].toString());
+        const bool active = button.getToggleState();
+        g.setColour (active ? accent.interpolatedWith (ui::text, 0.32f) : over || down ? ui::text : ui::textDim);
+        g.setFont (ui::font (14.0f, active));
+        g.drawText (button.getButtonText(), button.getLocalBounds().withTrimmedTop (4),
+                    juce::Justification::centred);
+        return;
+    }
+
     const auto icon = static_cast<ui::ButtonIcon> ((int) button.getProperties().getWithDefault ("icon", 0));
     if (icon == ui::ButtonIcon::None)
     {

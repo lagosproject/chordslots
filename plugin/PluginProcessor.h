@@ -32,7 +32,12 @@ public:
     void publish();
     cs::PlayData getPlayData (int variationIndex = 0) const;
     double getPublishedBpm() const noexcept { return publishedBpm.load(); }
-    double getLastBpm() const noexcept { return lastBpm.load(); }
+    bool usesStandaloneTempo() const noexcept { return wrapperType == wrapperType_Standalone; }
+    double getStandaloneBpm() const noexcept { return standaloneBpm.load(); }
+    void setStandaloneBpm (double bpm) noexcept;
+    bool isAutoMidiTempoEnabled() const noexcept { return autoMidiTempo.load(); }
+    void setAutoMidiTempoEnabled (bool enabled);
+    double getLastBpm() const noexcept { return usesStandaloneTempo() ? getStandaloneBpm() : lastBpm.load(); }
 
     //==============================================================================
     // Model access (any non-audio thread). Listeners get a change message after
@@ -93,6 +98,10 @@ public:
     void auditionAlternative (int slot, cs::Chord chord, bool inContext);
     void auditionAlternative (const cs::Progression& preview, int slot, bool inContext);
     void stopAlternativeAudition();
+    void auditionMelody();
+    bool isMelodyAuditioning() const noexcept { return partAuditioning.load() == AuditionPart::Melody; }
+    void auditionArp();
+    bool isArpAuditioning() const noexcept { return partAuditioning.load() == AuditionPart::Arp; }
     cs::Rng copyVoicingRng();
     void auditionCompStyle (cs::CompStyle style);
     void auditionBassPattern (const cs::Progression& preview);
@@ -105,7 +114,8 @@ public:
         Master = 0,
         ChordsOnly = 1,
         BassOnly = 2,
-        Song = 3
+        Song = 3,
+        ArpOnly = 4
     };
 
     juce::MidiFile createMidiFile (MidiExportMode mode = MidiExportMode::Master) const;
@@ -117,6 +127,7 @@ public:
     /** Extracts Brightness, Tension, and Energy curves from a dropped MIDI file. */
     bool loadMidiToCurves (const juce::File& file);
     bool harmonizeMidi (const juce::File& file);
+    void setAutoMelodyKey (bool enabled);
     void setSynthModel (PreviewSoundModel model);
     bool isSplitMidi() const noexcept;
     cs::Song getSong() const;
@@ -226,11 +237,13 @@ private:
 
     std::atomic<bool> previewOn { false };
     std::atomic<int> auditionRequest { -1 };
+    enum class AuditionPart { None, Melody, Arp };
     struct AlternativePreview
     {
         juce::MidiMessageSequence notes;
         double secondsPerTick = 0.0;
         bool inContext = false;
+        AuditionPart part = AuditionPart::None;
     };
     juce::SpinLock alternativeLock;
     std::unique_ptr<AlternativePreview> pendingAlternative, activeAlternative;
@@ -238,13 +251,16 @@ private:
     bool alternativeReady = false;
     int alternativeEvent = -1;
     int64_t alternativeSample = 0;
-    std::array<std::array<bool, 128>, 2> alternativeHeld {};
+    std::array<std::array<bool, 128>, 3> alternativeHeld {};
+    std::atomic<AuditionPart> partAuditioning { AuditionPart::None };
     // Packed MIDI variation request: (previous APVTS selection << 2) | target.
     // The previous value lets message-thread service discard a keyswitch made
     // stale by newer host/user automation.
     std::atomic<int> pendingMidiVariation { -1 };
     std::atomic<double> uiStep { -1.0 };
     std::atomic<double> lastBpm { 120.0 };
+    std::atomic<double> standaloneBpm { 120.0 };
+    std::atomic<bool> autoMidiTempo { true };
     std::atomic<double> publishedBpm { 120.0 };
     std::atomic<bool> tempoDirty { false };
 
@@ -303,6 +319,13 @@ private:
     std::atomic<float>* quantizeSwitchParam = nullptr;
     std::atomic<float>* compStyleParam = nullptr;
     std::atomic<float>* chordRhythmParam = nullptr;
+    std::atomic<float>* arpRateParam = nullptr;
+    std::atomic<float>* arpLengthParam = nullptr;
+    std::atomic<float>* pulseRateParam = nullptr;
+    std::atomic<float>* arpOctavesParam = nullptr;
+    std::atomic<float>* arpDirectionParam = nullptr;
+    std::atomic<float>* compHitLengthParam = nullptr;
+    std::atomic<float>* compPatternAccentParam = nullptr;
     std::atomic<float>* synthModelParam = nullptr;
 
     std::atomic<int> hostTimeSigNum { 4 };

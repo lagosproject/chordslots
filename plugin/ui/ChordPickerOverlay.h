@@ -41,7 +41,9 @@ private:
     {
     public:
         AuditionButton (const juce::String& label, std::array<float, 3> deltas,
-                        juce::String outsideNotes, const juce::String& scaleDetails);
+                        juce::String outsideNotes, const juce::String& scaleDetails,
+                        int melodyPercent, juce::String clashes, bool showMelody,
+                        std::array<float, 2> original, std::array<float, 2> targets);
         void resized() override;
         void mouseDown (const juce::MouseEvent&) override;
         void mouseUp (const juce::MouseEvent&) override;
@@ -57,9 +59,13 @@ private:
         void paintButton (juce::Graphics&, bool, bool) override;
         void timerCallback() override;
         std::array<float, 3> deltas;
+        std::array<float, 2> original, targets;
         juce::String outsideNotes;
         std::array<juce::Rectangle<int>, 3> cells;
-        juce::Rectangle<int> nameBounds;
+        juce::Rectangle<int> nameBounds, melodyBounds;
+        int melodyPercent;
+        juce::String clashes;
+        bool showMelody;
         bool pressed = false;
         bool fired = false;
         bool cancelled = false;
@@ -76,6 +82,7 @@ private:
     juce::Viewport alternativesViewport;
     juce::Label outsideHeading, emptyGroup;
     bool alternativesMode = true;
+    int currentMelodyPercent = -1;
     juce::Label titleLabel;
 
     // 12 Chromatic Roots

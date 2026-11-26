@@ -110,16 +110,6 @@ void LanesView::paint (juce::Graphics& g)
         g.drawText (text, pill.toNearestInt(), juce::Justification::centred, false);
     }
 
-    if (isDragOver)
-    {
-        g.setColour (ui::accent.withAlpha (0.25f));
-        g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
-        g.setColour (ui::accent);
-        g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 6.0f, 2.0f);
-        g.setFont (ui::font (14.0f, true));
-        g.setColour (juce::Colours::white);
-        g.drawText ("Drop MIDI file here to extract target curves", getLocalBounds(), juce::Justification::centred);
-    }
 }
 
 juce::String LanesView::getTooltip()
@@ -195,7 +185,6 @@ void LanesView::applyDrag (const juce::MouseEvent& e)
         }
     }, false);
 }
-
 void LanesView::mouseDown (const juce::MouseEvent& e)
 {
     dragLane = -1;
@@ -228,38 +217,4 @@ void LanesView::mouseUp (const juce::MouseEvent&)
         else
             cs::rerollSlots (p, mask, rng);
     }, false);
-}
-
-bool LanesView::isInterestedInFileDrag (const juce::StringArray& files)
-{
-    for (const auto& f : files)
-        if (f.endsWithIgnoreCase (".mid") || f.endsWithIgnoreCase (".midi"))
-            return true;
-    return false;
-}
-
-void LanesView::fileDragEnter (const juce::StringArray&, int, int)
-{
-    isDragOver = true;
-    repaint();
-}
-
-void LanesView::fileDragExit (const juce::StringArray&)
-{
-    isDragOver = false;
-    repaint();
-}
-
-void LanesView::filesDropped (const juce::StringArray& files, int, int)
-{
-    isDragOver = false;
-    for (const auto& f : files)
-    {
-        if (f.endsWithIgnoreCase (".mid") || f.endsWithIgnoreCase (".midi"))
-        {
-            processor.loadMidiToCurves (juce::File (f));
-            break;
-        }
-    }
-    repaint();
 }

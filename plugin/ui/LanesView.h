@@ -6,7 +6,6 @@
 #include "LookAndFeel.h"
 
 class LanesView final : public juce::Component,
-                        public juce::FileDragAndDropTarget,
                         public juce::TooltipClient
 {
 public:
@@ -22,11 +21,6 @@ public:
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
 
-    bool isInterestedInFileDrag (const juce::StringArray& files) override;
-    void fileDragEnter (const juce::StringArray&, int, int) override;
-    void fileDragExit (const juce::StringArray&) override;
-    void filesDropped (const juce::StringArray& files, int, int) override;
-
 private:
     juce::Rectangle<float> laneBounds (int lane) const;
     void applyDrag (const juce::MouseEvent&);
@@ -39,6 +33,5 @@ private:
     int selectedSlot = -1;
     int dragLane = -1;
     unsigned editedMask = 0;
-    bool isDragOver = false;
     int readoutLane = -1, readoutSlot = -1; // value shown for the lane and slot under the pointer
 };

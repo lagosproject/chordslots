@@ -5,18 +5,21 @@ namespace
 {
 inline juce::String utf8 (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
 constexpr std::array<int, 3> compactMetricWidths { 38, 39, 42 };
-constexpr std::array<int, 3> wideMetricWidths { 62, 76, 60 };
-constexpr std::array<const char*, 3> metricNames { "Tension", "Brightness", "Match" };
+constexpr std::array<int, 3> wideMetricWidths { 62, 76, 78 };
+constexpr std::array<const char*, 3> metricNames { "Tension", "Brightness", "Curve Match" };
 constexpr int replaceWidth = 57;
 constexpr int auditionWidth = 57;
 constexpr int rowHeight = 30;
 constexpr auto matchDescription = "Match measures how closely the whole progression follows its target tension and brightness curves.";
+constexpr auto melodyMatchDescription = "Melody Match weights the notes sounding in this slot by overlap duration and strong beats. Melody Fit controls how much this affects chord selection.";
 
-std::array<juce::Rectangle<int>, 3> metricCells (juce::Rectangle<int>& area)
+std::array<juce::Rectangle<int>, 3> metricCells (juce::Rectangle<int>& area, juce::Rectangle<int>* melody)
 {
     std::array<juce::Rectangle<int>, 3> cells;
     const auto& widths = area.getWidth() >= 450 ? wideMetricWidths : compactMetricWidths;
     area.removeFromRight (replaceWidth + auditionWidth);
+    if (melody != nullptr)
+        *melody = area.removeFromRight (140);
     for (int i = 2; i >= 0; --i)
         cells[(size_t) i] = area.removeFromRight (widths[(size_t) i]);
     return cells;
@@ -32,10 +35,13 @@ void useReplacement (cs::Progression& p, int slot, const cs::Slot& replacement)
 }
 
 ChordPickerOverlay::AuditionButton::AuditionButton (const juce::String& label, std::array<float, 3> changes,
-                                                  juce::String notes, const juce::String& scaleDetails)
-    : juce::TextButton (label), deltas (changes), outsideNotes (std::move (notes))
+                                                  juce::String notes, const juce::String& scaleDetails,
+                                                  int melodyScore, juce::String clashNotes, bool showMelodyColumn,
+                                                  std::array<float, 2> previous, std::array<float, 2> goals)
+    : juce::TextButton (label), deltas (changes), original (previous), targets (goals), outsideNotes (std::move (notes)),
+      melodyPercent (melodyScore), clashes (std::move (clashNotes)), showMelody (showMelodyColumn)
 {
-    setTooltip (label + scaleDetails + "\nClick to hear this chord. Hold to hear it in the progression.");
+    setTooltip (label + scaleDetails + "\nClick to hear this chord. Hold to hear it with the progression and any imported melody.");
     replace.setTooltip ("Replace the current chord with " + label + ".");
     addAndMakeVisible (replace);
     addAndMakeVisible (audition);
@@ -54,7 +60,7 @@ void ChordPickerOverlay::AuditionButton::resized()
     replace.setBounds (area.removeFromRight (replaceWidth).reduced (5, 3));
     audition.setBounds (area.removeFromRight (auditionWidth).reduced (3, 3));
     nameBounds = getLocalBounds();
-    cells = metricCells (nameBounds);
+    cells = metricCells (nameBounds, showMelody ? &melodyBounds : nullptr);
     nameBounds = nameBounds.reduced (9, 0);
 }
 
@@ -88,12 +94,30 @@ void ChordPickerOverlay::AuditionButton::paintButton (juce::Graphics& g, bool ov
         const int points = juce::roundToInt (100.0f * deltas[i]);
         g.drawText ((points > 0 ? "+" : "") + juce::String (points), cells[i], juce::Justification::centred);
     }
+    if (showMelody)
+    {
+        auto melodyLabel = melodyPercent >= 0 ? juce::String (melodyPercent) + "%" : juce::String::fromUTF8 ("—");
+        if (clashes.isNotEmpty())
+            melodyLabel += "  Clash: " + clashes;
+        g.setFont (ui::font (11.5f, clashes.isNotEmpty()));
+        g.setColour (clashes.isNotEmpty() ? ui::tension.brighter (0.45f) : ui::text);
+        g.drawFittedText (melodyLabel, melodyBounds.reduced (3, 0), juce::Justification::centred, 1, 0.8f);
+    }
 }
 
 juce::String ChordPickerOverlay::AuditionButton::getTooltip()
 {
     auto tooltip = juce::TextButton::getTooltip();
     const auto pos = getMouseXYRelative();
+    if (showMelody && melodyBounds.contains (pos))
+    {
+        if (melodyPercent < 0)
+            return "No imported melody notes sound in this slot.";
+        auto description = juce::String (melodyPercent) + "% Melody Match. " + melodyMatchDescription;
+        if (clashes.isNotEmpty())
+            description += "\nStrongest clash pitches in the imported melody: " + clashes;
+        return description;
+    }
     for (size_t i = 0; i < cells.size(); ++i)
     {
         if (! cells[i].contains (pos))
@@ -103,6 +127,12 @@ juce::String ChordPickerOverlay::AuditionButton::getTooltip()
                 + juce::String (points, 3) + " points (0-100 scale)";
         if (i == 2)
             tooltip += "\n" + juce::String (matchDescription);
+        else
+        {
+            const auto display = [] (float value) { return juce::String (juce::roundToInt (100.0f * value)); };
+            tooltip += "\nCurrent " + display (original[i]) + ", alternative " + display (original[i] + deltas[i])
+                    + ", target " + display (targets[i]) + ".";
+        }
         break;
     }
     return tooltip;
@@ -363,11 +393,16 @@ void ChordPickerOverlay::rebuildCandidates()
 {
     cancelGestures();
     candidateButtons.clear();
+    currentMelodyPercent = -1;
     if (currentSlot < 0 || currentSlot >= prog.numSlots)
         return;
 
     const float currentFit = cs::fitScore (prog);
     const auto& current = prog.slots[(size_t) currentSlot];
+    const auto melody = cs::slotMelodyProfile (prog, currentSlot, true);
+    const bool melodySounds = std::any_of (melody.begin(), melody.end(), [] (float duration) { return duration > 0.0f; });
+    if (melodySounds)
+        currentMelodyPercent = juce::roundToInt (100.0f * cs::melodyMatch (current.chord, melody));
     const auto rng = processor.copyVoicingRng();
 
     auto addCandidate = [&] (const cs::Slot& replacement, float fitDelta, cs::ScaleMembership scale)
@@ -390,9 +425,17 @@ void ChordPickerOverlay::rebuildCandidates()
             details += "\nSeparate bass outside scale: "
                      + utf8 (cs::pitchClassName (replacement.chord.bassPc(), prog.tonic, prog.scale));
 
+        const auto clashMask = cs::melodyClashMask (replacement.chord, melody);
+        juce::StringArray clashNotes;
+        for (int pc = 0; pc < 12; ++pc)
+            if ((clashMask & (1u << pc)) != 0)
+                clashNotes.add (utf8 (cs::pitchClassName (pc, prog.tonic, prog.scale)));
+        const int melodyPercent = melodySounds
+            ? juce::roundToInt (100.0f * cs::melodyMatch (replacement.chord, melody)) : -1;
         auto row = std::make_unique<AuditionButton> (label,
             std::array<float, 3> { replacement.tension - current.tension, replacement.brightness - current.brightness, fitDelta },
-            std::move (outsideNotes), details);
+            std::move (outsideNotes), details, melodyPercent, clashNotes.joinIntoString (", "), ! prog.melody.empty(),
+            std::array<float, 2> { current.tension, current.brightness }, std::array<float, 2> { current.targetT, current.targetB });
         const int slot = currentSlot;
         const int variation = contextVariation;
         row->onAudition = [this, slot, variation, replacement] (bool inContext)
@@ -534,19 +577,24 @@ void ChordPickerOverlay::paint (juce::Graphics& g)
                 return juce::String (juce::roundToInt (100.0f * target)) + juce::String::fromUTF8 (" → ")
                     + juce::String (juce::roundToInt (100.0f * actual));
             };
-            const auto summary = juce::String::fromUTF8 ("Target → actual    Brightness ") + pair (slot.targetB, slot.brightness)
+            auto summary = juce::String::fromUTF8 ("Target → actual    Brightness ") + pair (slot.targetB, slot.brightness)
                 + "    Tension " + pair (slot.targetT, slot.tension)
                 + "    Energy " + pair (slot.targetE, slot.energy);
+            if (currentMelodyPercent >= 0)
+                summary += "    Current Melody Match " + juce::String (currentMelodyPercent) + "%";
             g.drawFittedText (summary, targetSummaryBounds, juce::Justification::centredLeft, 1);
         }
 
         auto header = candidateArea.withTrimmedRight (alternativesViewport.getScrollBarThickness());
-        const auto cells = metricCells (header);
+        juce::Rectangle<int> melodyHeader;
+        const auto cells = metricCells (header, prog.melody.empty() ? nullptr : &melodyHeader);
         g.setFont (ui::font (11.0f, true));
         g.drawText ("Chord", header.reduced (9, 0), juce::Justification::centredLeft);
         for (size_t i = 0; i < cells.size(); ++i)
-            g.drawText (getWidth() >= 480 ? metricNames[i] : i == 0 ? "Tens." : i == 1 ? "Bright" : metricNames[i],
+            g.drawText (getWidth() >= 480 ? metricNames[i] : i == 0 ? "Tens." : i == 1 ? "Bright" : "Match",
                         cells[i], juce::Justification::centred);
+        if (! melodyHeader.isEmpty())
+            g.drawText ("Melody Match", melodyHeader, juce::Justification::centred);
         return;
     }
 

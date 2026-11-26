@@ -14,6 +14,9 @@ const juce::Colour text       { 0xffe9ebf2 };
 const juce::Colour textDim    { 0xffa0a7bc }; // higher contrast textDim (was 0xff8d93a6)
 const juce::Colour textMuted  { 0xff70778c };
 const juce::Colour accent     { 0xff7aa2ff };
+const juce::Colour harmonyAccent { 0xff9bb5ff };
+const juce::Colour feelAccent { 0xff80dcc3 };
+const juce::Colour songAccent { 0xffefba7c };
 const juce::Colour brightness { 0xffe6b562 };
 const juce::Colour tension    { 0xffee9bb0 };
 const juce::Colour energy     { 0xff7fd3c4 };

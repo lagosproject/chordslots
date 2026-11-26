@@ -125,18 +125,19 @@ struct Host
         checks that on/off events are properly paired. */
     int heldAfterReplay() const
     {
-        std::map<int, int> held;
+        std::map<std::pair<int, int>, int> held;
         for (const auto& e : events)
         {
+            auto& count = held[{ e.channel, e.note }];
             if (e.on)
             {
-                CHECK (held[e.note] == 0); // never re-trigger a note that is still held
-                ++held[e.note];
+                CHECK (count == 0); // never re-trigger a note that is still held
+                ++count;
             }
             else
             {
-                CHECK (held[e.note] == 1); // never release a note that is not held
-                --held[e.note];
+                CHECK (count == 1); // never release a note that is not held
+                --count;
             }
         }
         int n = 0;
@@ -305,6 +306,49 @@ void testPreviewAndAudition()
     h.processor.setPreviewPlaying (false);
     h.run (4);
     CHECK (h.heldAfterReplay() == 0);
+}
+
+void testStandaloneTempo()
+{
+    using Processor = juce::AudioProcessor;
+    Processor::setTypeOfNextNewPlugin (Processor::wrapperType_Standalone);
+    Host h;
+    Processor::setTypeOfNextNewPlugin (Processor::wrapperType_Undefined);
+    h.processor.edit ([] (cs::Progression& p, cs::Rng&)
+    {
+        p.melodySourceSteps = 96.0;
+        p.melody = { { 0.25, 0.5, 72 } };
+    });
+
+    std::unique_ptr<juce::AudioProcessorEditor> editor (h.processor.createEditor());
+    auto* tempo = dynamic_cast<juce::Slider*> (editor->findChildWithID ("standalone-bpm"));
+    CHECK (tempo != nullptr && tempo->isVisible());
+    if (tempo == nullptr)
+        return;
+    tempo->setValue (90.0, juce::sendNotificationSync);
+    CHECK (h.processor.getLastBpm() == 90.0);
+    CHECK (! h.processor.isAutoMidiTempoEnabled());
+    const auto midi = h.processor.createMidiFile();
+    const auto* track = midi.getTrack (0);
+    CHECK (std::any_of (track->begin(), track->end(), [] (const auto* event)
+    {
+        const auto& message = event->message;
+        return message.isTempoMetaEvent() && std::abs (message.getTempoSecondsPerQuarterNote() - 60.0 / 90.0) < 1.0e-6;
+    }));
+
+    h.processor.auditionMelody();
+    h.run (1 + (int) (32000 / h.blockSize));
+    CHECK (std::any_of (h.events.begin(), h.events.end(), [] (const auto& e)
+    {
+        return e.on && e.channel == 3 && e.note == 72 && e.sample == 32000;
+    }));
+
+    juce::MemoryBlock state;
+    h.processor.getStateInformation (state);
+    tempo->setValue (140.0, juce::sendNotificationSync);
+    h.processor.setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (h.processor.getStandaloneBpm() == 90.0);
+    CHECK (! h.processor.isAutoMidiTempoEnabled());
 }
 
 void testAcousticPianoPreview()
@@ -543,6 +587,179 @@ void testBassAndArpAuditions()
     }
 }
 
+void testConfigurableArpComping()
+{
+    using Mode = ChordSlotsProcessor::MidiExportMode;
+    Host h;
+    const auto setParam = [&] (const char* id, float value)
+    {
+        auto* param = h.processor.apvts.getParameter (id);
+        param->setValueNotifyingHost (param->convertTo0to1 (value));
+    };
+    CHECK (h.processor.createMidiFile (Mode::ArpOnly).getNumTracks() == 0);
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor (h.processor.createEditor());
+        for (auto* child : editor->getChildren())
+            if (auto* button = dynamic_cast<juce::TextButton*> (child);
+                button != nullptr && button->getButtonText() == "Feel")
+                button->onClick();
+
+        auto* rate = editor->findChildWithID ("arp-rate");
+        auto* direction = dynamic_cast<juce::ComboBox*> (editor->findChildWithID ("arp-direction"));
+        auto* length = editor->findChildWithID ("arp-length");
+        auto* octaves = editor->findChildWithID ("arp-octaves");
+        auto* pulseRate = dynamic_cast<juce::ComboBox*> (editor->findChildWithID ("pulse-rate"));
+        auto* patternAccent = editor->findChildWithID ("comp-pattern-accent");
+        auto* hear = editor->findChildWithID ("hear-arp");
+        CHECK (rate != nullptr && length != nullptr && octaves != nullptr && pulseRate != nullptr && patternAccent != nullptr && hear != nullptr);
+        CHECK (editor->findChildWithID ("comp-hit-length") == nullptr);
+        CHECK (direction != nullptr && ! direction->isVisible());
+        if (rate != nullptr && length != nullptr && octaves != nullptr && pulseRate != nullptr && patternAccent != nullptr && hear != nullptr)
+        {
+            CHECK (! rate->isVisible() && ! length->isVisible() && ! octaves->isVisible() && ! hear->isVisible());
+            CHECK (! pulseRate->isVisible() && ! patternAccent->isVisible());
+            setParam ("chordRhythm", (float) ((int) cs::CompStyle::ArpUpDown - cs::kNumCompStyles + 1));
+            editor->resized();
+            CHECK (rate->isVisible() && length->isVisible() && octaves->isVisible() && hear->isVisible());
+            if (direction != nullptr)
+            {
+                CHECK (direction->isVisible());
+                direction->setSelectedId (2, juce::sendNotificationSync);
+                CHECK (h.processor.getPerformanceParams().compStyle == cs::CompStyle::ArpDown);
+            }
+            CHECK (! pulseRate->isVisible() && ! patternAccent->isVisible());
+            setParam ("chordRhythm", 0);
+            CHECK (h.processor.getPerformanceParams().arpDirection == cs::CompStyle::ArpDown);
+            setParam ("compStyle", (float) cs::CompStyle::PulseEighth);
+            editor->resized();
+            CHECK (direction != nullptr && ! direction->isVisible());
+            CHECK (! rate->isVisible() && ! length->isVisible() && ! octaves->isVisible() && ! hear->isVisible());
+            CHECK (pulseRate->isVisible() && patternAccent->isVisible());
+            pulseRate->setSelectedId (5, juce::sendNotificationSync);
+            CHECK (h.processor.getPerformanceParams().pulseRateSteps == 6);
+            setParam ("pulseRate", 0);
+            setParam ("arpDirection", 0);
+            setParam ("compStyle", (float) cs::CompStyle::Sustain);
+        }
+    }
+    h.processor.edit ([] (cs::Progression& p, cs::Rng& rng)
+    {
+        p.bars = 1;
+        p.numSlots = 2;
+        cs::layoutEven (p);
+        cs::setChord (p, 0, { 0, 0 }, rng);
+        cs::setChord (p, 1, { 5, 0 }, rng);
+    });
+    const auto readNotes = [] (const juce::MidiFile& file)
+    {
+        std::vector<std::pair<double, int>> notes;
+        if (file.getNumTracks() > 0)
+            for (const auto* e : *file.getTrack (0))
+                if (e->message.isNoteOn())
+                    notes.emplace_back (e->message.getTimeStamp(), e->message.getNoteNumber());
+        return notes;
+    };
+    const auto chords = readNotes (h.processor.createMidiFile());
+    setParam ("chordRhythm", (float) ((int) cs::CompStyle::ArpUp - cs::kNumCompStyles + 1));
+    CHECK (readNotes (h.processor.createMidiFile()) != chords);
+    const auto up = readNotes (h.processor.createMidiFile (Mode::ArpOnly));
+    CHECK (up.size() == 8 && up[0].second < up[1].second);
+    const auto original = h.processor.getProgression();
+    const auto& voiced = original.slots[0].voicing;
+    CHECK (! up.empty() && up.front().second == voiced.notes[(size_t) voiced.bassCount]);
+
+    h.processor.edit ([] (cs::Progression& p, cs::Rng& rng) { cs::setChord (p, 1, { 7, 0 }, rng); });
+    const auto updated = readNotes (h.processor.createMidiFile (Mode::ArpOnly));
+    CHECK (updated.size() == 8 && updated[4].first == 960.0);
+    if (up.size() == 8 && updated.size() == 8)
+    {
+        CHECK (std::equal (up.begin(), up.begin() + 4, updated.begin()));
+        CHECK (! std::equal (up.begin() + 4, up.end(), updated.begin() + 4));
+    }
+
+    setParam ("chordRhythm", (float) ((int) cs::CompStyle::ArpDown - cs::kNumCompStyles + 1));
+    setParam ("arpRate", 4);
+    setParam ("arpLength", 50);
+    setParam ("gate", 0.5f);
+    const auto arpMidi = h.processor.createMidiFile (Mode::ArpOnly);
+    const auto down = readNotes (arpMidi);
+    CHECK (down.size() == 16 && down[0].second > down[1].second && down[1].first == 120.0);
+    CHECK (down == readNotes (h.processor.createMidiFile (Mode::ChordsOnly)));
+    for (const auto* event : *arpMidi.getTrack (0))
+        if (event->message.isNoteOn())
+            CHECK (event->noteOffObject != nullptr
+                   && event->noteOffObject->message.getTimeStamp() - event->message.getTimeStamp() == 59.0);
+    h.processor.auditionArp();
+    h.run (1);
+    CHECK (h.processor.isArpAuditioning());
+    h.run ((int) std::ceil (2.0 * h.sampleRate / h.blockSize));
+    CHECK (! h.processor.isArpAuditioning());
+    std::vector<std::pair<double, int>> heard;
+    for (const auto& e : h.events)
+        if (e.on)
+            heard.emplace_back (e.sample / 50.0, e.note);
+    CHECK (heard == down && h.heldAfterReplay() == 0);
+
+    juce::MemoryBlock state;
+    h.processor.getStateInformation (state);
+    Host restored;
+    restored.processor.setStateInformation (state.getData(), (int) state.getSize());
+    const auto restoredPerf = restored.processor.getPerformanceParams();
+    CHECK (restoredPerf.compStyle == cs::CompStyle::ArpDown);
+    CHECK (restoredPerf.arpRateSteps == 6 && restoredPerf.arpLength == 0.5f);
+    auto legacy = juce::ValueTree::fromXml (*juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize()));
+    auto parameters = legacy.getChildWithName ("Params");
+    parameters.removeChild (parameters.getChildWithProperty ("id", "arpDirection"), nullptr);
+    juce::AudioProcessor::copyXmlToBinary (*legacy.createXml(), state);
+    restored.processor.setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (restored.processor.getPerformanceParams().compStyle == cs::CompStyle::ArpDown);
+    auto* rhythm = restored.processor.apvts.getParameter ("chordRhythm");
+    rhythm->setValueNotifyingHost (0.0f);
+    CHECK (restored.processor.getPerformanceParams().arpDirection == cs::CompStyle::ArpDown);
+    rhythm->setValueNotifyingHost (rhythm->convertTo0to1 ((float) ((int) cs::CompStyle::ArpUp - cs::kNumCompStyles + 1)));
+    CHECK (restored.processor.getPerformanceParams().compStyle == cs::CompStyle::ArpDown);
+    restored.processor.edit ([] (cs::Progression& p, cs::Rng&)
+    {
+        p.bars = 8;
+        p.numSlots = 1;
+    });
+    CHECK (readNotes (restored.processor.createMidiFile (Mode::ArpOnly)).size() == 128);
+
+    setParam ("arpOctaves", 1);
+    setParam ("chordRhythm", (float) ((int) cs::CompStyle::ArpUpDown - cs::kNumCompStyles + 1));
+    h.processor.edit ([] (cs::Progression& p, cs::Rng&) { p.numSlots = 1; p.bars = 4; });
+    std::vector<int> ascending;
+    for (int octave : { 0, 12 })
+        for (int i = voiced.bassCount; i < voiced.n; ++i)
+            if (voiced.notes[(size_t) i] + octave <= 127)
+                ascending.push_back (voiced.notes[(size_t) i] + octave);
+    std::sort (ascending.begin(), ascending.end());
+    ascending.erase (std::unique (ascending.begin(), ascending.end()), ascending.end());
+    const auto upDown = readNotes (h.processor.createMidiFile (Mode::ArpOnly));
+    CHECK (ascending.size() > 2 && upDown.size() == 64);
+    if (ascending.size() > 2 && upDown.size() >= 2 * ascending.size())
+    {
+        for (size_t i = 0; i < ascending.size(); ++i)
+            CHECK (upDown[i].second == ascending[i]);
+        CHECK (upDown[ascending.size()].second == ascending[ascending.size() - 2]);
+        CHECK (upDown[2 * ascending.size() - 2].second == ascending.front());
+        CHECK (upDown[2 * ascending.size() - 1].second == ascending[1]);
+    }
+
+    setParam ("chordRhythm", 0);
+    setParam ("compStyle", (float) cs::CompStyle::PulseEighth);
+    setParam ("compHitLength", 50);
+    setParam ("compPatternAccent", 0);
+    const auto pulse = h.processor.getPlayData().slots[0];
+    CHECK (pulse.hitAt (1).stepOffset == 12);
+    CHECK (pulse.hitAt (1).durationSteps == 5 && pulse.hitAt (1).velScale == 1.0f);
+    setParam ("pulseRate", 5);
+    h.processor.edit ([] (cs::Progression& p, cs::Rng&) { p.bars = 8; });
+    const auto fastPulse = h.processor.getPlayData().slots[0];
+    CHECK (fastPulse.numHits == 128);
+    CHECK (fastPulse.hitAt (127).stepOffset == 762);
+}
+
 void testSeparatorLocksAndAlternativeAudition()
 {
     Host host;
@@ -559,6 +776,7 @@ void testSeparatorLocksAndAlternativeAudition()
         cs::roll (p, rng);
         CHECK (p.slots[1].start == pinned);
         CHECK (! p.slots[1].locked);
+        p.melody = { { 0.0, 0.125, 96 } };
     });
 
     juce::MemoryBlock saved;
@@ -578,12 +796,19 @@ void testSeparatorLocksAndAlternativeAudition()
     restored.run (1);
     const auto isolated = restored.events;
     CHECK (! isolated.empty());
-    CHECK (std::all_of (isolated.begin(), isolated.end(), [] (const auto& e) { return e.on && e.sample == 0; }));
+    CHECK (std::all_of (isolated.begin(), isolated.end(), [] (const auto& e)
+    {
+        return e.on && e.sample == 0 && e.channel != 3;
+    }));
 
     restored.processor.auditionAlternative (1, alternatives.front(), true);
     const int loopBlocks = (int) std::ceil (before.lengthSteps() * samplesPerStep (restored) / restored.blockSize);
     restored.run (loopBlocks + 4);
     CHECK (restored.events.size() > isolated.size() * 2);
+    CHECK (std::any_of (restored.events.begin(), restored.events.end(), [] (const auto& e)
+    {
+        return e.on && e.channel == 3 && e.note == 96;
+    }));
     CHECK (restored.heldAfterReplay() == 0);
     restored.processor.auditionAlternative (1, alternatives.front(), true);
     restored.run (1);
@@ -1008,6 +1233,11 @@ void testHarmonizeMelody()
     }
     addNote (melody, 2, 64, 120, 600);
     addNote (melody, 2, 67, 480, 960);
+    accompaniment.addEvent (juce::MidiMessage::tempoMetaEvent (500000), 0);
+    accompaniment.addEvent (juce::MidiMessage::keySignatureMetaEvent (-1, true), 0);
+    accompaniment.addEvent (juce::MidiMessage::tempoMetaEvent (400000), 960);
+    melody.addEvent (juce::MidiMessage::tempoMetaEvent (600000), 240);
+    melody.addEvent (juce::MidiMessage::endOfTrack(), 1920);
 
     juce::MidiFile midi;
     midi.setTicksPerQuarterNote (480);
@@ -1022,7 +1252,7 @@ void testHarmonizeMelody()
     }
 
     Host host;
-    const int slots = host.processor.getProgression().numSlots;
+    const auto before = host.processor.getProgression();
     CHECK (host.processor.harmonizeMidi (file));
     host.processor.edit ([] (cs::Progression& p, cs::Rng&) { p.melodyFit = 0.4f; }, false);
     juce::MemoryBlock state;
@@ -1031,17 +1261,132 @@ void testHarmonizeMelody()
     Host restored;
     restored.processor.setStateInformation (state.getData(), (int) state.getSize());
     const auto p = restored.processor.getProgression();
-    CHECK (p.numSlots == slots);
+    CHECK (p.numSlots == before.numSlots);
+    for (int i = 0; i < p.numSlots; ++i)
+        CHECK (p.slots[(size_t) i].start == before.slots[(size_t) i].start);
     CHECK (std::abs (p.melodyFit - 0.4f) < 1.0e-5f);
+    CHECK (! p.fitMelodyToLoop && p.melodyLengthSteps() == 96.0);
+    CHECK (p.melodySourceBpm == 120.0);
+    CHECK (p.melodyFilename == file.getFileName().toStdString());
+    CHECK (p.melodySourceTonic == 2 && p.melodySourceScale == 1);
+    CHECK (! p.autoMelodyKey && p.tonic == before.tonic && p.scale == before.scale);
     CHECK (p.melody.size() == 2);
     if (p.melody.size() == 2)
     {
         CHECK (p.melody[0].pitch == 64 && p.melody[1].pitch == 67);
-        CHECK (std::abs (p.melody[0].start - 0.125f) < 1.0e-5f);
-        CHECK (std::abs (p.melody[0].end - 0.625f) < 1.0e-5f);
-        CHECK (std::abs (p.melody[1].start - 0.5f) < 1.0e-5f);
-        CHECK (p.melody[1].end == 1.0f);
+        CHECK (p.melody[0].start == 0.0625 && p.melody[0].end == 0.3125);
+        CHECK (p.melody[1].start == 0.25 && p.melody[1].end == 0.5);
     }
+
+    const auto checkAudition = [] (Host& h, double expectedStart, double expectedEnd)
+    {
+        h.events.clear();
+        const auto start = h.position;
+        const auto sps = samplesPerStep (h);
+        h.processor.apvts.getParameter ("splitMidi")->setValueNotifyingHost (1.0f);
+        h.processor.auditionMelody();
+        h.run (1);
+        CHECK (h.processor.isMelodyAuditioning());
+        h.run ((int) std::ceil (h.processor.getProgression().lengthSteps() * sps / h.blockSize) + 1);
+        CHECK (! h.processor.isMelodyAuditioning());
+        for (int channel : { 1, 2 })
+            CHECK (std::any_of (h.events.begin(), h.events.end(), [channel] (const auto& e) { return e.on && e.channel == channel; }));
+        for (bool on : { true, false })
+        {
+            const auto expectedSample = start + std::llround ((on ? expectedStart : expectedEnd) * sps);
+            CHECK (std::any_of (h.events.begin(), h.events.end(), [=] (const auto& e)
+            {
+                return e.channel == 3 && e.note == 64 && e.on == on && e.sample == expectedSample
+                    && (! on || e.velocity == 90);
+            }));
+        }
+        CHECK (h.heldAfterReplay() == 0);
+    };
+    checkAudition (restored, 6.0, 30.0);
+    restored.processor.edit ([] (cs::Progression& progression, cs::Rng&) { progression.fitMelodyToLoop = true; });
+    restored.processor.getStateInformation (state);
+    Host fitted;
+    fitted.processor.setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (fitted.processor.getProgression().fitMelodyToLoop);
+    checkAudition (fitted, p.lengthSteps() / 16.0, p.lengthSteps() * 5.0 / 16.0);
+    CHECK (restored.processor.undo());
+    CHECK (! restored.processor.getProgression().fitMelodyToLoop);
+    restored.processor.setAutoMelodyKey (true);
+    const auto autoKey = restored.processor.getProgression();
+    CHECK (autoKey.autoMelodyKey && autoKey.tonic == 2 && autoKey.scale == 1);
+    for (int i = 0; i < autoKey.numSlots; ++i)
+        CHECK (autoKey.slots[(size_t) i].start == before.slots[(size_t) i].start);
+    CHECK (restored.processor.undo());
+    CHECK (! restored.processor.getProgression().autoMelodyKey && restored.processor.getProgression().tonic == before.tonic);
+
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor (restored.processor.createEditor());
+        editor->setSize (900, 570);
+        auto* filename = dynamic_cast<juce::Label*> (editor->findChildWithID ("midi-filename"));
+        auto* timing = dynamic_cast<juce::TextButton*> (editor->findChildWithID ("midi-timing"));
+        auto* details = dynamic_cast<juce::TextButton*> (editor->findChildWithID ("midi-details"));
+        auto* key = dynamic_cast<juce::Label*> (editor->findChildWithID ("midi-key-details"));
+        auto* tempo = dynamic_cast<juce::Label*> (editor->findChildWithID ("midi-tempo-details"));
+        CHECK (filename != nullptr && filename->isVisible() && filename->getText() == file.getFileName());
+        CHECK (editor->findChildWithID ("midi-hear-melody")->isVisible());
+        CHECK (timing != nullptr && details != nullptr && key != nullptr && tempo != nullptr);
+        if (timing != nullptr && details != nullptr && key != nullptr && tempo != nullptr)
+        {
+            CHECK (! key->isVisible() && ! tempo->isVisible());
+            timing->onClick();
+            CHECK (restored.processor.getProgression().fitMelodyToLoop && timing->getButtonText() == "Fit to Loop");
+            details->setToggleState (true, juce::dontSendNotification);
+            details->onClick();
+            CHECK (key->isVisible() && key->getText().contains ("D Natural Minor"));
+            CHECK (tempo->isVisible() && tempo->getText().contains ("120.0 BPM"));
+        }
+    }
+
+    juce::AudioProcessor::setTypeOfNextNewPlugin (juce::AudioProcessor::wrapperType_Standalone);
+    Host dropped;
+    juce::AudioProcessor::setTypeOfNextNewPlugin (juce::AudioProcessor::wrapperType_Undefined);
+    dropped.processor.setStandaloneBpm (95.0);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (dropped.processor.createEditor());
+    auto& dropTarget = dynamic_cast<juce::FileDragAndDropTarget&> (*editor);
+    const juce::StringArray files { file.getFullPathName() };
+    CHECK (dropTarget.isInterestedInFileDrag (files));
+    dropTarget.filesDropped (files, 10, 10);
+    CHECK (dropped.processor.getProgression().melody.empty());
+    CHECK (dropped.processor.getStandaloneBpm() == 95.0);
+    CHECK (juce::PopupMenu::dismissAllActiveMenus());
+    CHECK (dropped.processor.getProgression().melody.empty());
+    CHECK (dropped.processor.harmonizeMidi (file));
+    CHECK (dropped.processor.getProgression().melody.size() == 2);
+    CHECK (dropped.processor.getStandaloneBpm() == 120.0);
+    auto* tempo = dynamic_cast<juce::Slider*> (editor->findChildWithID ("standalone-bpm"));
+    CHECK (tempo != nullptr);
+    if (tempo != nullptr)
+    {
+        tempo->setValue (96.0, juce::sendNotificationSync);
+        CHECK (dropped.processor.harmonizeMidi (file));
+        CHECK (dropped.processor.getStandaloneBpm() == 96.0);
+        dropped.processor.setAutoMidiTempoEnabled (true);
+        CHECK (dropped.processor.getStandaloneBpm() == 120.0);
+    }
+
+    juce::MidiMessageSequence untagged;
+    addNote (untagged, 1, 60, 0, 480);
+    addNote (untagged, 1, 64, 480, 960);
+    addNote (untagged, 1, 67, 960, 1440);
+    addNote (untagged, 1, 60, 1440, 1920);
+    juce::MidiFile untaggedMidi;
+    untaggedMidi.setTicksPerQuarterNote (480);
+    untaggedMidi.addTrack (untagged);
+    juce::TemporaryFile untaggedFile (".mid");
+    {
+        juce::FileOutputStream out (untaggedFile.getFile());
+        CHECK (out.openedOk() && untaggedMidi.writeTo (out, 0));
+    }
+    dropped.processor.setAutoMelodyKey (true);
+    CHECK (dropped.processor.harmonizeMidi (untaggedFile.getFile()));
+    const auto estimated = dropped.processor.getProgression();
+    CHECK (estimated.melodySourceTonic == 0 && estimated.melodySourceScale == 0);
+    CHECK (estimated.tonic == 0 && estimated.scale == 0);
 }
 
 void testStateRoundTrip()
@@ -2808,7 +3153,8 @@ void testEndingSelector()
     if (! settings || ! ending) return;
     settings->onClick();
     CHECK (settings->getToggleState());
-    CHECK (panel && panel->isVisible() && panel->getBottom() < settings->getY());
+    CHECK (panel && panel->isVisible() && panel->getY() > settings->getBottom()
+           && editor->getLocalBounds().contains (panel->getBounds()));
     juce::TextButton* more = nullptr;
     for (auto* child : panel->getChildren())
         if (auto* button = dynamic_cast<juce::TextButton*> (child); button && button->getButtonText() == "More options")
@@ -2910,15 +3256,20 @@ static void testFollowupFixes (const juce::File& output = {})
     CHECK (timeline && inspector);
     if (! timeline || ! inspector) return;
     auto* play = songTestButton (*editor, "Play");
-    auto* roll = songTestButton (*editor, "ROLL");
+    auto* roll = editor->findChildWithID ("start-with-chords");
+    auto* melody = editor->findChildWithID ("start-with-melody");
+    CHECK (play && roll && melody);
+    if (! play || ! roll || ! melody) return;
     for (auto size : { juce::Point<int> (1042, 679), juce::Point<int> (900, 570) }) {
         editor->setSize (size.x, size.y);
         for (bool open : { false, true, false }) {
             if (open) timeline->onOpenAlternatives (0); else inspector->onClose();
             CHECK (play == songTestButton (*editor, "Play"));
-            CHECK (play->isVisible() && play->getY() == roll->getY());
+            CHECK (play->isVisible());
+            CHECK (roll->isVisible() && melody->isVisible());
+            CHECK (roll->getY() == melody->getY() && roll->getWidth() == melody->getWidth());
             auto* settings = songTestButton (*editor, "Roll settings");
-            CHECK (settings && roll->getRight() <= settings->getX() && settings->getRight() < play->getX());
+            CHECK (settings && roll->getRight() <= settings->getX() && settings->getRight() < melody->getX());
             if (output != juce::File()) phase4Snapshot (*editor, output,
                 "harmony-" + juce::String (size.x) + (open ? "-open" : "-closed"));
             const auto harmonyBounds = play->getBounds();
@@ -2926,7 +3277,7 @@ static void testFollowupFixes (const juce::File& output = {})
             CHECK (play->getBounds() == harmonyBounds);
             if (output != juce::File()) phase4Snapshot (*editor, output, "groove-" + juce::String (size.x));
             songTestButton (*editor, "Harmony")->onClick();
-            CHECK (play->getY() == roll->getY());
+            CHECK (play->getBounds() == harmonyBounds);
         }
     }
 
@@ -3180,10 +3531,12 @@ int main (int argc, char** argv)
     testHostSyncedPlayback();
     testGateAndRelocation();
     testPreviewAndAudition();
+    testStandaloneTempo();
     testAcousticPianoPreview();
     testCompStyleAudition();
     testShldRhythmStateAndPhase();
     testBassAndArpAuditions();
+    testConfigurableArpComping();
     testSeparatorLocksAndAlternativeAudition();
     testInspectAlternatives();
     testPhase3Views();

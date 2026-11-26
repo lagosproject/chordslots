@@ -56,6 +56,7 @@ private:
         double start, end;
         int pitch, velocity;
         bool bass;
+        bool melody = false;
     };
     std::vector<MidiNote> midiNotes;
     bool midiVisible = false;

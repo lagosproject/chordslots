@@ -20,6 +20,10 @@ namespace cs {
 
 constexpr int kPerfMaxNotes = 12;
 constexpr int kMaxCompHitsPerSlot = 64;
+inline constexpr std::array<int, 5> kArpRateSteps { 24, 16, 12, 8, 6 };
+inline constexpr const char* kArpRateNames[] { "1/4", "1/4T", "1/8", "1/8T", "1/16" };
+inline constexpr const char* kArpDirectionNames[] { "Up", "Down", "Up & Down" };
+constexpr int kMaxArpOctaves = 3;
 
 enum class CompStyle : int
 {
@@ -38,7 +42,8 @@ enum class CompStyle : int
     ShldSoul,
     ShldHipHop2,
     ArpUp,
-    ArpDown
+    ArpDown,
+    ArpUpDown
 };
 
 inline constexpr const char* kCompStyleNames[] {
@@ -47,7 +52,7 @@ inline constexpr const char* kCompStyleNames[] {
 };
 inline constexpr int kNumCompStyles = sizeof (kCompStyleNames) / sizeof (kCompStyleNames[0]);
 inline constexpr const char* kExtraCompStyleNames[] {
-    "SHLD Pop", "SHLD Pop 2", "SHLD Soul", "SHLD Hip Hop", "Arp Up", "Arp Down"
+    "SHLD Pop", "SHLD Pop 2", "SHLD Soul", "SHLD Hip Hop", "Arp Up", "Arp Down", "Arp Up & Down"
 };
 inline constexpr int kNumExtraCompStyles = sizeof (kExtraCompStyleNames) / sizeof (kExtraCompStyleNames[0]);
 
@@ -58,7 +63,23 @@ inline constexpr bool isShldRhythm (CompStyle style) noexcept
 
 inline constexpr bool isArpeggio (CompStyle style) noexcept
 {
-    return style == CompStyle::ArpUp || style == CompStyle::ArpDown;
+    return style >= CompStyle::ArpUp && style <= CompStyle::ArpUpDown;
+}
+
+inline constexpr bool isPulse (CompStyle style) noexcept
+{
+    return style == CompStyle::PulseQuarter || style == CompStyle::PulseEighth;
+}
+
+inline constexpr bool hasCompHitLength (CompStyle style) noexcept
+{
+    return style != CompStyle::Sustain && ! isArpeggio (style);
+}
+
+inline constexpr bool hasCompPatternAccents (CompStyle style) noexcept
+{
+    return hasCompHitLength (style) && ! isShldRhythm (style)
+        && style != CompStyle::PulseQuarter && style != CompStyle::OffbeatReggae;
 }
 
 inline constexpr const char* compStyleName (int index) noexcept
@@ -77,19 +98,46 @@ struct CompHit
     int durationSteps = 0;   // gate length in steps
     float velScale = 1.0f;   // velocity multiplier
     int arpVoice = 0;        // zero plays all voices, signed ordinals count up or down
-
-    int selectedVoice (int first, int end) const noexcept
-    {
-        if (arpVoice == 0 || end <= first)
-            return -1;
-        return arpVoice > 0 ? first + (arpVoice - 1) % (end - first)
-                            : end - 1 - (-arpVoice - 1) % (end - first);
-    }
 };
+
+inline int arpSequenceIndex (int ordinal, int count, bool bounce) noexcept
+{
+    if (count <= 1)
+        return 0;
+    if (bounce)
+    {
+        const int cycle = 2 * (count - 1);
+        const int phase = (ordinal - 1) % cycle;
+        return std::min (phase, cycle - phase);
+    }
+    return ordinal > 0 ? (ordinal - 1) % count : count - 1 - (-ordinal - 1) % count;
+}
+
+inline int arpDurationSteps (int rate, float length) noexcept
+{
+    return std::clamp ((int) std::lround (rate * length), 1, rate);
+}
+
+inline CompHit arpHit (int index, int slotSteps, int rate, int duration, int direction) noexcept
+{
+    const int step = index * rate;
+    return { step, std::min (duration, slotSteps - step), step % 24 == 0 ? 1.0f : 0.85f,
+             direction * (index + 1) };
+}
+
+inline CompHit pulseHit (int index, int slotSteps, int rate, float legacyLength = 1.0f,
+                         float accent = 1.0f) noexcept
+{
+    const int step = index * rate;
+    const int duration = std::min (rate * 3 / 4, slotSteps - step);
+    return { step, std::max (1, (int) std::lround (duration * legacyLength)),
+             step % 24 == 0 ? 1.0f : 1.0f - 0.15f * accent };
+}
 
 /** Non-allocating hit generator writing directly into a caller-provided fixed buffer. */
 inline int getCompHits (CompStyle style, int slotSteps, CompHit* outHits, int maxHits,
-                        int /*meterNum*/ = 4, int /*meterDen*/ = 4, int slotStart = 0) noexcept
+                        int /*meterNum*/ = 4, int /*meterDen*/ = 4, int slotStart = 0,
+                        int arpRateSteps = 12, float arpLength = 0.83f) noexcept
 {
     if (outHits == nullptr || maxHits <= 0)
         return 0;
@@ -129,12 +177,12 @@ inline int getCompHits (CompStyle style, int slotSteps, CompHit* outHits, int ma
 
     if (isArpeggio (style))
     {
-        const int direction = style == CompStyle::ArpUp ? 1 : -1;
-        for (int step = 0; step < slotSteps && count < maxHits; step += 12)
-        {
-            addHit (step, std::min (10, slotSteps - step), step % 24 == 0 ? 1.0f : 0.85f);
-            outHits[count - 1].arpVoice = direction * (step / 12 + 1);
-        }
+        const int direction = style == CompStyle::ArpDown ? -1 : 1;
+        const int rate = std::max (1, arpRateSteps);
+        const int length = arpDurationSteps (rate, arpLength);
+        const int hits = std::min (maxHits, (slotSteps + rate - 1) / rate);
+        for (; count < hits; ++count)
+            outHits[count] = arpHit (count, slotSteps, rate, length, direction);
         return count;
     }
 
@@ -144,22 +192,11 @@ inline int getCompHits (CompStyle style, int slotSteps, CompHit* outHits, int ma
         return count;
     }
 
-    if (style == CompStyle::PulseQuarter)
+    if (isPulse (style))
     {
-        for (int st = 0; st < slotSteps; st += 24)
-        {
-            int dur = std::min (18, slotSteps - st);
-            addHit (st, dur, 1.0f);
-        }
-    }
-    else if (style == CompStyle::PulseEighth)
-    {
-        for (int st = 0; st < slotSteps; st += 12)
-        {
-            int dur = std::min (9, slotSteps - st);
-            float v = (st % 24 == 0) ? 1.0f : 0.85f;
-            addHit (st, dur, v);
-        }
+        const int rate = style == CompStyle::PulseQuarter ? 24 : 12;
+        for (; count < maxHits && count * rate < slotSteps; ++count)
+            outHits[count] = pulseHit (count, slotSteps, rate);
     }
     else if (style == CompStyle::OffbeatReggae)
     {
@@ -246,6 +283,13 @@ inline double compHitOffsetScale (double hitDurationMs, double maxOffsetMs) noex
 struct PerformanceParams
 {
     CompStyle compStyle      = CompStyle::Sustain;
+    CompStyle arpDirection   = CompStyle::ArpUp;
+    int arpRateSteps          = 12;
+    float arpLength           = 0.83f;
+    int arpOctaves            = 1;
+    float compHitLength       = 1.0f;
+    float compPatternAccent   = 1.0f;
+    int pulseRateSteps        = 0; // zero uses the saved quarter/eighth pulse style
     // --- Strum ---------------------------------------------------------
     float strum              = 0.0f;   // -1..1. sign = direction, |value| scales spread.
                                        //  >0 down-strum (bass -> treble), <0 up-strum.
@@ -262,6 +306,27 @@ struct PerformanceParams
     float humanizeMaxVel     = 5.0f;   // +/- velocity drift at humanize == 1
     uint32_t seed            = 1;      // "re-feel" button changes this
 };
+
+inline int pulseRateFor (const PerformanceParams& perf) noexcept
+{
+    return perf.pulseRateSteps > 0 ? perf.pulseRateSteps : perf.compStyle == CompStyle::PulseQuarter ? 24 : 12;
+}
+
+inline void shapeCompHits (CompHit* hits, int count, const PerformanceParams& perf) noexcept
+{
+    const bool shorter = perf.compHitLength < 1.0f && hasCompHitLength (perf.compStyle);
+    const bool accent = perf.compPatternAccent != 1.0f && hasCompPatternAccents (perf.compStyle);
+    if (! shorter && ! accent)
+        return;
+    for (int i = 0; i < count; ++i)
+    {
+        auto& hit = hits[i];
+        if (shorter)
+            hit.durationSteps = std::max (1, (int) std::lround (hit.durationSteps * perf.compHitLength));
+        if (accent)
+            hit.velScale = 1.0f + (hit.velScale - 1.0f) * perf.compPatternAccent;
+    }
+}
 
 struct PerfInput
 {
