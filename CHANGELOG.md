@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 Test Release
+
+- Refined the Harmony, Feel, and Song workspaces and the chord editing workflow.
+- Expanded automated coverage for editing, playback, and MIDI export.
+- Added a producer manual and harmony walkthrough, and removed superseded implementation documents.
+
+
 ## 0.4.1 Test Release
 
 - Harmony groups loop settings into a single summary and puts generation, preview, and MIDI export in a shared footer. Roll Settings offers quick access to generation controls.
