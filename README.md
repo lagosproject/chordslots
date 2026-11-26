@@ -2,7 +2,7 @@
 
 **ChordSlots is a free, open-source MIDI chord progression generator and VST3 plugin.** Draw Brightness, Tension, and Energy across a loop, lock the chords you want to keep, and roll another take around them. Export editable MIDI to play with your own instruments.
 
-[Download v0.4.3 for Windows x64](https://github.com/lagosproject/chordslots/releases/tag/v0.4.3) · [Watch the demo](https://lagosproject.github.io/chordslots/#demo) · [Producer manual](https://lagosproject.github.io/chordslots/manual.html) · [Release notes](CHANGELOG.md#043-test-release)
+[Download v0.4.3 for Windows x64](https://github.com/lagosproject/chordslots/releases/tag/v0.4.3) · [Watch the screen-recorded walkthrough](https://lagosproject.github.io/chordslots/#demo) · [Producer manual](https://lagosproject.github.io/chordslots/manual.html) · [Release notes](CHANGELOG.md#043-test-release)
 
 ![ChordSlots Harmony tab with the chord timeline and target curves](docs/harmony.webp)
 
